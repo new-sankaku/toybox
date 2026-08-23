@@ -27,6 +27,7 @@ from tictok.record.stt_worker import run_transcribe as stt_transcribe
 from tictok.media import clip_range, clip_subtitles, hls_source
 from tictok.media import laugh_audio
 from tictok.media import short as short_media
+from tictok.media import voice
 from tictok.media import work as work_media
 from tictok.media.clipper import clip_path, make_clip, still_path, STILL_VARIANT_SUFFIXES
 from tictok.media.reel import make_reel
@@ -297,7 +298,7 @@ def _preview_sources(recording_id: int) -> tuple:
 # 文字起こし・笑い声分析も同じ台帳で走る。別台帳だった頃はJob一覧に出ず、GPUを同じ枠で
 # 取り合っているのに「動いているのにjobが無い」と読める状態だった。
 MEDIA_JOB_KINDS = ("overlay", "upscale", "reprocess", "audionorm", "pack",
-                   "waveform", "sprite", "overlay_preview", "clip_batch",
+                   "waveform", "sprite", "voice", "overlay_preview", "clip_batch",
                    "reel", "clip_overlay", "short", "stt", "laugh", "still")
 
 # 台帳に出る種別名。訳語の出所はops_labelsの1箇所だけにする(同じ語を2箇所に置くと、job
@@ -319,7 +320,7 @@ _NO_PER_RECORDING_DEDUPE = ("reel", "still")
 # (同時実行の枠は media_queue の instant lane が別に持つ)。
 STILL_JOB_PRIORITY = 20
 
-# 起動時sweepが積むjobのpriority。負にしておけば、sweepが数十本並んでいる最中に人が投げた
+# sweepが積むjobのpriority。負にしておけば、sweepが数十本並んでいる最中に人が投げた
 # jobが必ず先に始まる(待機列はpriority DESC, queued_atで並ぶ)。同時実行の本数を絞るのは
 # 別の仕組み(media_job_queueのsweep列)で、こちらは順番だけを譲る。
 SWEEP_JOB_PRIORITY = -10
@@ -335,7 +336,7 @@ async def _enqueue_media_job(kind: str, recording_id: int, *, group_id: str = ""
     WSのjob_updateで届く)。同じ録画・同じ種別が既にqueueに居るときは二重投入を拒む: 同一
     出力pathへ2本走らせても片方の成果は必ず捨てられ、GPUを二重に占有するだけになる。
 
-    ``sweep`` は起動時sweepからの自動投入。人の投入と同じ台帳・同じworkerで走らせつつ、
+    ``sweep`` はsweepからの自動投入。人の投入と同じ台帳・同じworkerで走らせつつ、
     順番(priority)と同時実行本数だけを別枠にするための印。
     """
     if (kind not in _NO_PER_RECORDING_DEDUPE
@@ -451,7 +452,7 @@ async def _enqueue_stt_jobs(recordings: list, priority: int = 0, sweep: bool = F
 
     既にqueueに居る録画は数えて先へ進む(二重投入の判断は ``_enqueue_media_job`` と同じ
     ``pending_for``)。実体の無い録画は投入しない — 何度積んでも結果は変わらず、
-    起動のたびに同じ失敗が積み上がるだけになる(実測89件)。
+    sweepのたびに同じ失敗が積み上がるだけになる(実測89件)。
 
     選別と投入を分けているのは、どちらもevent loopを塞ぐためである。選別は録画ごとに
     素材のdir走査とDB照会を行い、投入は1本ごとに待機列全件を引き直していた(N本でN²)。
@@ -1180,12 +1181,13 @@ def _record_short_cut(recording: dict, item: dict, result: dict, label: str) -> 
 
 
 async def _run_sidecar_cache_job(kind: str, recording_id: int, report) -> dict:
-    """再生画面が使うsidecar cache(音声波形 / サムネsprite)を先に作っておくjob。
+    """再生画面が使うsidecar cache(音声波形 / サムネsprite / 無音skipの解析)を先に作っておくjob。
 
-    どちらも「無ければ最初に開いた人がその場で待つ」種類の生成物で、実測3.9時間の録画で
-    波形が90秒級、spriteは映像をdecodeするぶんさらにかかる。作る中身も置き場も再生画面から
-    呼ぶ経路と同一(ensure_waveform / ensure_sprite)で、ここでやっているのは呼ぶ時期を人より
-    前へ倒すことだけ — 別の作り方は持たない。
+    どれも「無ければ最初に開いた人がその場で待つ」種類の生成物で、実測3.9時間の録画で
+    波形が90秒級、spriteは映像をdecodeするぶんさらにかかる(声の解析は40〜84分の録画で
+    6〜13秒)。作る中身も置き場も再生画面から呼ぶ経路と同一(ensure_waveform / ensure_sprite /
+    ensure_voice_profile)で、ここでやっているのは呼ぶ時期を人より前へ倒すことだけ —
+    別の作り方は持たない。
 
     進捗は段階だけを返す。生成側はffmpegを1本回して終わりでframe単位のcallbackを持たない。
     持っていない進捗を%として作れば、それは動いているように見えるだけの嘘になる。
@@ -1206,6 +1208,11 @@ async def _run_sidecar_cache_job(kind: str, recording_id: int, report) -> dict:
             await ensure_audio_profile(path)
             detail = {"buckets": result["buckets"],
                       "duration_seconds": result["duration_seconds"]}
+        elif kind == "voice":
+            # 声確率(0.1秒刻みの生確率)。無音skipと無言の早送りが同じsidecarを読む。
+            profile = await voice.ensure_voice_profile(path)
+            detail = {"points": len(profile.get("probs") or []),
+                      "duration_seconds": profile.get("duration_seconds")}
         else:
             grid = await ensure_sprite(path)
             detail = {"columns": grid["columns"], "rows": grid["rows"],
@@ -1213,6 +1220,8 @@ async def _run_sidecar_cache_job(kind: str, recording_id: int, report) -> dict:
     except hls_source.SourceMissing as exc:
         raise JobSkipped(str(exc)) from exc
     except RuntimeError as exc:
+        # voice.VoiceErrorもRuntimeError。ここで500へ寄せるのは、再実行で直る種類の失敗
+        # (ffmpegが起動できない・modelが読めない)だからで、対象なしとは区別する。
         raise HTTPException(status_code=500, detail=str(exc))
     await report("完了", 100)
     return {"recording_id": recording_id, "kind": kind, **detail}
@@ -1304,7 +1313,7 @@ async def _run_media_job(job: dict, report) -> dict:
             raise JobSkipped("録画が見つかりません（削除済み）。")
         with _input_precondition():
             return await _pack_recording(recording_id, recording, report)
-    if kind in ("waveform", "sprite"):
+    if kind in ("waveform", "sprite", "voice"):
         return await _run_sidecar_cache_job(kind, recording_id, report)
     if kind == "stt":
         return await _run_stt_job(recording_id, report, job.get("params"))

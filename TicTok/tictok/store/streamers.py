@@ -10,6 +10,7 @@ lock契約: lock保持前提のmethodは無い。身元解決(_owner_handles_loc
   self._lock を取らない(session_rankings は身元解決を使わないため一度も取らない)。
 """
 import json
+import time
 from datetime import datetime, timedelta
 
 from tictok.core.battle import annotate_result, gift_window_end, gift_window_fallback_duration
@@ -40,6 +41,29 @@ from tictok.store._common import (
 _WHALE_TIERS = (
     1000, 5000, 10000, 20000, 30000, 40000, 50000, 75000, 100000, 200000, 300000,
 )
+
+# cohortで「その日その人が居た」と数えるevent。giftだけでなく在室の痕跡すべてを採るのが
+# cohortの母集合の定義で、この並びがcacheに載る値を決めるため、変えたら版を上げること。
+_COHORT_EVENT_KINDS = (
+    "join", "comment", "like", "follow", "share", "subscribe", "gift",
+)
+# streamer_cohortのsession単位cache。analytics_session_cache表を間借りする(session削除で
+# ON DELETE CASCADEが効き、表を増やさずに済む)。
+# 版をanalytics.CACHE_VERSIONSへ置かないのは、あちらのkind一覧が
+# 「analytics.compute_payloadが計算できるもの」の定義でもあるためで、混ぜるとfinalize時の
+# 全kind計算がこのkindを計算しようとして落ちる。
+# payloadの形か日の切り方を変えたらここを+1すると、既存cache行がlazyに作り直される。
+_COHORT_CACHE_KIND = "cohort_daily"
+_COHORT_CACHE_VERSION = 1
+# 時間帯heatmap(曜日×時×15分)のsession単位cache。cohortと同じ間借り。cellの刻みか
+# strftimeの書式を変えたら+1する。
+_HEATMAP_CACHE_KIND = "heatmap_quarter"
+_HEATMAP_CACHE_VERSION = 1
+# 同接の水準(時間加重平均・宝箱窓を除いた平均・観測秒)のsession単位cache。cohort/heatmapと
+# 同じ間借り。_viewer_levels は既にsession単位のdictを返すので、そのまま1行ずつ載る。
+# 平均の出し方・gapの上限・宝箱窓の扱いを変えたら+1する。
+_VIEWER_LEVEL_CACHE_KIND = "viewer_level"
+_VIEWER_LEVEL_CACHE_VERSION = 1
 
 
 def _coin_label(value: int) -> str:
@@ -337,7 +361,7 @@ class StreamersMixin:
     """配信者別の集計画面(履歴・profile・cohort・見どころ)と全体dashboard。
 
     lockもDB接続も持たない。すべて Storage が所有する self._conn /
-    self._lock / self._read_lock を借りる(mixinとして Storage に混ぜられる前提)。
+    self._lock / _read_connection() を借りる(mixinとして Storage に混ぜられる前提)。
     契約の詳細はmodule docstringを参照。
     """
 
@@ -456,6 +480,11 @@ class StreamersMixin:
         # 配信者1人ぶんのsession/gifter/heatmap/battleをまとめて引く。どれもこの配信者の
         # 全期間が対象で、書き込み接続で流すとその間collectorのevent書き出しが待たされる。
         # 身元解決(handle集合・最新owner)だけはwriter接続のhelperなのでlockの内側に残す。
+        #
+        # Battle貢献(_cached_battle_gift_contributions)はread専用接続で流すので、収集中
+        # sessionの未commit分をここで1回だけ確定させる。以前はBattle 1件ごとにflushして
+        # いたため、1 requestでwrite lockを214回(=2×111戦)取り直していた。
+        self.flush()
         with self._lock:
             handles = self._owner_handles_locked(unique_id)
             owners = self._latest_owners()
@@ -483,7 +512,9 @@ class StreamersMixin:
             " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
             " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
             " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
-            " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar, SUM(e.gift_count) AS gifts,"
+            # avatarは event_strings へinternしてある(doc/DB_INTERN.md)。値へJOINしてから
+            # MAXを採ること ―― idの最大は辞書順最大と一致しない。
+            " COALESCE(NULLIF(u.avatar, ''), MAX(av.value)) AS avatar, SUM(e.gift_count) AS gifts,"
             # Lv/badgeとリーグはusers表(最新)を使う。ここはsessionを跨いだ通算集計で、
             # 「そのSessionでの見え方」という基準が存在しないため、identity列と同じく最新の
             # 値で1人を1行に示すのが正しい(point-in-time厳守はsession単位の
@@ -494,6 +525,7 @@ class StreamersMixin:
             " SUM(e.diamonds) AS diamonds, COUNT(DISTINCT e.session_id) AS sessions"
             " FROM events e JOIN sessions s ON s.id = e.session_id"
             " LEFT JOIN users u ON u.identity_key = e.identity_key"
+            " LEFT JOIN event_strings av ON av.id = e.user_avatar_id"
             f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
             " GROUP BY e.identity_key ORDER BY diamonds DESC, gifts DESC",
             tuple(handles),
@@ -502,28 +534,22 @@ class StreamersMixin:
         # coins/comments land in the hours they actually happened (not all on the
         # start hour). 'localtime' matches the browser on this localhost app, so
         # the day/hour grid lines up with the rest of the (browser-local) UI.
-        heatmap_rows = conn.execute(
-            "SELECT CAST(strftime('%w', b.start, 'unixepoch', 'localtime') AS INTEGER) AS dow,"
-            " CAST(strftime('%H', b.start, 'unixepoch', 'localtime') AS INTEGER) AS hour,"
-            " CAST(strftime('%M', b.start, 'unixepoch', 'localtime') AS INTEGER) / 15 AS quarter,"
-            " SUM(b.diamonds) AS diamonds, SUM(b.comments) AS comments,"
-            " SUM(s.bucket_seconds) AS active_seconds"
-            " FROM buckets b JOIN sessions s ON s.id = b.session_id"
-            f" WHERE s.unique_id IN ({ph})"
-            " GROUP BY dow, hour, quarter",
-            tuple(handles),
-        ).fetchall()
+        # 数え直しはsession単位cache越し(_heatmap_cells)。
+        heatmap = self._heatmap_cells(conn, handles, ph)
         # Oldest session first so that, when the same battle_id is saved under
         # more than one session (e.g. two server instances collected the same
         # room concurrently), the copy kept by the dedup below is the one whose
         # session saw the battle from its start — the most complete record.
-        battle_rows = conn.execute(
-            "SELECT b.session_id AS session_id, b.data_json AS data_json"
-            " FROM battles b JOIN sessions s ON s.id = b.session_id"
-            f" WHERE s.unique_id IN ({ph})"
-            " ORDER BY s.started_at ASC, b.session_id ASC",
-            tuple(handles),
-        ).fetchall()
+        battle_session_ids = [
+            row["session_id"]
+            for row in conn.execute(
+                "SELECT DISTINCT b.session_id AS session_id, s.started_at AS started_at"
+                " FROM battles b JOIN sessions s ON s.id = b.session_id"
+                f" WHERE s.unique_id IN ({ph})"
+                " ORDER BY s.started_at ASC, b.session_id ASC",
+                tuple(handles),
+            ).fetchall()
+        ]
         # Battle履歴から「その対戦の動画」へ辿るための、時刻の当たり先。中断録画も
         # 素材は揃っていることがあり、statusで捨てるとその録画へ辿る道が無くなる。
         recording_rows = [
@@ -565,8 +591,24 @@ class StreamersMixin:
         # 同接の水準(時間加重平均・宝箱窓を除いた平均・観測秒)。集計対象はsession_rowsと
         # 同じsession集合に限る ―― 制限中や窓の外のsessionまで走らせると、画面に出ない
         # 行のためにbucketを走査することになる。
+        # bucketを1本も持たないsessionはcacheへ載せない。起動時の backfill_missing_buckets
+        # が後から作り直す対象がまさにそれで、空のまま覚えると作り直した後も空のままになる
+        # (heatmapと同じ理由・同じ判定)。
         level_ids = [row["id"] for row in session_rows]
-        viewer_levels = _viewer_levels(conn, level_ids)
+        cacheable = [
+            row["id"] for row in conn.execute(
+                "SELECT s.id AS id FROM sessions s"
+                f" WHERE s.id IN ({','.join('?' * len(level_ids))})"
+                "   AND s.ended_at IS NOT NULL"
+                "   AND EXISTS (SELECT 1 FROM buckets b WHERE b.session_id = s.id)",
+                tuple(level_ids),
+            ).fetchall()
+        ] if level_ids else []
+        viewer_levels = self._cached_session_payloads(
+            conn, cacheable, _VIEWER_LEVEL_CACHE_KIND, _VIEWER_LEVEL_CACHE_VERSION,
+            _viewer_levels)
+        viewer_levels.update(
+            _viewer_levels(conn, [i for i in level_ids if i not in viewer_levels]))
         # 宝箱の収集開始。これより前の配信は「宝箱を落とさなかった」のか「記録していない」
         # のかを区別できないので、宝箱を除いた同接は出さない(出すと、記録の無い期間だけ
         # 素の同接が高かったように読める)。collab_sinceと同じ理由・同じ形の境目である。
@@ -599,12 +641,10 @@ class StreamersMixin:
         # 復元する。窓解決は同一sessionの他Battle(次Battle開始・duration中央値)に依存する
         # ためsession単位でまとめて解く。窓を自前で持つと、end_timeを欠くBattleが無制限窓に
         # なりBattle後の通常Giftまで貢献へ混入する(実測: 貢献者0人→12人, coin 26→19397)。
-        # battle_gift_contributionsは自身でlockを取るのでlockの外で回す。
-        battles_by_session: dict = {}
-        for brow in battle_rows:
-            battles_by_session.setdefault(brow["session_id"], []).append(
-                annotate_result(json.loads(brow["data_json"]))
-            )
+        # _cached_battle_gift_contributionsはlockを取らないのでlockの外で回す。
+        # data_jsonのparseはprofile_battlesが畳んで覚える(実測: 945戦35.0MBのparseに
+        # 約400ms掛かっていた)。sessionの並びは上のqueryのまま古い順で渡す。
+        battles_by_session = self.profile_battles(conn, battle_session_ids)
 
         battle_diamonds = 0
         battle_team_diamonds = 0
@@ -1055,18 +1095,6 @@ class StreamersMixin:
             "history": history,
         }
 
-        heatmap = [
-            {
-                "dow": row["dow"],
-                "hour": row["hour"],
-                "quarter": row["quarter"],
-                "diamonds": row["diamonds"] or 0,
-                "comments": row["comments"] or 0,
-                "active_seconds": row["active_seconds"] or 0,
-            }
-            for row in heatmap_rows
-        ]
-
         return {
             "identity": identity,
             "count": count,
@@ -1097,7 +1125,7 @@ class StreamersMixin:
         against. Days are local-time so they line up with the browser-local UI.
 
         大口帯(tiers)も同じ走査から出す。1人1日ぶんのコイン合計はこの集計が既に持って
-        いるので、帯の人数のためだけに全期間をもう一度走らせない(この走査は実測640ms)。
+        いるので、帯の人数のためだけに全期間をもう一度走らせない。
 
         帯の顔ぶれ(whales_list)も併せて返す。人数だけでは「同じ常連が毎日居るのか、
         日替わりで別人が来ているのか」が読めないためである。身元は人ぶんしか無い(日数×人
@@ -1106,29 +1134,18 @@ class StreamersMixin:
         with self._lock:
             handles = self._owner_handles_locked(unique_id)
         ph = ",".join("?" * len(handles))
-        # この配信者の視聴側eventを全期間ぶん走査する(実測640ms)。書き込み接続で流すと
-        # その間collectorのevent書き出しが待たされるので、集計read専用の接続を使う。
+        # 書き込み接続で流すとその間collectorのevent書き出しが待たされるので、集計read専用の
+        # 接続を使う。走査そのものはsession単位cache越しに行う(_cohort_day_index)。
         conn = self._read_connection()
-        rows = conn.execute(
-            "SELECT e.identity_key AS key,"
-            " strftime('%Y-%m-%d', e.time, 'unixepoch', 'localtime') AS ymd,"
-            " SUM(e.diamonds) AS diamonds"
-            " FROM events e JOIN sessions s ON s.id = e.session_id"
-            f" WHERE s.unique_id IN ({ph})"
-            " AND e.kind IN ('join', 'comment', 'like', 'follow', 'share', 'subscribe', 'gift')"
-            " GROUP BY e.identity_key, ymd",
-            tuple(handles),
+        session_rows = conn.execute(
+            f"SELECT id, ended_at FROM sessions WHERE unique_id IN ({ph})", tuple(handles)
         ).fetchall()
-        by_day: dict = {}
+        by_day = self._cohort_day_index(conn, session_rows)
         first_seen: dict = {}
-        for row in rows:
-            ymd = row["ymd"]
-            key = row["key"]
-            if not ymd or not key:
-                continue
-            by_day.setdefault(ymd, {})[key] = row["diamonds"] or 0
-            if key not in first_seen or ymd < first_seen[key]:
-                first_seen[key] = ymd
+        for ymd, coins_by_key in by_day.items():
+            for key in coins_by_key:
+                if key not in first_seen or ymd < first_seen[key]:
+                    first_seen[key] = ymd
         days = []
         prev_keys: set = set()
         whale_keys: set = set()
@@ -1138,7 +1155,9 @@ class StreamersMixin:
             retained = keys & prev_keys
             tiers = [0] * len(_WHALE_TIERS)
             whales_list = []
-            for key, coins in by_day[ymd].items():
+            # identity_key順に見る。同額が並んだときの一覧の順と、上限で切ったときに
+            # 誰が残るかを、cacheの埋まり具合(=どのsessionから畳んだか)で変えないため。
+            for key, coins in sorted(by_day[ymd].items()):
                 idx = _whale_tier_index(coins)
                 if idx is not None:
                     tiers[idx] += 1
@@ -1172,6 +1191,183 @@ class StreamersMixin:
             "people": self._whale_people(conn, handles, whale_keys),
         }
 
+    def _cohort_day_index(self, conn, session_rows) -> dict:
+        """cohortの素材 {日付: {identity_key: その日のコイン合計}} を組み立てる。
+
+        以前はこの配信者の全期間を毎回1本のGROUP BYで数え直していた。indexは効いていて
+        full scanも無く(SEARCH s USING COVERING INDEX idx_sessions_unique_started →
+        SEARCH e USING INDEX idx_events_session_kind_time)、遅いのは畳む作業そのもの
+        だった: 実測で105万行を14.6万groupへ畳んで cold 5,016ms / warm 2,405〜3,025ms、
+        うちstrftime('localtime')が約1.3秒。同条件のCOUNT(*)だけなら328msなので、SQLの
+        書き方を変えても取り返せない。
+
+        終了済みsessionのeventは増えないので、session単位まで畳んだ中間結果を残し、次から
+        は新しいsessionぶんだけ計算する。日別への畳み込みはsessionを跨いで足せる(同じ日に
+        2本配信していれば両方のコインが同じ日へ乗る)ので、session単位で切っても全期間を
+        1本で数えたのと同じ値になる。
+
+        収集中(未終了)のsessionはcacheに載せない — まだeventが増えるため、毎回その場で
+        数える。"""
+        cached = self._ensure_cohort_cache(conn, session_rows)
+        live_ids = [row["id"] for row in session_rows if row["id"] not in cached]
+        by_day: dict = {}
+        for payload in (*cached.values(), *self._cohort_payloads(conn, live_ids).values()):
+            for ymd, coins_by_key in payload.items():
+                day = by_day.setdefault(ymd, {})
+                for key, coins in coins_by_key.items():
+                    day[key] = day.get(key, 0) + coins
+        return by_day
+
+    def _cohort_payloads(self, conn, session_ids: list) -> dict:
+        """指定sessionぶんの {日付: {identity_key: コイン合計}} をsession単位で返す。
+
+        keyか日付が空のeventは落とす。落としてよいのは、この2つがcohortの座標そのもの
+        (誰が・いつ)で、欠けた行はどの日の誰にも数えられないためである。JSONのobject
+        keyにはnullを置けないので、cacheへ載せる前のこの位置で落とす。"""
+        out: dict = {sid: {} for sid in session_ids}
+        if not session_ids:
+            return out
+        kph = ",".join("?" * len(_COHORT_EVENT_KINDS))
+        rows = conn.execute(
+            "SELECT e.session_id AS session_id, e.identity_key AS key,"
+            " strftime('%Y-%m-%d', e.time, 'unixepoch', 'localtime') AS ymd,"
+            " SUM(e.diamonds) AS diamonds FROM events e"
+            " WHERE e.session_id IN (SELECT je.value FROM json_each(?) je)"
+            f" AND e.kind IN ({kph})"
+            " GROUP BY e.session_id, e.identity_key, ymd",
+            (json.dumps(session_ids), *_COHORT_EVENT_KINDS),
+        ).fetchall()
+        for row in rows:
+            if not row["ymd"] or not row["key"]:
+                continue
+            out[row["session_id"]].setdefault(row["ymd"], {})[row["key"]] = row["diamonds"] or 0
+        return out
+
+    def _ensure_cohort_cache(self, conn, session_rows) -> dict:
+        """終了済みsessionのcohort payloadを作って保存し、session_id -> payload を返す。"""
+        return self._cached_session_payloads(
+            conn, [row["id"] for row in session_rows if row["ended_at"] is not None],
+            _COHORT_CACHE_KIND, _COHORT_CACHE_VERSION, self._cohort_payloads)
+
+    def _cached_session_payloads(self, conn, session_ids: list, kind: str, version: int,
+                                 compute) -> dict:
+        """session単位payloadのcacheを読み、未計算ぶんだけcomputeして保存する。
+
+        作法は全体解析の _ensure_analytics_cache と同じ: 置き場は analytics_session_cache
+        (session削除のON DELETE CASCADEが既にあり、表を増やさずに済む)、計算はread専用接続、
+        write lockはcache行のINSERTのぶんだけ。versionを上げると既存行がlazyに作り直される。
+
+        **cacheに載せてよいsessionを選ぶのは呼び出し側**である。判断の材料(終了済みか、
+        素材が揃っているか)はcacheの種類ごとに違い、ここからは見えない。
+
+        版をanalytics.CACHE_VERSIONSへ置かないのは、あちらのkind一覧が
+        「analytics.compute_payloadが計算できるもの」の定義でもあるためで、混ぜるとfinalize時の
+        全kind計算がこれらのkindを計算しようとして落ちる。"""
+        payloads: dict = {}
+        if not session_ids:
+            return payloads
+        for row in conn.execute(
+            "SELECT session_id, payload_json FROM analytics_session_cache"
+            " WHERE kind = ? AND version = ?"
+            " AND session_id IN (SELECT je.value FROM json_each(?) je)",
+            (kind, version, json.dumps(session_ids)),
+        ).fetchall():
+            payloads[row["session_id"]] = json.loads(row["payload_json"])
+        missing = [sid for sid in session_ids if sid not in payloads]
+        if not missing:
+            return payloads
+        computed = compute(conn, missing)
+        now = time.time()
+        with self._lock:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO analytics_session_cache"
+                " (session_id, kind, version, payload_json, computed_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                [
+                    (sid, kind, version, json.dumps(payload), now)
+                    for sid, payload in computed.items()
+                ],
+            )
+            self._conn.commit()
+        logger.info(
+            "配信者集計cache: session %d 件を計算しました（kind=%s）", len(computed), kind,
+            extra={"event": "streamers.cache_filled",
+                   "ctx": {"kind": kind, "sessions": len(computed), "version": version}},
+        )
+        payloads.update(computed)
+        return payloads
+
+    def _heatmap_cells(self, conn, handles: list, ph: str) -> list:
+        """時間帯heatmap(曜日×時×15分)のcellを、session単位cache越しに組み立てる。
+
+        bucketの時系列から出すのは、1配信のコイン・コメントを開始時刻の1時間へ寄せずに
+        実際に起きた時間帯へ落とすため。'localtime'で切るのはこのlocalhost appの画面
+        (browserのlocal時刻)と同じ格子に載せるためで、**日と時の境目の意味はcacheにしても
+        変えていない** — 同じstrftimeを、全期間に対して毎回ではなくsessionごとに1度だけ
+        通しているだけである。
+
+        毎回数え直していた頃は実測205〜246ms掛かっていた。bucketは1配信者で141,068行あり、
+        1行につき strftime('localtime') を3回呼ぶ(曜日・時・分)ので、42万回の時刻変換が
+        そのまま画面の待ち時間になっていた。
+
+        cacheに載せるのは**終了済みで、かつbucketが1本以上あるsession**だけである。bucketが
+        0本のsessionを載せてはいけない: 起動時のbackfill_missing_bucketsが後から作り直す
+        対象がまさにそれで、空のcellを覚えると作り直した後も空のままになる。"""
+        session_rows = conn.execute(
+            "SELECT s.id AS id, (s.ended_at IS NOT NULL"
+            "  AND EXISTS (SELECT 1 FROM buckets b WHERE b.session_id = s.id)) AS cacheable"
+            f" FROM sessions s WHERE s.unique_id IN ({ph})",
+            tuple(handles),
+        ).fetchall()
+        cached = self._cached_session_payloads(
+            conn, [row["id"] for row in session_rows if row["cacheable"]],
+            _HEATMAP_CACHE_KIND, _HEATMAP_CACHE_VERSION, self._heatmap_payloads)
+        live = [row["id"] for row in session_rows if row["id"] not in cached]
+        cells: dict = {}
+        for payload in (*cached.values(), *self._heatmap_payloads(conn, live).values()):
+            for cell in payload:
+                key = (cell[0], cell[1], cell[2])
+                acc = cells.setdefault(key, [0, 0, 0])
+                acc[0] += cell[3]
+                acc[1] += cell[4]
+                acc[2] += cell[5]
+        # 曜日→時→15分の昇順。畳む前の1本のGROUP BYが返していた順と同じにする。
+        return [
+            {"dow": dow, "hour": hour, "quarter": quarter,
+             "diamonds": acc[0], "comments": acc[1], "active_seconds": acc[2]}
+            for (dow, hour, quarter), acc in sorted(cells.items())
+        ]
+
+    def _heatmap_payloads(self, conn, session_ids: list) -> dict:
+        """指定sessionぶんのheatmap cellを session_id -> [[曜日,時,15分,coin,comment,秒], ...]。
+
+        strftimeは1行につき1回だけ呼び、'%w%H%M'を1つの文字列で受けてから桁で割る(曜日1桁・
+        時2桁・分2桁で固定長)。曜日・時・分を別々に呼ぶと同じ時刻変換を3回払うことになる。
+        内側でその文字列ごとに畳んでから15分へ丸めるのは、外側のGROUP BYが見る行数を
+        bucket数から分単位のcell数へ落とすためである(実測: 205ms → 109ms、出力は同一)。"""
+        out: dict = {sid: [] for sid in session_ids}
+        if not session_ids:
+            return out
+        for row in conn.execute(
+            "SELECT session_id AS session_id, CAST(substr(k, 1, 1) AS INTEGER) AS dow,"
+            " CAST(substr(k, 2, 2) AS INTEGER) AS hour,"
+            " CAST(substr(k, 4, 2) AS INTEGER) / 15 AS quarter,"
+            " SUM(d) AS diamonds, SUM(c) AS comments, SUM(a) AS active_seconds FROM ("
+            "  SELECT b.session_id AS session_id,"
+            "   strftime('%w%H%M', b.start, 'unixepoch', 'localtime') AS k,"
+            "   SUM(b.diamonds) AS d, SUM(b.comments) AS c, SUM(s.bucket_seconds) AS a"
+            "   FROM buckets b JOIN sessions s ON s.id = b.session_id"
+            "   WHERE b.session_id IN (SELECT je.value FROM json_each(?) je)"
+            "   GROUP BY b.session_id, k)"
+            " GROUP BY session_id, dow, hour, quarter",
+            (json.dumps(session_ids),),
+        ).fetchall():
+            out[row["session_id"]].append([
+                row["dow"], row["hour"], row["quarter"],
+                row["diamonds"] or 0, row["comments"] or 0, row["active_seconds"] or 0,
+            ])
+        return out
+
     def _whale_people(self, conn, handles: list, keys: set) -> dict:
         """大口の身元(表示名・@id・アイコン)をidentity_keyごとに1件だけ返す。
 
@@ -1191,9 +1387,11 @@ class StreamersMixin:
                 "SELECT e.identity_key AS key,"
                 " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
                 " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
-                " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar"
+                # avatarは event_strings へintern済み。値へJOINしてからMAXを採る。
+                " COALESCE(NULLIF(u.avatar, ''), MAX(av.value)) AS avatar"
                 " FROM events e JOIN sessions s ON s.id = e.session_id"
                 " LEFT JOIN users u ON u.identity_key = e.identity_key"
+                " LEFT JOIN event_strings av ON av.id = e.user_avatar_id"
                 f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
                 f" AND e.identity_key IN ({kph})"
                 " GROUP BY e.identity_key",
@@ -1286,7 +1484,8 @@ class StreamersMixin:
                 " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
                 " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
                 " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
-                " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar,"
+                # avatarは event_strings へintern済み。値へJOINしてからMAXを採る。
+                " COALESCE(NULLIF(u.avatar, ''), MAX(av.value)) AS avatar,"
                 " u.fans_level AS fans_level, u.gifter_level AS gifter_level,"
                 " u.gifter_badge AS gifter_badge, u.member_badge AS member_badge,"
                 f" {display_league_sql('u')} AS league,"
@@ -1294,6 +1493,7 @@ class StreamersMixin:
                 " COUNT(DISTINCT e.session_id) AS sessions"
                 " FROM events e JOIN sessions s ON s.id = e.session_id"
                 " LEFT JOIN users u ON u.identity_key = e.identity_key"
+                " LEFT JOIN event_strings av ON av.id = e.user_avatar_id"
                 f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
                 " AND e.time >= ? AND e.time < ?"
                 " GROUP BY e.identity_key"
@@ -1519,7 +1719,12 @@ class StreamersMixin:
 
         窓の解き方(次Battleの開始まで/fallback)はstreamer_profileと同じ。重複収集された
         同じBattleはbattle_idで落とす — これを忘れるとBattle数もコインも二重に乗る。
+
+        Battle貢献はread専用接続で流すので、loopへ入る前にここで1回だけ確定させる。以前は
+        Battle 1件ごとにflushしていたため、write lockの取得が1 requestあたりmatrix 48.9回・
+        ranking 105回に達していた。
         """
+        self.flush()
         # data_jsonは1戦あたりが大きく(実測: 1配信者699戦で23MB)、全戦をparseするだけで
         # 440ms掛かる。窓の解決に要るのは時刻だけなのでjson_extractで引き、実体をparseする
         # のは見ている期間の戦だけにする。annotate_resultはresultとscoreにしか触れないので、
@@ -1726,8 +1931,14 @@ class StreamersMixin:
             "   WHERE kind = 'gift' AND identity_key = t.key)) AS unique_id,"
             " COALESCE(NULLIF(u.nickname, ''), (SELECT MAX(user_nickname) FROM events"
             "   WHERE kind = 'gift' AND identity_key = t.key)) AS nickname,"
-            " COALESCE(NULLIF(u.avatar, ''), (SELECT MAX(user_avatar) FROM events"
-            "   WHERE kind = 'gift' AND identity_key = t.key)) AS avatar,"
+            # ここだけ相関subquery形。avatarは event_strings へintern済みなので、JOINを
+            # 足すのではなくsubquery側を書き換える。**MAX(user_avatar_id) では駄目で**、
+            # 値へJOINしてからMAXを採ること(idの最大は辞書順最大と一致しない)。
+            # 内側のJOINで落ちるのはid列がNULLの行だが、元のMAXもNULLは無視するので
+            # 同じ答えになる(1件も残らなければ双方ともNULL)。
+            " COALESCE(NULLIF(u.avatar, ''), (SELECT MAX(av.value) FROM events e2"
+            "   JOIN event_strings av ON av.id = e2.user_avatar_id"
+            "   WHERE e2.kind = 'gift' AND e2.identity_key = t.key)) AS avatar,"
             " u.fans_level AS fans_level, u.gifter_level AS gifter_level,"
             " u.gifter_badge AS gifter_badge, u.member_badge AS member_badge,"
             f" {display_league_sql('u')} AS league,"

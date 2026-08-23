@@ -36,22 +36,32 @@ from tictok.core.config import (
 from tictok.core.logging_setup import progress_interval_seconds
 
 from tictok.store._common import (
+    _value_for_intern,
+    _EVENT_STRING_CACHE_MAX,
     _EVENTS_COLUMNS,
-    _EVENTS_INSERT_SQL,
+    _INTERN_PHASE_CONTRACT,
+    _INTERN_PHASE_EXPAND,
     _VIEWERS_INSERT_SQL,
     _WRITE_BATCH_SIZE,
     _WRITE_FLUSH_INTERVAL_SECONDS,
     _identity_key,
+    _interned_event_positions,
     _session_ids_of,
+    _string_hash,
     logger,
 )
+
+
+# journalの件数cacheの版。行の読み方(_iter_journal_rows)を変えて件数が動きうるときに
+# 上げる。上げるとcacheは丸ごと無効になり、次の起動が頭から数え直す。
+_COUNT_CACHE_VERSION = 1
 
 
 class IngestMixin:
     """取り込み経路(batch writer / 耐久journal / event投入)。
 
     lockもDB接続も持たない。すべて Storage が所有する self._conn /
-    self._lock / self._read_lock を借りる(mixinとして Storage に混ぜられる前提)。
+    self._lock / _read_connection() を借りる(mixinとして Storage に混ぜられる前提)。
     契約の詳細はmodule docstringを参照。
     """
 
@@ -198,11 +208,120 @@ class IngestMixin:
         )
         return kept_events, kept_viewers
 
+    # ----- 重複文字列のintern(生の値 -> event_strings.id) -------------------------------
+    # bufferとjournalは生の文字列を運び、idへの差し替えはここ — 書き出し直前のlock区間 —
+    # でだけ起きる。journalに生値を残すのは意図的で、そうしないと旧形式のjournalをreplayした
+    # ときにURL文字列がINTEGER列へ黙って入り(SQLiteは動的型)、以後JOINが一致せずavatarが
+    # 静かに消える。生値のままなら、今後intern対象の列を増やしてもjournalは無傷である。
+
+    def _intern_values_locked(self, values: set) -> None:
+        """未知の値を event_strings へ確定させ、cacheへ載せる。self._lock保持前提。
+
+        1 event毎に別queryを出さないため、batch全体ぶんを1度にまとめて引く。DBへ行くのは
+        cache未hitぶんだけで、実測は1 batch(50行)あたり mean 11.98 / p95 28件。
+
+        新しいidは自分で採番する。INSERTのたびにlast_insert_rowidを取りに戻ると、新規の
+        件数ぶん往復が増えるためである。採番が競合しないのは、この接続へ書く経路
+        (batch writer / 隔離書き込み / journal復元 / migration)がすべて self._lock の
+        内側にあるからで、writerは常に1つしか居ない。
+        """
+        if not values:
+            return
+        if self._next_string_id is None:
+            self._next_string_id = self._conn.execute(
+                "SELECT COALESCE(MAX(id), 0) + 1 FROM event_strings").fetchone()[0]
+        cache = self._string_cache
+        hashes = sorted({_string_hash(value) for value in values})
+        # SQLiteの変数上限へ触れないよう分けて引く。
+        for i in range(0, len(hashes), 400):
+            chunk = hashes[i:i + 400]
+            placeholders = ",".join("?" * len(chunk))
+            for row in self._conn.execute(
+                f"SELECT id, value FROM event_strings WHERE hash IN ({placeholders})", chunk
+            ):
+                # hashで絞ってから value を実比較する。hashが衝突しても、別の値を同じidへ
+                # 畳むことはない(衝突の可能性を確率で無視しているのではない)。
+                if row["value"] in values:
+                    cache[row["value"]] = row["id"]
+        fresh = [value for value in values if value not in cache]
+        if not fresh:
+            return
+        rows = []
+        for value in fresh:
+            rows.append((self._next_string_id, _string_hash(value), value))
+            cache[value] = self._next_string_id
+            self._next_string_id += 1
+        self._conn.executemany(
+            "INSERT INTO event_strings (id, hash, value) VALUES (?, ?, ?)", rows)
+
+    def _intern_forget_after_rollback(self) -> None:
+        """rollbackでevent_stringsへのINSERTが巻き戻った後、cacheを捨てて採番を採り直す。
+
+        巻き戻ったidをcacheが持ったままだと、以後のeventが**存在しないidを参照する**行に
+        なり、JOINが一致せずavatarとbadgeが静かに消える。どのidが巻き戻ったかを追わずに
+        丸ごと捨てるのは、rollbackが失敗経路でしか起きないためで、hit率を惜しむ場面ではない
+        (再構築は次のbatchが引き直すだけで済む)。
+        """
+        self._string_cache.clear()
+        self._next_string_id = None
+
+    def _event_rows_for_insert_locked(self, rows: list) -> list:
+        """buffer/journalの生の行を、今の段階のDB列順へ組み替える。self._lock保持前提。
+
+        EXPANDでは旧列とid列の両方へ書く(行は3つ長くなる)。読み出し側は書き換え済みの
+        箇所も未着手の箇所も同じ答えを得るので、両者が共存できる。CONTRACTでは旧列がもう
+        無いので、生の値の位置をidへ差し替えて同じ幅で書く。
+
+        **渡されたrowsは書き換えない。** 失敗時に_drainが再キューするのはこの生の行で、
+        ここで潰すと再試行がidだけの行を旧列へ入れにいく。
+        """
+        if self._intern_phase < _INTERN_PHASE_EXPAND or not rows:
+            return rows
+        positions = self._interned_positions
+        columns = self._interned_columns
+        cache = self._string_cache
+        missing = set()
+        for row in rows:
+            for pos, column in zip(positions, columns):
+                # 保存する値はここで決まる。avatarは署名queryを落とす(_common.py参照)。
+                # 生の行そのものは書き換えない — 失敗時に_drainが再キューするのはこの行で、
+                # journalにも生値のまま残す約束がある。
+                value = _value_for_intern(column, row[pos])
+                if value is not None and value not in cache:
+                    missing.add(value)
+        self._intern_values_locked(missing)
+        if len(cache) > _EVENT_STRING_CACHE_MAX:
+            # 上限は「際限なく伸びない」ための天井で、hit率のためではない(_common.py参照)。
+            # 捨て方は_USER_CACHE_MAXに揃える — 挿入順の古い方から1/4。
+            for stale in list(cache)[:_EVENT_STRING_CACHE_MAX // 4]:
+                del cache[stale]
+        contract = self._intern_phase >= _INTERN_PHASE_CONTRACT
+        out = []
+        for row in rows:
+            ids = tuple(
+                None if row[pos] is None else cache[_value_for_intern(column, row[pos])]
+                for pos, column in zip(positions, columns))
+            if contract:
+                new = list(row)
+                for pos, value in zip(positions, ids):
+                    new[pos] = value
+                out.append(tuple(new))
+            else:
+                # EXPANDでは旧列とid列の両方へ書く。**旧列にも正規化後の値を入れる** —
+                # 生のURLを旧列に残すと、旧列を読む箇所とJOINで読む箇所が違う答えを返し、
+                # 「両者が同じ答えを得る」というEXPANDの存在理由が崩れる。
+                new = list(row)
+                for pos, column in zip(positions, columns):
+                    new[pos] = _value_for_intern(column, row[pos])
+                out.append(tuple(new) + ids)
+        return out
+
     def _write_batch_locked(self, events: list, viewers: list, users: list) -> None:
         """高速経路: event/viewerをexecutemanyで一括INSERTし、userを1件ずつupsertする。
         self._lock保持前提。commitは呼び出し元(_drain)が行う。"""
         if events:
-            self._conn.executemany(_EVENTS_INSERT_SQL, events)
+            self._conn.executemany(
+                self._events_insert_sql, self._event_rows_for_insert_locked(events))
         if viewers:
             self._conn.executemany(_VIEWERS_INSERT_SQL, viewers)
         self._upsert_users_locked(users)
@@ -212,8 +331,12 @@ class IngestMixin:
         呼び出し前にrollback済み(部分INSERTは巻き戻し済み)であること。IntegrityErrorの行だけ
         dead-letterへ退避してdropし、残りは確定させる。OperationalError(一時障害)は隔離せず
         上位へ送出して全体再キューさせる。"""
-        bad_events = self._insert_rows_isolating(_EVENTS_INSERT_SQL, events)
-        bad_viewers = self._insert_rows_isolating(_VIEWERS_INSERT_SQL, viewers)
+        # 隔離はrollbackの後から始まる。直前のbatchでevent_stringsへ入れたidも巻き戻って
+        # いるので、cacheを捨ててから引き直す(でないと存在しないidを参照する行を書く)。
+        self._intern_forget_after_rollback()
+        bad_events = self._insert_rows_isolating(
+            self._events_insert_sql, self._event_rows_for_insert_locked(events), events)
+        bad_viewers = self._insert_rows_isolating(_VIEWERS_INSERT_SQL, viewers, viewers)
         self._upsert_users_locked(users)
         if bad_events or bad_viewers:
             quarantine_path = self._quarantine(bad_events, bad_viewers)
@@ -229,15 +352,20 @@ class IngestMixin:
                                "path": quarantine_path}},
             )
 
-    def _insert_rows_isolating(self, sql: str, rows: list) -> list:
+    def _insert_rows_isolating(self, sql: str, rows: list, raw_rows: list) -> list:
         """rowsを1行ずつINSERTし、IntegrityErrorの行だけを返して隔離対象にする。
-        OperationalError(一時障害)はそのまま送出し、上位で全体rollback+再キューさせる。"""
+        OperationalError(一時障害)はそのまま送出し、上位で全体rollback+再キューさせる。
+
+        raw_rowsは同じ並びの「intern前の行」。**返すのはこちらである。** dead-letterは人が
+        読んで手で復旧するfileなので、event_stringsのidだけを書き出しても復旧材料にならない
+        (idの指す先はrollbackで消えていることもある)。
+        """
         bad: list = []
-        for row in rows:
+        for row, raw in zip(rows, raw_rows):
             try:
                 self._conn.execute(sql, row)
             except sqlite3.IntegrityError:
-                bad.append(row)
+                bad.append(raw)
         return bad
 
     def _upsert_users_locked(self, users: list) -> None:
@@ -304,6 +432,9 @@ class IngestMixin:
                 extra={"event": "storage.rollback_failed",
                        "ctx": {"session_ids": session_ids}},
             )
+        # event_stringsへのINSERTも巻き戻っている。cacheに残すと、再キューした行が次の
+        # 周期で存在しないidを参照して書かれる。
+        self._intern_forget_after_rollback()
         with self._buf_lock:
             self._event_buffer = events + self._event_buffer
             self._viewer_buffer = viewers + self._viewer_buffer
@@ -426,7 +557,11 @@ class IngestMixin:
                     self._conn.execute("DELETE FROM events WHERE session_id = ?", (sid,))
                     self._conn.execute("DELETE FROM viewer_samples WHERE session_id = ?", (sid,))
                     if j_events:
-                        self._conn.executemany(_EVENTS_INSERT_SQL, j_events)
+                        # journalは生の文字列を運ぶ。書き出し経路と同じ名寄せを必ず通す
+                        # (通さないとURL文字列がINTEGER列へ黙って入り、avatarが消える)。
+                        self._conn.executemany(
+                            self._events_insert_sql,
+                            self._event_rows_for_insert_locked(j_events))
                     if j_viewers:
                         self._conn.executemany(_VIEWERS_INSERT_SQL, j_viewers)
                     self._recompute_session_stats_locked(sid)
@@ -450,6 +585,7 @@ class IngestMixin:
                             extra={"event": "storage.journal_rollback_failed",
                                    "ctx": {"restore_session_id": sid}},
                         )
+                    self._intern_forget_after_rollback()
                     continue
                 summary["sessions"] += 1
                 summary["events"] += len(j_events) - db_ev
@@ -496,7 +632,8 @@ class IngestMixin:
         files = list(journal_dir.glob("events-*.jsonl")) + list(journal_dir.glob("events-*.jsonl.gz"))
         return sorted(files)
 
-    def _iter_journal_rows(self, path: Path, log_anomalies: bool = True):
+    def _iter_journal_rows(self, path: Path, log_anomalies: bool = True,
+                           start_offset: int = 0, progress: Optional[list] = None):
         """journal file 1本を ``(kind, session_id, row)`` で流す。kindは 'e' / 'v'。
 
         **行の読み方をここ1箇所にしか置かないことがこのmethodの目的である。** 復元するか
@@ -506,13 +643,35 @@ class IngestMixin:
         ずれる。別々に書けば、片方だけ直った瞬間に静かにeventが失われる。
 
         log_anomalies=False は2 pass目のため。同じfileの同じ異常を二度は報告しない。
+
+        binaryで開いてbyte列のままjson.loadsへ渡す。text modeのdecodeは行の解釈に何も
+        足さないうえ、実測でこのloopの1/4を占めていた(350MBで1.4s)。壊れたbyte列は
+        json.loadsが弾くので、部分書き込みの扱いは行単位のskipのまま変わらない
+        (text modeでは行の取り出しそのものが例外になり、file 1本を丸ごと諦めていた)。
+
+        start_offset/progress は数え直しを避けるためのもの(_count_journal_rows)。
+        start_offset は**行頭でなければならない**。progressは ``[位置, 再開してよいか]``
+        の2要素listで、progress[0] へ「次に再開してよい位置」= 最後に読み切った行の直後の
+        byte位置を書く。改行で終わっていないfile末尾(書き込み中に落ちた行)に当たったときは
+        その行を返したうえで progress[1] を False にする — 返した行を位置に含められない
+        以上、そのfileは続きから数えてはならない(同じ行を二度数えることになる)。返すこと
+        自体は変えない。ここで落とすと、DBから欠けた最後の1件が復元されなくなる。
         """
         overlong = 0
+        consumed = start_offset
         try:
             opener = gzip.open if path.suffix == ".gz" else open
-            with opener(path, "rt", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
+            with opener(path, "rb") as fh:
+                if start_offset:
+                    fh.seek(start_offset)
+                for raw in fh:
+                    if raw.endswith(b"\n"):
+                        consumed += len(raw)
+                        if progress is not None:
+                            progress[0] = consumed
+                    elif progress is not None:
+                        progress[1] = False
+                    line = raw.strip()
                     if not line:
                         continue
                     try:
@@ -556,14 +715,116 @@ class IngestMixin:
         行そのものは持たない。復元が要るかどうかはDBの行数との比較だけで決まるので、
         通常の起動 — 復元が1件も要らない起動 — で保持期間ぶんの記録をmemoryへ載せる
         必要はない(実測で journal は 568MB / 15日ぶんあり、行に開くとその数倍になる)。
+
+        数えた結果は ``_count_cache_path`` へ「どこまで数えたか(byte位置)」付きで残し、
+        次の起動はその続きだけを数える。journalは追記onlyなので、既に数えた区間の
+        件数は二度と変わらない。cacheが無い/合わない場合は頭から数え直すだけで、
+        出る数は同じである(全走査との一致は起動ごとに確かめられる類のものではないため、
+        導入時に実journal 350MBで突き合わせて確認してある)。
+
+        これが要るのは、数える対象が保持期間ぶん全部で、しかも起動のたびに同じ数字を
+        出し直していたため(実測で毎起動6〜10秒、37回中で実際に復元が要ったのは1回)。
         """
+        cache = self._load_count_cache()
+        entries: dict = {}
         events: dict = {}
         viewers: dict = {}
         for path in paths:
-            for kind, sid, _row in self._iter_journal_rows(path):
-                target = events if kind == "e" else viewers
-                target[sid] = target.get(sid, 0) + 1
+            size = path.stat().st_size
+            prev = cache.get(path.name)
+            # .gz(回転済み)は追記されないので、途中から数える意味が無い。しかもoffsetは
+            # 展開後のbyte数でfile sizeとは別物なので、指紋はsize一致にする。
+            resumable = path.suffix != ".gz"
+            if prev is None:
+                usable = False
+            elif resumable:
+                # 追記onlyなので、数えた位置までの中身は変わらない。位置よりfileが短い =
+                # 前提が崩れている(別のfileに置き換わった)ので使わない。
+                usable = prev["offset"] <= size
+            else:
+                usable = prev["size"] == size
+            counts = {"e": dict(prev["e"]), "v": dict(prev["v"])} if usable else {"e": {}, "v": {}}
+            start = prev["offset"] if usable else 0
+            progress = [start, True]
+            if not usable or (resumable and start < size):
+                for kind, sid, _row in self._iter_journal_rows(
+                    path, start_offset=start, progress=progress
+                ):
+                    bucket = counts[kind]
+                    bucket[sid] = bucket.get(sid, 0) + 1
+            if progress[1]:
+                entries[path.name] = {"offset": progress[0], "size": size,
+                                      "e": counts["e"], "v": counts["v"]}
+            # progress[1]がFalse = 書きかけの行が末尾に在る。その行は数に入れてあるが位置
+            # には含められないので、このfileはcacheへ残さない(次回は頭から数える)。cacheの
+            # 有無で件数が変わらないことの方が、1 fileぶんの走査より重い。
+            for sid, n in counts["e"].items():
+                events[sid] = events.get(sid, 0) + n
+            for sid, n in counts["v"].items():
+                viewers[sid] = viewers.get(sid, 0) + n
+        self._save_count_cache(entries)
         return events, viewers
+
+    def _count_cache_path(self) -> Path:
+        return Path(get_journal_dir()) / "count_cache.json"
+
+    def _load_count_cache(self) -> dict:
+        """file名 -> {"offset": int, "size": int, "e": {sid: n}, "v": {sid: n}} を返す。
+
+        読めない・版が違う・形が違うなら空を返す(=全部数え直す)。cacheはjournalそのもの
+        から作り直せる派生物なので、疑わしければ捨てる方を既定にしてある。
+        """
+        try:
+            raw = json.loads(self._count_cache_path().read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except Exception:
+            logger.exception(
+                "journalの件数cacheを読めませんでした。数え直します",
+                extra={"event": "storage.journal_count_cache_unreadable"},
+            )
+            return {}
+        if not isinstance(raw, dict) or raw.get("version") != _COUNT_CACHE_VERSION:
+            return {}
+        out = {}
+        for name, entry in (raw.get("files") or {}).items():
+            try:
+                out[name] = {
+                    "offset": int(entry["offset"]),
+                    "size": int(entry["size"]),
+                    # JSONのkeyは文字列になるのでsession_idへ戻す。
+                    "e": {int(k): int(v) for k, v in entry["e"].items()},
+                    "v": {int(k): int(v) for k, v in entry["v"].items()},
+                }
+            except Exception:
+                return {}
+        return out
+
+    def _save_count_cache(self, entries: dict) -> None:
+        """数えた結果を書き出す。best-effort(失敗しても起動は続ける)。
+
+        entriesには今回見たfileしか入らないので、pruneで消えたfileの行はここで落ちる。
+        """
+        payload = {
+            "version": _COUNT_CACHE_VERSION,
+            "files": {
+                name: {"offset": entry["offset"], "size": entry["size"],
+                       "e": {str(k): v for k, v in entry["e"].items()},
+                       "v": {str(k): v for k, v in entry["v"].items()}}
+                for name, entry in entries.items()
+            },
+        }
+        path = self._count_cache_path()
+        tmp = path.with_suffix(".json.tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            tmp.replace(path)
+        except Exception:
+            logger.exception(
+                "journalの件数cacheを書けませんでした",
+                extra={"event": "storage.journal_count_cache_write_failed"},
+            )
 
     def _collect_journal_rows(self, paths: list, wanted=None, limits=None) -> tuple:
         """復元に使う行を組み立てる(``(events_by_sid, viewers_by_sid)``)。
@@ -722,14 +983,37 @@ class IngestMixin:
                     user.get("avatar") or None,
                 )
             )
+        # avatarはeventsと同じ event_strings へ相乗りする(実測 141,708行 / 39.1MB /
+        # distinct 21,689)。この経路はbatch writerを通らないので、旧列との併記(EXPAND)は
+        # 要らない — 読み手が1つも無い表なので、書き換えを待つ相手が居ないためである。
+        avatar_pos = 9
         with self._lock:
-            self._conn.executemany(
-                "INSERT INTO contributor_samples (session_id, time, create_time, rank, score,"
-                " identity_key, user_id, user_unique_id, user_nickname, user_avatar)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                params,
-            )
-            self._conn.commit()
+            interned = self._intern_phase >= _INTERN_PHASE_EXPAND
+            if interned:
+                self._intern_values_locked(
+                    {v for v in (_value_for_intern("user_avatar", p[avatar_pos])
+                                 for p in params) if v is not None})
+                cache = self._string_cache
+                params = [
+                    p[:avatar_pos]
+                    + (None if p[avatar_pos] is None
+                       else cache[_value_for_intern("user_avatar", p[avatar_pos])],)
+                    for p in params
+                ]
+            column = "user_avatar_id" if interned else "user_avatar"
+            try:
+                self._conn.executemany(
+                    "INSERT INTO contributor_samples (session_id, time, create_time, rank,"
+                    f" score, identity_key, user_id, user_unique_id, user_nickname, {column})"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    params,
+                )
+                self._conn.commit()
+            except Exception:
+                # commitできなかった以上、直前にevent_stringsへ入れたidも確定していない。
+                # cacheに残すと以後の行が存在しないidを参照する。
+                self._intern_forget_after_rollback()
+                raise
 
     def add_follower_sample(
         self, session_id: int, ts: float, create_time: Optional[float], follower_count: int

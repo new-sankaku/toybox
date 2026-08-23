@@ -25,9 +25,9 @@ _ALLOWED_HOST_SUFFIXES = (
     ".tiktokv.com",
 )
 
-# CDN avatar bytes are stable for a given signed URL; cache so repeated tiles /
+# CDN avatar bytes are stable for a given image path; cache so repeated tiles /
 # screens do not re-hit the CDN, and so a later URL expiry does not flicker the
-# image during a session.
+# image during a session. 鍵は署名付きURLではなくpath(_cache_key)である。
 _CACHE_TTL_SECONDS = 6 * 60 * 60
 _CACHE_MAX_ENTRIES = 512
 _FETCH_TIMEOUT_SECONDS = 8.0
@@ -85,6 +85,20 @@ class AvatarProxy:
         await self._client.aclose()
 
     @staticmethod
+    def _cache_key(url: str) -> str:
+        """このavatarの同一性。署名queryとCDN region hostを落としたpathだけを見る。
+
+        同じ画像が毎回違うURLで届く: 署名(refresh_token / x-expires / x-signature)は
+        呼ぶたびに変わり、hostも p16 と p19 を行き来する。URLそのものを鍵にすると、
+        同じ人の同じ画像を人数ぶんではなく届いたURLの本数ぶん取りに行くことになる
+        (実測: events 20万件で URL 48,542種に対しpathは25,020種。1人でURL 180本が
+        path 7本。overview 1画面で request 67本に対し実人数は30人)。
+
+        取得そのものは署名付きURLで行う ―― 正規化した方でCDNを叩くと403になる。
+        ここで決めるのは「同じ画像か」の判定だけである。"""
+        return urlsplit(url).path
+
+    @staticmethod
     def is_allowed(url: str) -> bool:
         parts = urlsplit(url)
         if parts.scheme not in ("http", "https"):
@@ -101,15 +115,16 @@ class AvatarProxy:
         back to the very copy we could have served immediately. The CDN is hit only
         for an avatar we have never seen (no pool/disk copy yet)."""
         now = time.time()
-        cached = self._cache.get(url)
+        key = self._cache_key(url)
+        cached = self._cache.get(key)
         if cached is not None and cached.expires_at > now:
-            self._cache.move_to_end(url)
+            self._cache.move_to_end(key)
             return cached.content, cached.content_type
 
-        async with self._lock_for(url):
-            cached = self._cache.get(url)
+        async with self._lock_for(key):
+            cached = self._cache.get(key)
             if cached is not None and cached.expires_at > time.time():
-                self._cache.move_to_end(url)
+                self._cache.move_to_end(key)
                 return cached.content, cached.content_type
             # Local-first: if we already hold this avatar, serve it without touching
             # the CDN. Only a genuinely new avatar reaches the network fetch below.
@@ -150,18 +165,20 @@ class AvatarProxy:
                 return owner
         return None
 
-    def _lock_for(self, url: str) -> asyncio.Lock:
-        # One in-flight fetch per URL; concurrent tiles requesting the same
-        # avatar wait on the cache rather than stampeding the CDN.
-        lock = self._url_locks.get(url)
+    def _lock_for(self, key: str) -> asyncio.Lock:
+        # One in-flight fetch per avatar; concurrent tiles requesting the same
+        # avatar wait on the cache rather than stampeding the CDN. 鍵はcacheと同じ
+        # _cache_key ―― URL単位にすると、同じ画像の別署名が別lockで並走して
+        # cacheを素通りし、fetchが人数ぶんでなくURLの本数ぶん出る。
+        lock = self._url_locks.get(key)
         if lock is None:
             if len(self._url_locks) >= 512:
-                # 署名URLはローテーションして二度と戻らないため、使用中でない
-                # lockを間引いて無制限に増えないようにする。
+                # 見ているavatarの数だけ増えるので、使用中でないlockを間引いて
+                # 無制限に増えないようにする。
                 self._url_locks = {
                     u: l for u, l in self._url_locks.items() if l.locked()
                 }
-            lock = self._url_locks.setdefault(url, asyncio.Lock())
+            lock = self._url_locks.setdefault(key, asyncio.Lock())
         return lock
 
     async def _download(self, url: str) -> Optional[tuple[bytes, str]]:
@@ -208,15 +225,17 @@ class AvatarProxy:
             return None
 
     def _remember(self, url: str, content: bytes, content_type: str) -> None:
-        self._cache[url] = _Entry(content, content_type, time.time() + _CACHE_TTL_SECONDS)
-        self._cache.move_to_end(url)
+        key = self._cache_key(url)
+        self._cache[key] = _Entry(content, content_type, time.time() + _CACHE_TTL_SECONDS)
+        self._cache.move_to_end(key)
         while len(self._cache) > _CACHE_MAX_ENTRIES:
             self._cache.popitem(last=False)
 
     def _disk_paths(self, url: str) -> tuple[Path, Path]:
         # Key by path only: the same avatar image keeps a stable path across
         # sessions even as the query signature / CDN region host changes.
-        key = hashlib.sha256(urlsplit(url).path.encode("utf-8")).hexdigest()
+        # memory cacheとlockも同じ _cache_key を鍵にしている。
+        key = hashlib.sha256(self._cache_key(url).encode("utf-8")).hexdigest()
         return self._cache_dir / key, self._cache_dir / f"{key}.type"
 
     def _load_disk(self, url: str) -> Optional[tuple[bytes, str]]:

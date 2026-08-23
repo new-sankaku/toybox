@@ -81,6 +81,11 @@ def env_guard(tmp_path, monkeypatch):
         "TICTOK_LOG_DIR": sandbox / "logs",
         "TICTOK_JOURNAL_DIR": sandbox / "journal",
         "TICTOK_SAMPLE_DIR": sandbox / "samples",
+        # 退避先もsandboxへ。既定はDBの隣(config.get_db_backup_dir)なので、TICTOK_DB_PATHを
+        # sandboxへ向けている以上ここは既に安全だが、明示しておく — 既定の導き方が将来また
+        # project root固定へ戻っても、本番の backups/ を汚さない。かつて固定だったとき、
+        # 1.85GBのmigration前退避がtest 1回の実行で消えた(doc/DB_MAINTENANCE.md)。
+        "TICTOK_DB_BACKUP_DIR": sandbox / "backups",
     }
     for name, path in dirs.items():
         path.mkdir(parents=True, exist_ok=True)

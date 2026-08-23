@@ -7,12 +7,20 @@
 lock契約:
   _refresh_session_analytics_locked は self._lock 保持前提。呼び出し元は
   recover_from_journal(ingest)と finalize_session(sessions)で、どちらもlock区間の内側。
-  _ensure_analytics_cache / _analytics_rows は自分で self._lock を取る。
+  読み取りは全て _read_connection() で流し、self._lock は取らない。_ensure_analytics_cache
+  だけがcache行のINSERTのために1件ごとに self._lock を取る(計算はlockの外)。
+
+読み取りをwriter接続から外した理由:
+  ここの14 methodは全て _analytics_rows を通り、それが self.flush() -> 本体SELECT ->
+  未cache分のその場計算 を全てwriter接続で行っていた。SQL本体は実測0.6〜14msなのに
+  db.write_wait は1,573ms/18回。解析画面は19 kindを同時に投げるので、待ちだけが積み上がる。
+  読み取りをread専用接続へ移せば、待つ相手はcollectorのdrainではなく他の集計だけになる。
 """
 import json
 import time
 
 from tictok import analytics
+from tictok.store import streamers
 from tictok.core.config import get_log_progress_interval_seconds
 from tictok.core.logging_setup import progress_interval_seconds
 from tictok.core.progress import IntervalGate
@@ -24,7 +32,7 @@ class AnalyticsMixin:
     """全体解析(配信者横断)のsession単位cacheと集計API。
 
     lockもDB接続も持たない。すべて Storage が所有する self._conn /
-    self._lock / self._read_lock を借りる(mixinとして Storage に混ぜられる前提)。
+    self._lock / _read_connection() を借りる(mixinとして Storage に混ぜられる前提)。
     契約の詳細はmodule docstringを参照。
     """
 
@@ -57,35 +65,37 @@ class AnalyticsMixin:
         """終了済みで未計算(またはlogic version不一致)のsessionのpayloadを計算・保存する。
         finalizeを通らず終了したsession(異常終了の復旧等)もここで拾う。
 
-        **lockはsession 1件ごとに取り直す(lock保持のまま全件回さない)**。CACHE_VERSIONSを
-        1つ上げると全履歴が再計算対象になり、以前はその全走査をDB lockを握ったまま行って
-        いた。待たされるのは解析画面だけではない: 同じlockを使う全ての読み書き — 別tabの
-        録画一覧も、収集中sessionのevent書き込みも — が止まるため、userには「アプリ全体が
-        固まった」ように見える。1件ごとに手放せば、他のrequestがその隙間へ入れる。
+        **計算はread専用接続で行い、write lockはcache行のINSERTの1件ぶんだけ取る。**
+        CACHE_VERSIONSを1つ上げると全履歴が再計算対象になる。以前はその全走査をwriter接続で
+        行っていたため、待たされるのは解析画面だけではなかった: 同じlockを使う全ての
+        読み書き — 別tabの録画一覧も、収集中sessionのevent書き込みも — が止まり、userには
+        「アプリ全体が固まった」ように見えた。計算(実測でorganic 283ms / battle_ratio 210ms)を
+        読み取り側へ出せば、writer接続を握る時間は1行のINSERTだけになる。
+
+        read専用接続が見るのはcommit済みの内容だけだが、ここが計算するのは終了済みsessionの
+        みで、確定はfinalize_session(flush込み)を通っている。呼び出し元の_analytics_rowsも
+        先にflush()する。
 
         件数が変わるのは「他のrequestが割り込める」点だけで、結果は変わらない。埋めている
         最中に追加されたsessionはcacheに載らないまま読み出しへ抜けるが、その場合は
         _analytics_rows がその場で計算する経路(収集中sessionと同じ)へ落ちる。
         """
         version = analytics.CACHE_VERSIONS[kind]
-        with self._lock:
-            rows = self._conn.execute(
-                self._ANALYTICS_SESSION_SELECT
-                + " FROM sessions s"
-                " LEFT JOIN analytics_session_cache c ON c.session_id = s.id AND c.kind = ?"
-                " WHERE s.ended_at IS NOT NULL AND (c.session_id IS NULL OR c.version != ?)"
-                + _EXCLUDE_RESTRICTED,
-                (kind, version),
-            ).fetchall()
+        conn = self._read_connection()
+        rows = conn.execute(
+            self._ANALYTICS_SESSION_SELECT
+            + " FROM sessions s"
+            " LEFT JOIN analytics_session_cache c ON c.session_id = s.id AND c.kind = ?"
+            " WHERE s.ended_at IS NOT NULL AND (c.session_id IS NULL OR c.version != ?)"
+            + _EXCLUDE_RESTRICTED,
+            (kind, version),
+        ).fetchall()
         gate = IntervalGate(progress_interval_seconds(get_log_progress_interval_seconds()))
         for index, row in enumerate(rows):
-            # 1件ぶんの計算と書き込みだけをlockの中で行う。connectionはthread safeでは
-            # ないので、計算をlockの外へ出すことはできない(隙間を作るのが目的で、
-            # 排他を弱めるのが目的ではない)。
+            payload = analytics.compute_payload(
+                conn, self._analytics_sess_dict(row), kind
+            )
             with self._lock:
-                payload = analytics.compute_payload(
-                    self._conn, self._analytics_sess_dict(row), kind
-                )
                 self._conn.execute(
                     "INSERT OR REPLACE INTO analytics_session_cache"
                     " (session_id, kind, version, payload_json, computed_at)"
@@ -112,31 +122,33 @@ class AnalyticsMixin:
         cacheから読み、収集中sessionはその場で計算する(session単位indexで軽い)。
 
         収集中sessionのその場計算はbufferではなくDBを読むため、先に確定させる。終了済み
-        分はfinalize_sessionがflush後にcacheを作るので既に整合している。"""
+        分はfinalize_sessionがflush後にcacheを作るので既に整合している。flush()の後は
+        read専用接続からも同じ内容が見えるので、以降は一切writer接続に触らない。
+
+        制限session(status=restricted)はここでも除く。cacheを作る側
+        (_ensure_analytics_cache / _refresh_session_analytics_locked)は最初から除いていた
+        のに、この読み出しだけが除いていなかった。結果、制限session 6件は全kind・全request
+        で payload_json IS NULL のままその場計算へ落ち、event 0件の配信を19 kindぶん計算し
+        直しては全体解析の分母へ入れていた(実測: 画面表示ごとに114回)。除外は
+        _common.SESSION_STATUS_RESTRICTEDの定義どおりで、片側だけ除くのが誤りだった。"""
         self.flush()
-        # cache埋めはlockの外で行う(中で1件ごとに取り直す)。ここをlockの中へ戻すと、
-        # 全session再計算のあいだDBに触る全ての処理が止まる。
         self._ensure_analytics_cache(kind)
-        with self._lock:
-            rows = self._conn.execute(
-                self._ANALYTICS_SESSION_SELECT
-                + ", c.payload_json AS payload_json FROM sessions s"
-                " LEFT JOIN analytics_session_cache c ON c.session_id = s.id AND c.kind = ?"
-                " WHERE s.started_at >= ? ORDER BY s.started_at",
-                (kind, since),
-            ).fetchall()
-        # cache済みのpayloadはlockの外でほどく。lockを取り直すのは、その場で計算する
-        # session(収集中)の1件ぶんだけにする。_ensure_analytics_cacheと同じ理由で、
-        # 収集中sessionの重いkind(実測でorganic 283ms / battle_ratio 210ms)を握ったままに
-        # すると、その間collectorのevent書き込みまで止まる。
+        conn = self._read_connection()
+        rows = conn.execute(
+            self._ANALYTICS_SESSION_SELECT
+            + ", c.payload_json AS payload_json FROM sessions s"
+            " LEFT JOIN analytics_session_cache c ON c.session_id = s.id AND c.kind = ?"
+            " WHERE s.started_at >= ?" + _EXCLUDE_RESTRICTED
+            + " ORDER BY s.started_at",
+            (kind, since),
+        ).fetchall()
         out = []
         for row in rows:
             sess = self._analytics_sess_dict(row)
             if sess["ended_at"] is not None and row["payload_json"] is not None:
                 out.append((sess, json.loads(row["payload_json"])))
             else:
-                with self._lock:
-                    out.append((sess, analytics.compute_payload(self._conn, sess, kind)))
+                out.append((sess, analytics.compute_payload(conn, sess, kind)))
         return out
 
     def _refresh_session_analytics_locked(self, session_id: int) -> None:
@@ -150,6 +162,17 @@ class AnalyticsMixin:
         # 制限sessionはevent 0件なので全体解析の対象外(cacheも作らない)。
         if row["status"] == SESSION_STATUS_RESTRICTED:
             return
+        # 配信者集計のsession単位cache(streamers._cached_session_payloads)も同じ表に載る。
+        # あちらは「終了済みsessionのeventもbucketも増えない」を前提に作りっぱなしにするので、
+        # その前提が崩れる唯一の経路 — journalからの復元でeventが増え、bucketが作り直される
+        # — ここで捨てる。次にその画面を開いたときに作り直される。計算方法が違うので下の
+        # loopには混ぜない。
+        self._conn.executemany(
+            "DELETE FROM analytics_session_cache WHERE kind = ? AND session_id = ?",
+            [(streamers._COHORT_CACHE_KIND, session_id),
+             (streamers._HEATMAP_CACHE_KIND, session_id),
+             (streamers._VIEWER_LEVEL_CACHE_KIND, session_id)],
+        )
         sess = self._analytics_sess_dict(row)
         now = time.time()
         for kind in analytics.KINDS:
@@ -230,22 +253,28 @@ class AnalyticsMixin:
         """ギフト/コメントの集中度(横断)。identity_key単位でgiftコインとComment数を集計し、
         Gini係数・Lorenz曲線・上位N%シェアを返す。User横断の貢献量が必要なためsession単位
         cacheでは持たず、covering index(kind, identity_key, ...)で素データを直接集計する
-        (素データと同時に消えるため削除でも整合が壊れない)。"""
-        with self._lock:
-            gift_rows = self._conn.execute(
-                "SELECT e.identity_key AS key, SUM(e.diamonds) AS v"
-                " FROM events e JOIN sessions s ON s.id = e.session_id"
-                " WHERE e.kind = 'gift' AND s.started_at >= ?"
-                " GROUP BY e.identity_key",
-                (since,),
-            ).fetchall()
-            comment_rows = self._conn.execute(
-                "SELECT e.identity_key AS key, COUNT(*) AS v"
-                " FROM events e JOIN sessions s ON s.id = e.session_id"
-                " WHERE e.kind = 'comment' AND s.started_at >= ?"
-                " GROUP BY e.identity_key",
-                (since,),
-            ).fetchall()
+        (素データと同時に消えるため削除でも整合が壊れない)。
+
+        全期間のgift/comment eventを舐める2本なので集計read専用接続で流す。writer接続で
+        流していた頃は、この2本(実測 12ms / 103ms)のあいだcollectorのdrainが待たされた。"""
+        # 収集中sessionのeventもここに入る。read専用接続はcommit済みしか見ないため、
+        # batch writerに滞留した分を先に確定させる(読み取り前flush)。
+        self.flush()
+        conn = self._read_connection()
+        gift_rows = conn.execute(
+            "SELECT e.identity_key AS key, SUM(e.diamonds) AS v"
+            " FROM events e JOIN sessions s ON s.id = e.session_id"
+            " WHERE e.kind = 'gift' AND s.started_at >= ?"
+            " GROUP BY e.identity_key",
+            (since,),
+        ).fetchall()
+        comment_rows = conn.execute(
+            "SELECT e.identity_key AS key, COUNT(*) AS v"
+            " FROM events e JOIN sessions s ON s.id = e.session_id"
+            " WHERE e.kind = 'comment' AND s.started_at >= ?"
+            " GROUP BY e.identity_key",
+            (since,),
+        ).fetchall()
         gifts = analytics.concentration([r["v"] or 0 for r in gift_rows if r["key"]])
         comments = analytics.concentration(
             [r["v"] or 0 for r in comment_rows if r["key"]]
@@ -278,17 +307,17 @@ class AnalyticsMixin:
         # 滞留したsampleを先に確定させる(読み取り前flush)。
         self.flush()
         rows = self._analytics_rows("coverage", since)
-        with self._lock:
-            media = self._conn.execute(
-                "SELECT r.session_id AS session_id, r.started_at AS started_at,"
-                " r.ended_at AS ended_at, r.status AS status,"
-                " (t.recording_id IS NOT NULL) AS has_transcript"
-                " FROM recordings r"
-                " JOIN sessions s ON s.id = r.session_id"
-                " LEFT JOIN transcripts t ON t.recording_id = r.id"
-                " WHERE s.started_at >= ?" + _EXCLUDE_RESTRICTED,
-                (since,),
-            ).fetchall()
+        # 直前の_analytics_rowsがflush()済みなので、集計read専用の接続から全て見える。
+        media = self._read_connection().execute(
+            "SELECT r.session_id AS session_id, r.started_at AS started_at,"
+            " r.ended_at AS ended_at, r.status AS status,"
+            " (t.recording_id IS NOT NULL) AS has_transcript"
+            " FROM recordings r"
+            " JOIN sessions s ON s.id = r.session_id"
+            " LEFT JOIN transcripts t ON t.recording_id = r.id"
+            " WHERE s.started_at >= ?" + _EXCLUDE_RESTRICTED,
+            (since,),
+        ).fetchall()
         return analytics.reduce_coverage(rows, media)
 
     def analytics_organic_entries(self, since: float = 0.0) -> dict:

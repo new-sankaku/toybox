@@ -1,7 +1,8 @@
 # 配信者まるごとの一括処理
 
-文字起こし(`transcribe`) / 焼き込み(`overlay`) / Up出力(`upscale`) / 再mp4化(`reprocess`) /
-音量正規化(`audionorm`) / ts結合(`pack`) / 元mp4の削除(`delete_mp4`)を、Sessionではなく
+文字起こし(`transcribe`) / 笑い声分析(`laugh`) / 無音skipの解析(`voice`) / 焼き込み(`overlay`) /
+Up出力(`upscale`) / 再mp4化(`reprocess`) / 音量正規化(`audionorm`) / ts結合(`pack`) /
+元mp4の削除(`delete_mp4`)を、Sessionではなく
 **配信者単位**(または全配信者、あるいは選んだ録画だけ)で実行する。画面は配信者動画
 (`/videos`)の「一括処理」tab、API は
 `GET /api/bulk/status`, `GET /api/bulk/estimate`, `GET /api/bulk/recordings`,
@@ -23,6 +24,13 @@
 「toolbarにselect+buttonを重ねると、済んだ配信者も投入できてしまう劣った経路が並ぶだけだった」
 という判断をそのまま引き継ぐため、**配信者画面には投入buttonを置かず、linkだけ**を出す
 (`/videos?streamer=<unique_id>#bulk`)。
+
+### 出力fileを作らない種別
+
+無音skipの解析は録画1本あたり数百kBのsidecarしか残さない。投入前の空き容量判定
+(`_require_disk_space`)を通さないのはそのためで、通すと「空きが無いから声の解析もできない」
+という無関係な行き止まりになる。画面側でも見積りのmp4容量とdisk警告を出さない
+(`BULK_NO_MP4_KINDS` / `BULK_NO_DISK_KINDS`。文字起こし・笑い声分析と同じ扱い)。
 
 ## 画面は「種別を選ぶ」ではなく「配信者×種別の表」
 
@@ -110,6 +118,9 @@ cellのbuttonは**枠を出して押せると名乗らせる**。地も枠も透
 **DBの `recordings.audio_normalized_at` だけ**を見る。loudnormはmp4に痕跡を残さないので、
 fileからは正規化済みか判別できない(推測で埋めてはいけない)。再mp4化は元mp4を作り直すので、
 正規化せずに作り直したら必ずこの列をNULLへ戻す。文字起こしは `transcripts` 表の有無だけ。
+無音skipの解析(`voice`)はsidecar(`.voice.json`)の実在だけで、DBに印を持たない — sweepと
+同じ判定を `fsfacts.SIDECAR_JOB_FACTS` の1箇所から引く（一括とsweepで「済み」の意味が
+食い違うと、片方が積み続ける）。
 
 「既にqueueにある」の照合先も種別で違う。映像jobは `pending_media_job_keys()`、文字起こしは
 `pending_transcription_ids()`(台帳が別)。**素材やmp4を置き換える種別(`pack`・`delete_mp4`)の

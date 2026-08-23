@@ -584,11 +584,23 @@ def get_journal_retention_days() -> int:
 
 
 def get_db_backup_dir() -> str:
-    """Directory holding database snapshots. Next to the DB by default so a snapshot is
-    found without configuration; point it at another volume to survive that disk."""
-    return os.environ.get(
-        "TICTOK_DB_BACKUP_DIR", str(PROJECT_ROOT / "backups")
-    )
+    """Directory holding database snapshots. Next to **the database being used** by
+    default so a snapshot is found without configuration; point it at another volume to
+    survive that disk.
+
+    Derived from ``get_db_path()`` rather than from the project root. For the real
+    server the two are the same directory, so nothing changes there. They differ for
+    every *other* database opened by this code — a test sandbox, a scratch copy, a
+    one-off script — and pinning the default to the project root sent those snapshots
+    into the live ``backups/``. Generations are pruned per reason, so a handful of
+    tiny test snapshots claiming the ``premigration`` name pushed out the real one:
+    measured, a 1.85GB pre-migration snapshot was gone after a single test run, and
+    the loss is invisible until someone needs to restore. A snapshot belongs to the
+    database it was taken from."""
+    configured = os.environ.get("TICTOK_DB_BACKUP_DIR")
+    if configured:
+        return configured
+    return str(Path(get_db_path()).resolve().parent / "backups")
 
 
 def get_db_backup_keep() -> int:
@@ -618,6 +630,35 @@ def get_db_integrity_check_max_errors() -> int:
     """Rows PRAGMA integrity_check is allowed to report before it stops. A corrupt file
     can produce an unbounded list, and the first handful already identify the damage."""
     return _env_int("TICTOK_DB_INTEGRITY_CHECK_MAX_ERRORS", 20)
+
+
+# ---- planner statistics (sqlite_stat1, see tictok/store/maintenance.py) ----
+# Without sqlite_stat1 the query planner sizes every index by the same rule of thumb,
+# and for the battle gift contribution query it picks (kind, identity_key, ...) over
+# (session_id, kind, time) — one full scan of every gift event in the database per
+# battle. Measured on a copy of the live database, 1,417 battle windows: 526ms with
+# statistics against 4,596ms without (warm cache, paired A/B; identical result rows).
+# ANALYZE is a write, so it only runs in the startup window where no collector is
+# attached, and only when the data can plausibly have moved.
+
+
+def get_db_analyze_enabled() -> bool:
+    """Keep the planner's table statistics current. Turning this off leaves whatever
+    sqlite_stat1 already holds in place — it does not delete it — so an operator whose
+    database has grown past the startup budget can freeze the statistics rather than
+    lose them."""
+    return _env_bool("TICTOK_DB_ANALYZE_ENABLED", True)
+
+
+def get_db_analyze_growth_ratio() -> float:
+    """Growth of the events table, as a fraction of the row count recorded at the last
+    ANALYZE, that makes the next startup recompute statistics. ANALYZE holds the write
+    lock for its whole run (measured: 2.3s over 1.25M events), so running it on every
+    start would more than double a 1.65s startup for statistics that barely move.
+    Both the trigger and the cost scale with the database, so one ratio fits a fresh
+    install and a year-old one; 20% is about ten days at the observed 24,000 events/day.
+    0 recomputes on every start."""
+    return _env_float("TICTOK_DB_ANALYZE_GROWTH_RATIO", 0.20)
 
 
 # ---- ops_events (Layer2 state-transition table, see tictok/storage.py) ----
@@ -711,6 +752,37 @@ def get_perf_loop_lag_warn_ms() -> float:
     moment. Below this, blocking is short enough to be indistinguishable from normal
     scheduling and OS timer granularity."""
     return _env_float("TICTOK_PERF_LOOP_LAG_WARN_MS", 500.0)
+
+
+def get_perf_stall_sample_ms() -> float:
+    """Stall length past which a watchdog thread photographs the event loop's stack
+    **while it is still stuck**. The lag probe can only report after the loop moves
+    again, by which point the culprit has returned — it names the requests that were
+    in flight, and for the stalls that matter most that list is empty (measured: 593
+    of 836 recorded stalls had no request in flight at all). Only a thread that is
+    not on the loop can see what the loop is doing.
+
+    The default sits well above the reporting threshold of the lag probe so this
+    fires on the episodes worth a stack, not on ordinary scheduling jitter."""
+    return _env_float("TICTOK_PERF_STALL_SAMPLE_MS", 2000.0)
+
+
+def get_perf_stall_sample_enabled() -> bool:
+    """The stall watchdog thread. Costs one timestamp comparison per tick while the
+    loop is healthy; the stack is only walked once per stall episode."""
+    return _env_bool("TICTOK_PERF_STALL_SAMPLE_ENABLED", True)
+
+
+def get_db_read_pool_size() -> int:
+    """Number of read-only connections kept for heavy aggregate queries.
+
+    A single connection serialised them, which is fine when one aggregate is slow for
+    CPU reasons but costly once they are SQL-bound: the streamer screen fires several
+    at once, so each waits for the sum of the others. Measured on a copy of the live
+    database (921 battle windows per thread): 4 concurrent went 1001ms serialised ->
+    300ms pooled. One connection still costs its own page cache, so this is a small
+    bound, not one connection per thread."""
+    return _env_int("TICTOK_DB_READ_POOL_SIZE", 3)
 
 
 def get_storage_backlog_warn_rows() -> int:
@@ -1314,9 +1386,9 @@ def get_media_queue_instant_workers() -> int:
 
 
 def get_media_queue_sweep_concurrency() -> int:
-    """起動時sweepが積んだjobを同時に何本走らせるか(0で無制限)。
+    """sweepが積んだjobを同時に何本走らせるか(0で無制限)。
 
-    sweepは人が待っていない自動投入で、しかも起動のたびに数十本積まれる。workerの全枠
+    sweepは人が待っていない自動投入で、しかも起動直後は数十本積まれる。workerの全枠
     (既定2)をsweepが埋めると、その直後に人が投げた焼き込みはsweepが1本終わるまで始まらない。
     既定の1は「sweepは常に1本ずつ、残りの枠は人の投入のために空けておく」という意味で、
     workerが1本しか無い構成でも待たされるのはsweep 1本ぶんに収まる。
@@ -1443,6 +1515,196 @@ def get_audio_silence_min_seconds() -> float:
     """Shortest run of silent intervals reported as a silent span. Below this the gap is
     a pause between words, not a place a clip can be cut."""
     return _env_float("TICTOK_AUDIO_SILENCE_MIN_SECONDS", 2.0)
+
+
+# ---- Silence skipping during playback ----
+#
+# Skipping asks "may this be thrown away unheard", and the instrument that answers it is
+# the VAD below, not the level series. Measured on five recordings, the level-derived
+# version skipped 1.1-13.8% of the runtime while nobody was speaking for 45-59% of it, and
+# on two of the five, 3.0-9.7% of what it did skip was actual voice. A level cannot answer
+# the question: a stream carries BGM and game audio underneath, so silence is not where
+# the talking stops.
+#
+# Skipping is destructive in a way pacing is not — a stretch played fast is still heard,
+# a stretch jumped over is gone — so the thresholds here are deliberately stricter than
+# the pacing ones.
+
+
+def get_skip_voice_threshold() -> float:
+    """Speech probability at or above which a moment is content and must not be jumped.
+    Lower than the pacing threshold on purpose: measured against the word times of five
+    recordings (after correcting one whose transcript is 4.9s out of register), 0.2 leaves
+    0-13s per recording where a word sits inside a span the plan would jump, while 0.1
+    leaves 0-6s. The cost is the skippable time falling to about nine tenths."""
+    return _env_float("TICTOK_SKIP_VOICE_THRESHOLD", 0.1)
+
+
+def get_skip_min_gap_seconds() -> float:
+    """Shortest silence worth jumping. Sets how often playback jumps: measured on five
+    recordings 0.5s gives 5.5-9.7 jumps per minute and skips 34-51% of the runtime, 1.0s
+    gives 4.3-7.2 and 31-49%, 2.0s gives 2.7-4.0 and 24-44%. A jump costs 70ms of stall
+    (measured in Chrome against a buffered target), so even at the shortest setting the
+    stalls add up to well under 1% of the time watched."""
+    return _env_float("TICTOK_SKIP_MIN_GAP_SECONDS", 0.5)
+
+
+def get_skip_guard_seconds() -> float:
+    """How much silence BEFORE speech is left unskipped — the landing point of every jump.
+    It covers three things at once: the fold of the 32ms VAD frames onto the storage grid,
+    whatever the VAD misses at an onset, and the moment the decoder needs after a seek. It
+    is the one margin that cannot be too small, because a jump that lands late has removed
+    the start of an utterance and the listener has no way to know."""
+    return _env_float("TICTOK_SKIP_GUARD_SECONDS", 0.45)
+
+
+def get_skip_lead_seconds() -> float:
+    """How much silence AFTER speech is left unskipped. The cheap side: being slow to jump
+    costs a fraction of a second, so this only has to absorb the fold onto the grid."""
+    return _env_float("TICTOK_SKIP_LEAD_SECONDS", 0.1)
+
+
+def get_skip_min_jump_seconds() -> float:
+    """Shortest jump still worth making, applied where playback has already entered a span.
+    Below this the seek costs more than the silence it removes (a buffered seek stalls for
+    about 70ms, an unbuffered one for 0.7-259s and is refused elsewhere)."""
+    return _env_float("TICTOK_SKIP_MIN_JUMP_SECONDS", 0.3)
+
+
+# ---- Voice activity (is anyone speaking) ----
+#
+# The question "is anyone speaking here" gets its own instrument. The first version answered
+# it from whisper's word times and was wrong: measured against VAD on four recordings, 4.4%
+# to 43.8% of what it marked as a gap was actual speech, and the onset of an utterance was
+# played fast for a median of 0.29-0.62s (worst 7.2s). Word times run 0.22-0.30s behind the
+# audio because they are a by-product of a transcription model, not a measurement of voice.
+# Silero VAD answers the question directly at 32ms resolution, needs no transcript, and
+# brings the speech eaten by the fast lane to zero at the settings below.
+
+
+def get_voice_frame_seconds() -> float:
+    """Resolution of the stored speech-probability series. The VAD itself runs at 32ms; this
+    is the grid the frames are folded onto (with max, so folding widens speech rather than
+    thinning it). 0.1s matches the display waveform and keeps a 3h recording under a
+    megabyte, while staying finer than the lead the pacing keeps around each utterance."""
+    return _env_float("TICTOK_VOICE_FRAME_SECONDS", 0.1)
+
+
+def get_voice_threshold() -> float:
+    """Speech probability at or above which a moment counts as voice. Silero's own default is
+    0.5, which is meant for cutting speech out for transcription — here it is far too eager:
+    measured against 0.2 it drops 299-672 seconds of real speech per recording, and that
+    speech would be played at the fast rate. The cost of the lower threshold is small (the
+    effective speedup moves by roughly 0.1-0.2x); the cost of the higher one is missing the
+    start of what the listener is watching for."""
+    return _env_float("TICTOK_VOICE_THRESHOLD", 0.2)
+
+
+def get_voice_min_silence_seconds() -> float:
+    """Gaps shorter than this inside speech are filled in rather than split. A pause between
+    words is not a place worth changing speed for, and splitting there makes the rate flap
+    within a sentence."""
+    return _env_float("TICTOK_VOICE_MIN_SILENCE_SECONDS", 0.3)
+
+
+def get_voice_min_speech_seconds() -> float:
+    """Speech runs shorter than this are dropped. Set low on purpose: a single 0.1s bin above
+    the threshold is more likely a real syllable than noise, and the penalty for keeping it
+    is one extra tenth of a second at normal speed."""
+    return _env_float("TICTOK_VOICE_MIN_SPEECH_SECONDS", 0.1)
+
+
+# ---- Talk pacing (speed up everything that is not speech) ----
+#
+# Pacing and skipping now ask the same question of the same instrument — "is anyone talking
+# here", answered by the VAD above — and differ only in what they do with the answer.
+# Pacing plays the rest fast, skipping jumps it. Nothing is lost to a fast stretch, so the
+# pacing thresholds may be looser than the skipping ones; the two are not used together,
+# because after a skip the silence left over is shorter than the shortest gap worth
+# changing speed for.
+
+
+def get_pace_fast_rate() -> float:
+    """Playback rate applied where nobody is speaking. Chrome plays audio at every rate up
+    to 16x (measured), so this is heard rather than silently dropped — which is why the
+    volume below exists. Above roughly 8x the picture stops being readable, so raising this
+    trades away the ability to notice something on screen."""
+    return _env_float("TICTOK_PACE_FAST_RATE", 6.0)
+
+
+def get_pace_fast_volume() -> float:
+    """Volume multiplier applied while running fast, relative to whatever volume the
+    listener has set. Speeding audio up 6x turns BGM into noise; dropping it keeps the fast
+    stretches from being unpleasant without muting them, so a laugh or a shout the word
+    times missed is still audible."""
+    return _env_float("TICTOK_PACE_FAST_VOLUME", 0.25)
+
+
+def get_pace_lead_seconds() -> float:
+    """How far past the END of speech the normal rate is held before a gap becomes a fast
+    stretch. This is the cheap side: being late to speed up costs a fraction of a second of
+    playback and nothing else, so it only has to absorb the fold onto the 0.1s grid."""
+    return _env_float("TICTOK_PACE_LEAD_SECONDS", 0.1)
+
+
+def get_pace_onset_guard_seconds() -> float:
+    """How far BEFORE speech starts the fast stretch is ended. Deliberately larger than the
+    trailing lead above, because the two sides fail differently: being late to speed up wastes
+    a moment, while being late to slow down plays the first syllable at the fast rate — and
+    that is the one error the listener cannot recover from without seeking back. It was the
+    symptom actually reported against the first build.
+
+    The guard has to cover everything between the measurement and the ear: the fold of the
+    32ms VAD frames onto the 0.1s grid, the frame the rate change lands on (at 6x, one 16ms
+    animation frame is ~0.1s of audio), and whatever the VAD itself gets wrong at an onset.
+    Measured on four recordings, widening it from 0.1s to 0.3s costs 0.08x of the effective
+    speedup — cheap enough that the margin is worth having even when the spans look right."""
+    return _env_float("TICTOK_PACE_ONSET_GUARD_SECONDS", 0.3)
+
+
+def get_pace_min_fast_seconds() -> float:
+    """Shortest gap worth changing speed for. Measured on real recordings this sets the
+    switching rate: 0.3s gives 17-26 changes per minute, 0.5s gives 14-21, 1.0s gives
+    9-17, and the difference in total speedup between them is under 0.1x. The gaps inside a
+    sentence are not where the time is — 0.1-0.3s pauses are 0.3% of a recording."""
+    return _env_float("TICTOK_PACE_MIN_FAST_SECONDS", 0.5)
+
+
+def get_pace_reaction_threshold() -> float:
+    """Reaction probability at or above which a moment counts as content rather than a gap.
+    Deliberately far below ``get_laugh_audio_threshold`` (the clip-candidate threshold):
+    reactions are a fraction of a percent of a recording each, so pulling them out of the
+    fast lane costs at most 0.09x of the total speedup even at 0.05, while missing one
+    means racing past the moment the listener is watching for. Generosity is nearly free."""
+    return _env_float("TICTOK_PACE_REACTION_THRESHOLD", 0.10)
+
+
+def get_pace_reaction_classes() -> list:
+    """AudioSet classes treated as content rather than as a gap, separated by ``|``.
+
+    Laughter alone was the wrong list — it was inherited from the clip-candidate detector,
+    which asks a different question ("was this funny"). Pacing asks "is there a reaction
+    here worth hearing", and a shout, a gasp or applause answers yes just as well.
+
+    Measured over four recordings at threshold 0.10, the seconds each class adds to the
+    content lane (and so removes from the speedup): the shout family (Shout, Yell, Whoop,
+    Battle cry) fires for 0 seconds on all four, Screaming and the applause family for 0-17s
+    each, and the laugh family for 20-121s. Widening the list from laughter alone to
+    everything below moves the effective rate by 0.03-0.08x — it is very nearly free, which
+    is why the list is wide rather than narrow.
+
+    Singing is deliberately absent: it costs 0.16-0.36x (Female singing alone runs 308-320s
+    on two of the four) and a song is not a reaction. Add it here if a streamer sings.
+    Crying/Whimper are absent too — Whimper fires for 223s on one recording, which reads as
+    a false positive on Japanese speech rather than 4% of the stream being distress."""
+    raw = os.environ.get(
+        "TICTOK_PACE_REACTION_CLASSES",
+        "Laughter|Giggle|Snicker|Belly laugh|Chuckle, chortle"
+        "|Shout|Yell|Whoop|Battle cry|Screaming|Children shouting"
+        "|Gasp|Groan|Sigh"
+        "|Clapping|Cheering|Applause",
+    )
+    return [name.strip() for name in raw.split("|") if name.strip()]
 
 
 # ---- Clip export ----

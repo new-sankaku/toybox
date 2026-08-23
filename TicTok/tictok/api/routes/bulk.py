@@ -30,24 +30,28 @@ router = APIRouter()
 
 # 一括投入を許すkind。任意のkindを通すと、preview等の一括に向かないjobまで配信者単位で
 # 大量に積めてしまうので、ここに挙げたものだけを受け付ける。
-BULK_KINDS = ("transcribe", "laugh", "overlay", "upscale", "reprocess", "audionorm",
-              "pack", "delete_mp4")
+BULK_KINDS = ("transcribe", "laugh", "voice", "overlay", "upscale", "reprocess",
+              "audionorm", "pack", "delete_mp4")
 
 # queueへ載る種別。delete_mp4はfileを1本消すだけでffmpegを起こさないため、jobにすると
 # 実行時間0の行が録画数ぶん台帳へ並ぶだけになる。専用APIで即時に実行する。
 # 文字起こしもここには入らない: 走る先は同じmedia_job_queue(kind=stt)だが、投入は
 # _enqueue_stt_jobs が持つ(group_idを振らない)ため、同じ投入APIから種別で振り分ける。
-BULK_QUEUE_KINDS = ("overlay", "upscale", "reprocess", "audionorm", "pack")
+BULK_QUEUE_KINDS = ("overlay", "upscale", "reprocess", "audionorm", "pack", "voice")
+
+# 出力fileを作らない種別。残すのは録画1本あたり数百kBのsidecarだけなので、投入前の空き容量
+# 判定を通す(文字起こし・笑い声分析はそもそも別の投入口でこの判定を通らない)。
+BULK_NO_OUTPUT_KINDS = ("voice",)
 
 # 対象判定に .ts の走査が要る種別。母集合単位の呼び出しは _bulk_hls_batch で先に埋める。
 # 焼き込み・Up出力・文字起こしが入っているのは、mp4が無い録画でも素材から処理できるため —
 # 素材の有無を見ずに判定すると、単体では処理できる録画が一括だけ弾かれる。
 BULK_HLS_KINDS = ("transcribe", "laugh", "overlay", "upscale", "reprocess", "delete_mp4",
-                  "pack", "waveform", "sprite")
+                  "pack", "waveform", "sprite", "voice")
 
 # 対象判定に .sidecars の走査が要る種別。母集合単位の呼び出しは _bulk_sidecar_batch で
 # 先に埋める(録画ごとのstatにすると数千本で効く)。
-BULK_SIDECAR_KINDS = ("waveform", "sprite")
+BULK_SIDECAR_KINDS = ("waveform", "sprite", "voice")
 
 # 一括投入の種別名。映像jobの台帳に出る語(MEDIA_JOB_TITLES)と揃えるが、そこに無い種別
 # (文字起こし・元mp4の削除)も画面と409本文で名乗る必要があるので、この画面の語彙として
@@ -207,15 +211,16 @@ def _bulk_classify(kind: str, recording: dict,
         if packed is None:
             packed = fsfacts._recording_packed(recording)
         return (False, "packed") if packed else (True, "")
-    if kind in ("waveform", "sprite"):
+    if kind in fsfacts.SIDECAR_JOB_FACTS:
         # 入力は素材(.ts)でもmp4でもよい(生成側はhls_source経由で開く)。済み判定はcache
-        # fileの実在だけを見る — 波形もspriteもDBに印を持たず、外で消えたり戻ったりする。
+        # fileの実在だけを見る — 波形もspriteも声profileもDBに印を持たず、外で消えたり
+        # 戻ったりする。
         has_hls = facts.get("has_hls")
         if has_hls is None:
             has_hls = fsfacts._recording_has_hls(recording)
         if not facts["has_file"] and not has_hls:
             return False, "no_source"
-        fact = "waveform_done" if kind == "waveform" else "sprite_done"
+        fact = fsfacts.SIDECAR_JOB_FACTS[kind]
         done = facts[fact] if fact in facts else fsfacts._recording_sidecar_done(recording, fact)
         return (False, "done") if done else (True, "")
     if kind in ("overlay", "upscale"):
@@ -645,8 +650,11 @@ async def bulk_queue(payload: BulkQueueRequest) -> dict:
         raise HTTPException(status_code=400,
                             detail=f"queueへ載せない種別です: {kind}（専用APIで実行します）")
     # 実行はworkerだが、下限割れなら投入前に断る(全件がworkerで失敗するより早い)。
-    disk._require_disk_space(disk._disk_volume_paths(), "bulk_queue", kind=kind,
-                        unique_id=payload.unique_id)
+    # 出力fileを作らない種別は通す — 無音skipの解析が残すのは録画1本あたり数百kBのsidecarで、
+    # ここで断ると「空きが無いから声の解析もできない」という無関係な行き止まりになる。
+    if kind not in BULK_NO_OUTPUT_KINDS:
+        disk._require_disk_space(disk._disk_volume_paths(), "bulk_queue", kind=kind,
+                            unique_id=payload.unique_id)
     ids = [int(value) for value in payload.recording_ids] if payload.recording_ids else None
     plan = await asyncio.to_thread(_bulk_plan, kind, payload.unique_id, payload.redo, ids)
     targets = plan["targets"]

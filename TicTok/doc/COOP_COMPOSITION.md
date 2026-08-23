@@ -18,7 +18,75 @@ BattleもLinkMicの上で起きるため、**同じ時間が両方の窓に入�
 |---|---|---|
 | v1 | create/finish だけで開閉 | 配信尺の86.5%がコラボ。窓の中の大半がソロで**過大** |
 | v2 | roster(誰がLINKEDか)で開閉 | 映像19.1h 対 窓17.7h。境界は秒単位で正しいが**数%過少** |
-| v3 | v2 + 切断を「誰の切断か」で読み分け、繋いだまま終わった窓も確定 | 収集中 |
+| v3 | v2 + 切断を「誰の切断か」で読み分け、繋いだまま終わった窓も確定 | 録画47本と照合。幻5.42h/取りこぼし4.46h。**退出snapshotで窓を開く欠陥** |
+| v4 | v3 + 退出/取消/拒否のsnapshotのrosterを読まない、自室のゲストはco-hostに数えない | 同じ47本で幻0.11h/取りこぼし0.88h |
+
+### v3で見つかった3つの欠陥(録画47本・33.3GB・映像38.36hとの照合)
+
+**① 退出のsnapshotで窓が開く(幻3.95h)**。`group_change_content` の `source` は、その
+snapshotが何の操作で出たかを名乗る(`click_quick_leave_button` 等)。退出のsnapshotは
+**抜ける本人をまだLINKEDのまま載せた変化前のroster**で、v3はこれを「own LINKED +
+他室LINKED」と読み、コラボが終わった瞬間に窓を開いていた。次のsnapshotが届くまで
+(実測で最長1時間40分、その間eventは1件も来ない)ソロ時間をコラボに数える。この署名の
+窓は14件・14,230秒あり、映像と一致したのは22秒(0.2%)だけだった。
+→ v4は退出系sourceのsnapshotでは状態を変えない。開閉のどちらにも使わない。
+退出の当事者(`biz_content` が名乗る)をrosterから外して読む案も試したが、groupコラボで
+本物の窓まで閉じ、取りこぼしが0.88h→8.50hへ悪化したので採らない。
+
+**② 配信が切れた後の再接続retry期間を飲み込む(幻79,922秒)**。配信が切れてもcollectorは
+再接続を試み続け、sessionはその間開いたままになる(実測13.6時間/8.6時間、その間
+viewer_sampleは0件でeventは全部`system`)。開いたままの窓をsession終了時刻で閉じると、
+この尾を丸ごとコラボに数える。
+→ 終端は `collector._open_collab_end` = **配信が生きていた最後の時刻**で頭打ちにする。
+`_last_data_at` はcollector自身のsystem eventでも進むので使えない。配信由来のdataだけが
+動かす `_last_stream_at` を見る。
+なお「最後に接続を確認できた時刻」で切るのは**誤り**である。接続中にLinkLayer eventが
+止まることがあり(実測で最長1時間40分)、切断eventも来ないままコラボが配信終了まで
+続く。そこで切ると取りこぼしが0.87h→4.12hへ悪化する。
+
+**③ serverが落ちると開いていた窓が消える(実測13/38 session)**。開いている窓はメモリに
+しか無く、中間永続化は確定済みの窓しか書いていなかった。graceful終了なら
+`_close_open_collab_windows` が先に走るので漏れない前提だったが、再起動・強制終了で
+崩れる(sessionは起動時復旧が確定させるが、in-memoryの窓は知らない)。
+→ `_collab_windows_public` は開いている窓も暫定の終端つきで書く(`closed_by: "open"`)。
+保存はsession単位の全置換なので、窓が伸びれば上書きされ、閉じれば確定形に変わる。
+
+### 版を上げてもdataを捨てない
+
+判定ruleの版を上げると分析は現行版の窓だけを集計するので、過去の窓はすべて落ちる。
+`linklayer_raw_capture` の生capture(`samples/raw/LinkLayerEvent_<session>.jsonl`)が
+残っているsessionは `scripts/rebuild_collab_windows.py` で作り直せる。窓管理の手順は
+collectorと同じものをscript側でも再現してある — 手順が割れると「作り直した窓」と
+「これから収集する窓」が別ruleになる。生captureのJSONは**protoの型を連れて読む**こと
+(betterprotoはprotoに在るfieldを未設定でも空messageで返し、無いfieldはAttributeErrorに
+なる。判定はその差で枝を選んでいるので、素のdictだと `closed_by` が本番と違う名前になる)。
+
+**④ 退出を一律に無視すると閉じる合図も消える**。①で退出系snapshotを無視した結果、
+コラボが終わっても閉じる合図が無くなり窓が開いたままになる例が出た(実測47分)。
+`leave_with_user_click_disconnect` は**自分が切った**ことの名乗りで、生captureの4件とも
+映像のコラボはその1〜4秒後に終わっていた。rosterは変化前のままなので読まず、名乗り
+だけで切断として扱う。似た値の `clear_cross_states:...userLeaveTriggerToIdle` は3件中
+1件しか終端と一致せず(1件は730秒後、1件はコラボ中ですらない)、合図に使えない。
+
+**⑤ 自室のゲストをコラボに数えていた**。`list_content` / `join_direct_content` の
+`linked_list` に、相手の room_id が**自室と同じ**entryが来ることがある。co-hostではなく
+自室へゲストを上げるmulti-guestで、group_change側は自室entryを `is_own` として既に
+除いており、こちらだけ残っていた。実測1件(35分)を録画の実フレームで確かめたところ、
+画面は最後まで配信者ひとりで共演は映っていない。
+
+### v4の実測(録画47本で確定)
+
+| closed_by | 窓数 | 秒 | 映像と一致 |
+|---|---|---|---|
+| join_direct_content | 93 | 90,814 | 99.7% |
+| finish_content | 81 | 23,866 | 99.3% |
+| session_end | 14 | 14,057 | 100.0% |
+| group_change_content:own_disconnect | 4 | 3,373 | 100.0% |
+| group_change_content | 7 | 3,206 | 99.7% |
+
+**幻0.11h・取りこぼし0.88h**(v3は幻5.42h・取りこぼし4.46h)。残る取りこぼし2,756秒の
+うち2,428秒(88%)は下記「接続時に既にコラボ中」の既知の穴で、録画の先頭から始まる区間
+である。残り328秒は境界のjitter。
 
 ### 検証方法(録画映像との突き合わせ)
 
@@ -34,6 +102,14 @@ BattleもLinkMicの上で起きるため、**同じ時間が両方の窓に入�
   除外EXTINFぶん(実測264秒/2090秒)ずれ、その録画の突合が全滅する。信用できるのはplaylist軸
   (`-ss` で抜いたフレーム)の方。
 - aspectでは**Battleとコラボを区別できない**(Battleも分割画面)。`battles` 表の区間を足してから比べる。
+- 録画のHLSは2秒ごとの独立fileではなく、**packへまとめられ playlist が `#EXT-X-BYTERANGE` で
+  その中のbyte範囲を指す**(実測: playlist entry 4,888件に対し実file 28個・pack平均349秒)。
+  entryのfile名だけを見てpackごとprobeすると、**そのpackの先頭の解像度**しか判らず、pack途中の
+  切替を取り落とす。packごとにkeyframeを全走査し、解像度が変わったkeyframeのbyte位置を
+  BYTERANGEで時刻へ戻すこと。分解能はkeyframe間隔(実測2秒)。
+- process起動が支配的な走査になりやすい。ffprobe 1回は実測51ms、うち34msがprocess起動で、
+  file読みは0.3ms(512KB)しかない。entryごとに起動すると録画47本で20万回になる。
+  pack単位なら1本あたり28〜52回で済み、同じ情報が得られる(実測4.7倍・33.3GBを552秒)。
 
 ### v2で取りこぼしていたもの(v3の修正点)
 

@@ -540,6 +540,52 @@ def _save_transcript(server, recording_id, word_times=True,
                        "timemap_version": timemap_version})
 
 
+# ---- 無音skipの解析(voice) ----
+# 再生画面が使うsidecarを先に作っておく種別。人がその場で待つ生成物なので、一括とsweepの
+# 両方から積める必要がある。
+
+
+def test_voice_targets_recordings_without_the_sidecar(client, server, make_recording):
+    """済み判定はsidecarの実在だけ。DBに印を持たない(外で消えたり戻ったりする)。"""
+    from tictok.media.voice import voice_profile_path
+
+    make_recording(unique_id="vera")
+    _, _, done_path = make_recording(unique_id="vera")
+    target = voice_profile_path(done_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("{}", encoding="utf-8")
+    server.fsfacts._fs_state_cache.clear()
+    server.fsfacts._fs_bulk_cache.clear()
+    server.fsfacts._bulk_status_cache.clear()
+
+    body = client.get("/api/bulk/estimate",
+                      params={"kind": "voice", "unique_id": "vera"}).json()
+    assert body["recordings"] == 1
+    assert body["skipped"]["done"] == 1
+
+
+def test_voice_is_queued_like_the_other_media_jobs(client, server, make_recording):
+    _, recording_id, _ = make_recording(unique_id="wanda")
+    body = client.post("/api/bulk/queue",
+                       json={"kind": "voice", "unique_id": "wanda"}).json()
+    assert body["total"] == 1
+    jobs = [j for j in server.runtime.storage.list_media_jobs(50)
+            if j["recording_id"] == recording_id]
+    assert [j["kind"] for j in jobs] == ["voice"]
+
+
+def test_voice_is_queued_even_when_the_disk_is_low(client, server, make_recording,
+                                                   monkeypatch):
+    """残すのは数百kBのsidecarだけ。空き容量で断ると、無関係な行き止まりになる。"""
+    def _refuse(*args, **kwargs):
+        raise AssertionError("出力を作らない種別で空き容量を判定してはならない")
+
+    monkeypatch.setattr(server.disk, "_require_disk_space", _refuse)
+    make_recording(unique_id="xena")
+    assert client.post("/api/bulk/queue",
+                       json={"kind": "voice", "unique_id": "xena"}).json()["total"] == 1
+
+
 def test_transcribe_targets_recordings_without_a_transcript(client, server,
                                                             make_recording):
     """済み判定はtranscripts表だけ。文字起こしはfileを作らないので、filesystemからは判別できない。"""

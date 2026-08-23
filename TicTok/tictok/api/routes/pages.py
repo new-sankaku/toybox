@@ -48,6 +48,11 @@ async def jobs_page() -> FileResponse:
     return _page_response("jobs.html")
 
 
+@router.get("/assets")
+async def assets_page() -> FileResponse:
+    return _page_response("assets.html")
+
+
 @router.get("/ops")
 async def ops_page() -> FileResponse:
     return _page_response("ops.html")

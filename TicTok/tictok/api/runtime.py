@@ -406,16 +406,32 @@ logger.info(
     extra={"event": "process.instance_lock_acquired",
            "ctx": {"path": get_db_path() + ".lock"}},
 )
+_recovery_ms: dict = {}
+
+
+def _timed(name: str, fn):
+    """復旧の各段の所要時間を控えながら実行する。
+
+    合計だけを記録していたため、44.6秒かかった起動(2026-08-21 08:41)で「20秒がどの段の
+    ものか」がlogから答えられなかった。段は4つしかなく、どれも1回しか呼ばれない。
+    """
+    started = time.perf_counter()
+    try:
+        return fn()
+    finally:
+        _recovery_ms[name] = round((time.perf_counter() - started) * 1000.0, 1)
+
+
 # batched writerの停滞/クラッシュ/再起動でbuffer滞留分が失われても、取り込み時にdiskへ
 # 追記した耐久journalから欠損eventを復元する。stale finalizeより前に走らせ、復元済みeventで
 # stats/bucketが再構成された状態にする。
-_journal_summary = storage.recover_from_journal()
-_stale_sessions = storage.cleanup_stale_sessions()
+_journal_summary = _timed("journal", storage.recover_from_journal)
+_stale_sessions = _timed("stale_sessions", storage.cleanup_stale_sessions)
 # cleanup_stale_sessionsが長らくbucketを作らなかった時代のsessionを埋める。回収済みの行は
 # もうcleanupの対象条件(connecting/connected/reconnecting)に入らないので、上の修正だけでは
 # 過去分が永久に欠けたままになる。
-_backfilled_buckets = storage.backfill_missing_buckets()
-_stale_recordings = storage.mark_stale_recordings()
+_backfilled_buckets = _timed("backfill_buckets", storage.backfill_missing_buckets)
+_stale_recordings = _timed("stale_recordings", storage.mark_stale_recordings)
 # One line for the whole crash-recovery step. Each call already reports its own
 # anomalies; this states the outcome and its cost, which is what tells a "why did the
 # server take a minute to come up" question apart from a "what did it repair" one.
@@ -425,9 +441,15 @@ storage.record_ops_event(
     "起動時の復旧: journalから {sessions}件のsessionを復元（event +{events}件、"
     "viewer +{viewers}件）、残っていた {stale_sessions}件のsessionを確定、"
     "{stale_recordings}件の録画を中断扱いにしました"
-    "（bucketを補完したsession {backfilled}件）".format(
+    "（bucketを補完したsession {backfilled}件 / 内訳 journal {t_journal:.1f}s・"
+    "session確定 {t_stale:.1f}s・bucket補完 {t_backfill:.1f}s・録画 {t_rec:.1f}s）".format(
         stale_sessions=_stale_sessions, stale_recordings=_stale_recordings,
-        backfilled=_backfilled_buckets, **_journal_summary
+        backfilled=_backfilled_buckets,
+        t_journal=_recovery_ms["journal"] / 1000.0,
+        t_stale=_recovery_ms["stale_sessions"] / 1000.0,
+        t_backfill=_recovery_ms["backfill_buckets"] / 1000.0,
+        t_rec=_recovery_ms["stale_recordings"] / 1000.0,
+        **_journal_summary
     ),
     duration_ms=round((time.perf_counter() - _startup_started) * 1000.0, 1),
     detail={
@@ -437,6 +459,9 @@ storage.record_ops_event(
         "stale_sessions": _stale_sessions,
         "stale_recordings": _stale_recordings,
         "backfilled_bucket_sessions": _backfilled_buckets,
+        # 段ごとの所要時間。合計(duration_ms)にはstorageの初期化とmigrationも入るので、
+        # ここの4つを足しても合計にはならない。
+        "step_ms": dict(_recovery_ms),
     },
 )
 settings = Settings(storage)

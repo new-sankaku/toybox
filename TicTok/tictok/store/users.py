@@ -39,7 +39,7 @@ class UsersMixin:
     """User名寄せ(identity)・配信者handle解決・Fan台帳・発掘候補。
 
     lockもDB接続も持たない。すべて Storage が所有する self._conn /
-    self._lock / self._read_lock を借りる(mixinとして Storage に混ぜられる前提)。
+    self._lock / _read_connection() を借りる(mixinとして Storage に混ぜられる前提)。
     契約の詳細はmodule docstringを参照。
     """
 
@@ -327,7 +327,10 @@ class UsersMixin:
             " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
             " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
             " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
-            " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar,"
+            # avatarは event_strings へinternしてある。**MAX(e.user_avatar_id) にしては
+            # ならない** ―― 元のMAXは値そのものの辞書順最大で、idの最大(=最初に見た順)とは
+            # 別物である。値へJOINしてから MAX を採ることで、旧と同じ行が出る。
+            " COALESCE(NULLIF(u.avatar, ''), MAX(av.value)) AS avatar,"
             " u.gifter_level AS gifter_level, u.fans_level AS fans_level,"
             # この視聴者自身が配信者である場合のリーグ帯(取れていなければ空=非表示)。
             f" {display_league_sql('u')} AS league,"
@@ -337,6 +340,7 @@ class UsersMixin:
             " MIN(e.time) AS first_gift, MAX(e.time) AS last_gift"
             " FROM events e JOIN sessions s ON s.id = e.session_id"
             " LEFT JOIN users u ON u.identity_key = e.identity_key"
+            " LEFT JOIN event_strings av ON av.id = e.user_avatar_id"
             " WHERE e.kind = 'gift'" + exclude +
             " GROUP BY e.identity_key, s.unique_id",
             NON_IDENTITY_KEYS,

@@ -36,6 +36,26 @@ group_change_content の方だった。結果、窓は「最初に繋いだ時�
   - 現在の接続者集合は呼び出し側(collector)が ``current_peers`` で渡す。判定に外部状態を
     持ち込むのはここだけで、渡されなければ「判らない」を返し状態を変えない。
 
+**v4のrule(v3からの差分)**: 退出/取消/拒否で出たsnapshotは**状態を語っていない**。
+  - group_change_content の ``source`` は、そのsnapshotが**何の操作で出たか**を名乗る
+    (``click_quick_leave_button`` / ``leave_with_user_click_disconnect`` /
+    ``REPLY_STATUS_REFUSE_*`` 等)。退出のsnapshotは、抜ける本人をまだ LINKED のまま
+    載せた**変化前のroster**である。v3はこれを「own LINKED + 他室LINKED」と読んで
+    コラボが終わった瞬間に窓を開き、次のsnapshotが届くまで(実測で最長1時間40分)
+    ソロ時間をコラボとして数えていた。
+  - v4: 退出系の source が付いた group_change_content では状態を変えない。真の状態は
+    直後の別のcontent(finish/join_direct)か、次の通常snapshotが名乗る。
+  - ただし ``leave_with_user_click_disconnect`` は**自分が切った**ことの名乗りなので、
+    rosterを読まずに切断として扱う。これを無視すると、コラボが終わっても閉じる合図が
+    無くなり、次のsnapshotまで窓が開いたままになる(実測47分)。
+  - list_content / join_direct_content で、相手が**自室に居る**entryはco-hostではない
+    (自室へゲストを上げるmulti-guest)。group_change側は自室entryを is_own として既に
+    除いており、こちらだけ残っていた。実測1件(35分)を映像で確かめたところ、画面は
+    最後まで配信者ひとりで、共演は映っていなかった。
+  - 録画47本(33.3GB・映像38.36h)との照合で、幻が 7.68h → 0.11h、取りこぼしは
+    0.87h → 0.88h(不変)。退出の当事者をrosterから外して読む案も試したが、group
+    コラボで本物の窓まで閉じ、取りこぼしが8.50hへ悪化したので採らない。
+
 判定は純関数にしてある: 実proto objectでもtestのstubでも getattr で同じように読めるため、
 collectorを起動せずにruleだけを検証できる。
 """
@@ -44,10 +64,28 @@ from typing import Optional
 # 保存済みcollab窓がどのruleで作られたかのversion。ruleを変えたら+1する。
 # 分析側はこの値が現行と一致する窓だけを集計対象にする(旧ruleの窓は過大計上で、
 # 補正する材料もDBに残っていないため、混ぜずに捨てる)。
-COLLAB_WINDOW_VERSION = 3
+# v3の窓は samples/raw の生captureから scripts/rebuild_collab_windows.py で作り直せる。
+COLLAB_WINDOW_VERSION = 4
 
 # group_change_content の status。TikTokは文字列enum名で送ってくる。
 _GROUP_STATUS_LINKED = "GROUP_STATUS_LINKED"
+
+# source が名乗る「このsnapshotを出した操作」のうち、誰かが抜ける/断る側のもの。
+# TikTokは固定enumではなく実装内部の識別子(``click_quick_leave_button`` 等)も混ぜて
+# 送るため、完全一致ではなく部分一致で拾う。実配信の生captureに現れた値:
+#   click_quick_leave_button / leave_with_user_click_disconnect / inviteCancel_new_arc /
+#   applyCancel_new_arc / resetGroupData_cancelAll_cross_arc / sdk_timeout /
+#   clear_cross_states:CrossStateToIdle:userLeaveTriggerToIdle /
+#   SOURCE_TYPE_*[REPLY_STATUS_REFUSE_*] / SOURCE_TYPE_*[REPLY_STATUS_REJECT]
+_LEAVE_SOURCE_MARKS = (
+    "leave", "cancel", "refuse", "reject", "timeout", "toidle", "disconnect",
+)
+
+# 退出系のうち、**自分が切った**ことを名乗るもの。rosterは変化前のままだが、この名乗り
+# 自体が切断の通知である。実配信の生captureに4件あり、4件とも映像のコラボはその1〜4秒後に
+# 終わっていた。似た値の ``clear_cross_states:...userLeaveTriggerToIdle`` は3件中1件しか
+# 終端と一致せず(1件は730秒後、1件はコラボ中ですらない)、合図として使えないので採らない。
+_OWN_DISCONNECT_MARKS = ("leave_with_user_click_disconnect",)
 
 
 def _uids(all_user) -> list:
@@ -84,6 +122,21 @@ def _party(content) -> tuple:
         if uid or room:
             return uid, room
     return "", ""
+
+
+def _is_own_disconnect(event) -> bool:
+    """このsnapshotが「自分が切った」ことを名乗っているか。"""
+    source = str(getattr(event, "source", "") or "").lower()
+    return any(mark in source for mark in _OWN_DISCONNECT_MARKS)
+
+
+def _is_leave_snapshot(event) -> bool:
+    """このsnapshotが「誰かが抜ける/断る」操作で出たものか。
+
+    ``source`` はpayloadが自分で名乗る発生理由で、退出時のsnapshotは抜ける本人を
+    まだLINKEDのまま載せた変化前のrosterである(実配信の生captureで確認)。"""
+    source = str(getattr(event, "source", "") or "").lower()
+    return any(mark in source for mark in _LEAVE_SOURCE_MARKS)
 
 
 def _explicit_disconnect(event) -> Optional[tuple]:
@@ -141,6 +194,14 @@ def linkmic_state(event, own_user_id: str, own_room_id: str,
     group = getattr(event, "group_change_content", None)
     group_user = getattr(group, "group_user", None) if group is not None else None
     entries = list(getattr(group_user, "user", None) or []) if group_user is not None else []
+    if entries and _is_own_disconnect(event):
+        # 自分の切断の名乗り。rosterは変化前のままなので読まず、切断として扱う。
+        return {"connected": False, "peers": [], "peer_rooms": {},
+                "source": "group_change_content:own_disconnect"}
+    if entries and _is_leave_snapshot(event):
+        # 退出/取消/拒否で出たsnapshotは変化前のrosterを載せている。ここで読むと
+        # コラボが終わった瞬間に「まだ繋がっている」と読み違える。
+        return {**unknown, "source": "group_change_content:leave"}
     if entries:
         own_linked = False
         own_seen = False
@@ -183,7 +244,11 @@ def linkmic_state(event, own_user_id: str, own_room_id: str,
         all_user = getattr(content, "user_list", None) or getattr(content, "all_users", None)
         if all_user is None:
             continue
-        members = [(uid, room) for uid, room in _uids(all_user) if uid != own_user_id]
+        # 相手が**自室に居る**entryはco-hostではない。自室へゲストを上げるmulti-guestで、
+        # group_change側は自室entryを is_own として既に除いている(こちらだけ残っていた)。
+        # 実測1件(35分)を映像で確かめたところ、画面は最後まで配信者ひとりだった。
+        members = [(uid, room) for uid, room in _uids(all_user)
+                   if uid != own_user_id and str(room or "") != own_room_id]
         peers = [uid for uid, _room in members]
         peer_rooms = {uid: room for uid, room in members if room}
         # 空のlinked_listは「もう誰も居ない」。v1はここで窓を開いていた。

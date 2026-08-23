@@ -27,8 +27,10 @@ import logging
 import math
 import os
 import sqlite3
+import sys
 import threading
 import time
+import traceback
 from collections import deque
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -37,6 +39,8 @@ from tictok.core.config import (
     get_perf_enabled,
     get_perf_loop_lag_interval_seconds,
     get_perf_loop_lag_warn_ms,
+    get_perf_stall_sample_enabled,
+    get_perf_stall_sample_ms,
     get_perf_max_routes,
     get_perf_rollup_seconds,
     get_perf_rollup_top,
@@ -425,12 +429,84 @@ def note_loop_lag(lag_ms: float) -> None:
     )
 
 
+# ---- 停止しているloopを外から覗く番人 -----------------------------------------------------
+
+# stackは深い側が犯人に近い。全部出すとlogが読めなくなるので、末尾だけを残す。
+_STALL_STACK_FRAMES = 14
+
+_loop_thread_id = None
+_loop_heartbeat = [0.0]
+_stall_watchdog_started = False
+
+
+def _stall_watchdog() -> None:
+    """event loopが止まっている**最中**に、loop threadのstackを写す番人thread。
+
+    ``note_loop_lag`` はloopが動き出してから呼ばれるので、そこで写しても犯人は既に戻って
+    いる。実測でも停止836件のうち **593件(71%)が「同時刻に処理中のrequestなし」** で、
+    requestの一覧だけでは辿り着けなかった。止まっている間に覗けるのは、そのloopに乗って
+    いない別threadだけである。
+
+    平常時の費用はtickごとの引き算1回。stackを歩くのは停止1回につき1度だけで、同じ停止の
+    間は二度写さない(写した瞬間のframeが全てで、同じ停止を何枚撮っても中身は変わらない)。"""
+    armed = False
+    while True:
+        threshold_ms = get_perf_stall_sample_ms()
+        # 閾値の1/8で見張る。停止の始まりからそのぶん遅れて写ることになるので、粒度は
+        # 閾値に従わせる(独立のつまみを増やしても調整する材料が無い)。
+        time.sleep(max(0.05, threshold_ms / 8000.0))
+        if not (get_perf_enabled() and get_perf_stall_sample_enabled()):
+            continue
+        tid, beat = _loop_thread_id, _loop_heartbeat[0]
+        if tid is None or beat <= 0.0:
+            continue
+        stalled_ms = (time.perf_counter() - beat) * 1000.0
+        if stalled_ms < threshold_ms:
+            armed = True
+            continue
+        if not armed:
+            continue
+        armed = False
+        frames = sys._current_frames().get(tid)
+        if frames is None:
+            stack = ["(loop threadのstackを取得できませんでした)"]
+        else:
+            stack = [line.rstrip() for line
+                     in traceback.format_stack(frames)[-_STALL_STACK_FRAMES:]]
+        inflight = inflight_snapshot()
+        logger.warning(
+            "event loopが%.0fms止まっている最中のstackです（同時刻に処理中: %s）",
+            stalled_ms,
+            " / ".join(f"{row['method']} {row['path']}" for row in inflight[:3])
+            or "処理中のrequestなし",
+            extra={"event": "http.loop_stall_stack",
+                   "ctx": {"stalled_ms": round(stalled_ms, 1),
+                           "threshold_ms": threshold_ms,
+                           "inflight_count": len(inflight),
+                           "stack": stack}},
+        )
+
+
+def _start_stall_watchdog() -> None:
+    global _stall_watchdog_started, _loop_thread_id
+    _loop_thread_id = threading.get_ident()
+    if _stall_watchdog_started:
+        return
+    _stall_watchdog_started = True
+    threading.Thread(target=_stall_watchdog, name="perf-stall-watchdog",
+                     daemon=True).start()
+
+
 async def loop_lag_monitor() -> None:
     """event loopの遅れを測り続ける常駐task。lifespanが起動し、shutdownでcancelされる。"""
     interval = max(0.05, get_perf_loop_lag_interval_seconds())
+    # 番人はこのtaskと同じ生き死にで良いが、loopに乗せると止まった時に一緒に止まるので
+    # thread側に置く。loop threadの身元はここでしか分からない。
+    _start_stall_watchdog()
     while True:
         started = time.perf_counter()
         await asyncio.sleep(interval)
+        _loop_heartbeat[0] = time.perf_counter()
         if not get_perf_enabled():
             continue
         note_loop_lag(max(0.0, (time.perf_counter() - started - interval) * 1000.0))

@@ -17,6 +17,7 @@ from tictok.core import perf
 from tictok.core import layout
 from tictok.record.recorder import sidecar_dir
 from tictok.media.thumbnails import thumbnail_artifact_paths
+from tictok.media.voice import voice_artifact_paths
 from tictok.media.waveform import waveform_artifact_paths
 from tictok.record import hls_pack
 from tictok.record.upscale import upscale_done, upscale_output_path
@@ -192,15 +193,25 @@ def _recording_packed(recording: dict) -> bool:
 _SIDECAR_ARTIFACTS = {
     "waveform_done": waveform_artifact_paths,
     "sprite_done": thumbnail_artifact_paths,
+    "voice_done": voice_artifact_paths,
+}
+
+# sidecarを作るjobの種別 → その済みを表すfact名。sweepと一括が同じ対応を別々に持っていた
+# 頃は、種別を足した側だけが増えて片方が古いまま残る形だった(実際に三項演算子で2種別を
+# 書き分けていて、3つ目を足すと必ずどちらかへ倒れた)。
+SIDECAR_JOB_FACTS = {
+    "waveform": "waveform_done",
+    "sprite": "sprite_done",
+    "voice": "voice_done",
 }
 
 
 def _recording_sidecar_done(recording: dict, fact: str) -> bool:
-    """この録画のsidecar cache(波形 / sprite)が既に在るか。波形・サムネの判定に入ったときだけ
+    """この録画のsidecar cache(波形 / sprite / 声)が既に在るか。その判定に入ったときだけ
     遅延で引き、cache済みfacts dictへ書き戻す(has_hls・packedと同じ流儀)。
 
     見るのは実在だけで、cacheの指紋(mtime+size)までは照合しない。指紋が古いcacheの作り直しは
-    再生画面が要求した時点で生成側が判断する — 起動時sweepの仕事は「一度も作られていない録画を
+    再生画面が要求した時点で生成側が判断する — sweepの仕事は「一度も作られていない録画を
     無くすこと」であって、cacheの鮮度を追いかけることではない。"""
     facts = _recording_fs_facts(recording)
     if fact not in facts:
@@ -250,8 +261,8 @@ def _sidecar_done_in(recording: dict, fact: str, memo: dict) -> bool:
 
 
 def _bulk_sidecar_batch(recordings: list, facts_by_id: dict) -> None:
-    """recordingsのwaveform_done/sprite_doneを、録画ごとのstatではなく **.sidecars を1回
-    scandir** して埋める。波形・サムネの判定に入るときだけ呼ぶ。"""
+    """recordingsのsidecar系factを、録画ごとのstatではなく **.sidecars を1回 scandir** して
+    埋める(_SIDECAR_ARTIFACTSの全て)。それらの判定に入るときだけ呼ぶ。"""
     memo: dict = {}
     for recording in recordings:
         facts = facts_by_id.get(recording["id"])
@@ -402,10 +413,12 @@ def _bulk_hls_batch(recordings: list, facts_by_id: dict) -> None:
 # 一括画面の集計は録画ごとのfile確認を伴うため、pollのたびに走らせない。cacheは要求種別の
 # 組ごとに持つ(reprocessを含む集計と含まない集計は別物)。
 _BULK_STATUS_TTL_SECONDS = 20.0
-# 上限件数。keyは要求種別を並べた文字列なので、正当なkeyは BULK_KINDS(7種)の空でない
-# 部分集合ぶん = 127通りしかない。それでも天井が要るのは、keyが要求文字列から作られていて
+# 上限件数。keyは要求種別を並べた文字列なので、正当なkeyは BULK_KINDS(9種)の空でない
+# 部分集合ぶん = 511通りしかない。それでも天井が要るのは、keyが要求文字列から作られていて
 # ``?kinds=overlay,overlay,...`` のような重複が別keyになるため — 正当な種別だけを並べても
-# 長さの数だけkeyが増える。127の2倍を上限にすれば、通常の利用で捨てることは無く、
+# 長さの数だけkeyが増える。511の2倍を上限にすれば、通常の利用で捨てることは無く、
 # 重複による増殖だけが頭打ちになる。1 entryは実測4,365 byte(配信者3名ぶんの集計)。
-_BULK_STATUS_CACHE_MAX = 256
+# **種別を1つ足すと正当なkeyの数は倍になる**ので、ここも一緒に上げる
+# (test_bulk_status_cache_cap_clears_the_legitimate_key_space が見張っている)。
+_BULK_STATUS_CACHE_MAX = 1024
 _bulk_status_cache: dict = _BoundedCache(_BULK_STATUS_CACHE_MAX)

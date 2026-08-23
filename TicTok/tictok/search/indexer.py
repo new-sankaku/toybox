@@ -14,6 +14,7 @@ mapperを組み直すと録画1本あたりffprobeが走るので、検索が実
 scripts/repair_search_time_axis.py が行う。
 """
 
+import asyncio
 import logging
 import time
 from pathlib import Path
@@ -76,14 +77,22 @@ def build_time_mapper_sync(src: Path, started_at: float, ended_at: Optional[floa
                              _playback_media_pts(src, anchors))
 
 
+def _axis_inputs(src: Path) -> tuple:
+    """mapperの材料(anchors / media->pts)をfileから読む。
+
+    どちらも同じsidecarを開いて解析するfile I/Oで、``plays_from_hls`` の素材判定も
+    filesystemを叩く。async側は必ず ``to_thread`` 経由で呼ぶこと。"""
+    anchors = _load_timing_anchors(src)
+    return anchors, _playback_media_pts(src, anchors)
+
+
 async def build_playback_mapper(src: Path, started_at: float,
                                 ended_at: Optional[float]) -> tuple:
     """wall-clock -> 再生の時間軸(秒)のmapperと、その組み立ての内訳を返す。
 
     commentの秒を作るのも、既存の秒を検算するのも、必ずこの1箇所を通すこと。片方だけが
     違う材料でmapperを組むと、張り直す必要のない録画を「ズレている」と判定する。"""
-    anchors = _load_timing_anchors(src)
-    media_pts = _playback_media_pts(src, anchors)
+    anchors, media_pts = await asyncio.to_thread(_axis_inputs, src)
     info = {"anchors": len(anchors) if anchors else 0,
             "media_pts": len(media_pts) if media_pts else 0,
             "video_duration_seconds": None, "pts_gaps": 0, "pts_pad_seconds": 0.0}
@@ -114,7 +123,10 @@ async def build_playback_mapper(src: Path, started_at: float,
 
 def index_transcript(storage, recording: dict) -> int:
     """録画の文字起こしsegmentをindexへ投入する。segmentのstart/endは文字起こし側で既にmedia軸へ
-    再mapされている(transcription._media_time)ので、そのままvideo_timeにできる。"""
+    再mapされている(transcription._media_time)ので、そのままvideo_timeにできる。
+
+    **同期でstorageを触る**ので、coroutineからは ``to_thread`` 経由で呼ぶこと。
+    get_transcriptもreplace_search_hitsも書き込みlockを待つ。"""
     transcript = storage.get_transcript(recording["id"])
     if transcript is None:
         return storage.replace_search_hits(recording["id"], SOURCE_STT, [])
@@ -294,6 +306,9 @@ def index_laughter(storage, recording: dict, profile: dict,
     共演中の音声には相手の声が乗っており、どの笑いが配信者のものかを音から決める手段が
     無いためで、外した条件は録画へ記録する — 条件を変えたときに、古い条件で張ったindexが
     済みのまま残らないようにする(一括処理の済み判定がこの記録を見る)。
+
+    ``index_transcript`` と同じく**同期でstorageを触る**ので、coroutineからは
+    ``to_thread`` 経由で呼ぶこと(coop_spansのDB読みも含めて全部が書き込みlockを待つ)。
     """
     from tictok.core.config import (get_laugh_audio_threshold,
                                     get_laugh_index_exclude_coop,
@@ -345,21 +360,20 @@ def index_laughter(storage, recording: dict, profile: dict,
     return count
 
 
-async def index_comments(storage, recording: dict, src: Optional[Path] = None) -> int:
-    """録画窓のcommentをindexへ投入する。
+def _write_comment_hits(storage, recording: dict, src: Path, to_pts,
+                        axis_info: dict) -> int:
+    """commentの行を組んでindexへ書き、書いた軸を録画へ記録する。
 
-    eventはrecording窓([started_at, ended_at])で絞る。session内に複数録画がある場合、
-    session全eventを渡すと2本目以降の原点が壊れるため(焼き込みと同じ制約)。"""
-    session_id = recording.get("session_id")
-    if session_id is None:
-        return storage.replace_search_hits(recording["id"], SOURCE_COMMENT, [])
-    if src is None:
-        src = Path(recording["path"])
+    **同期でstorageを触る側**なので、loop上では呼ばないこと(``index_comments`` が
+    ``to_thread`` へ出す)。iter_events・replace_search_hits・set_recording_time_axisは
+    どれもStorageの書き込みlockを待つ。loop上で待つと、待っているのがevent loop自身に
+    なり、この録画のindexが張り終わるまで全requestとWS配信が止まる(実測で中央1.5秒)。
 
+    ``to_pts`` は ``build_playback_mapper`` が返した写像で、閉じた値だけを読む純関数
+    なので別threadから呼んで問題ない。"""
+    session_id = recording["session_id"]
     started_at = recording["started_at"]
     ended_at = recording.get("ended_at")
-    to_pts, axis_info = await build_playback_mapper(src, started_at, ended_at)
-
     # ended_atが無い録画(crashで中断した行・確定の途中で落ちた行)は窓の終わりが決まらない。
     # そのままiter_eventsへ渡すとsession末尾まで開きっぱなしになり、同じsessionの後続録画の
     # commentを丸ごとこの録画のものとして取り込む(焼き込みで同じ形の事故があり、
@@ -407,3 +421,24 @@ async def index_comments(storage, recording: dict, src: Optional[Path] = None) -
                            "next_recording" if window_end is not None else "open")}},
     )
     return count
+
+
+async def index_comments(storage, recording: dict, src: Optional[Path] = None) -> int:
+    """録画窓のcommentをindexへ投入する。
+
+    eventはrecording窓([started_at, ended_at])で絞る。session内に複数録画がある場合、
+    session全eventを渡すと2本目以降の原点が壊れるため(焼き込みと同じ制約)。
+
+    この関数はloop上から呼ばれる(録画の確定callbackと起動時のbackfill)。DBを触る所は
+    ``_write_comment_hits`` へ寄せてthreadへ出し、loop上には ``await`` する材料集めだけを
+    残す。"""
+    session_id = recording.get("session_id")
+    if session_id is None:
+        return await asyncio.to_thread(
+            storage.replace_search_hits, recording["id"], SOURCE_COMMENT, [])
+    if src is None:
+        src = Path(recording["path"])
+    to_pts, axis_info = await build_playback_mapper(
+        src, recording["started_at"], recording.get("ended_at"))
+    return await asyncio.to_thread(
+        _write_comment_hits, storage, recording, src, to_pts, axis_info)

@@ -18,6 +18,7 @@ from tictok.media import clipper
 from tictok.media import concat as concat_mod
 from tictok.media import gift_icons as gi
 from tictok.media import hls_source
+from tictok.media import skip
 from tictok.media import still
 from tictok.media import thumbnails as th
 from tictok.media import waveform as wf
@@ -160,6 +161,61 @@ def test_silence_spans_threshold_is_absolute_full_scale():
     assert wf.silence_spans(profile, threshold_dbfs=-6.0, min_seconds=1.0) == [
         {"start": 0.0, "end": 3.0}
     ]
+
+
+# ---- 無音skip再生 ----
+# 飛ばした声は戻らないので、「飛ばさない側」の条件を1つずつ見る。判定そのものはVAD
+# (media/voice.py)で、ここが見るのは声の列を飛び先へ畳む所である。
+
+
+def test_skip_plan_leaves_a_thicker_margin_before_speech_than_after():
+    # 手前(guard)が厚い。飛んだ先が声の頭に着地すると語頭が消え、消えたこと自体が
+    # 画面に残らない — 聞き手が気付けない唯一の失敗である。
+    plan = skip.skip_plan(60.0, [{"start": 20.0, "end": 30.0}])
+    assert plan["spans"] == [{"start": 0.0, "end": 19.55}, {"start": 30.1, "end": 60.0}]
+    assert plan["guard_seconds"] > plan["lead_seconds"]
+
+
+def test_skip_plan_drops_gaps_shorter_than_the_minimum():
+    # 余裕を引いた後の残りで測る。跳躍そのものが無音より高く付く長さは飛ばさない。
+    speech = [{"start": 10.0, "end": 20.0}, {"start": 20.6, "end": 30.0}]
+    assert skip.skip_plan(30.0, speech)["spans"] == [{"start": 0.0, "end": 9.55}]
+
+
+def test_skip_plan_keeps_reactions_as_content():
+    # 笑い・叫び・拍手は語にならない。飛ばす方式では、その瞬間だけが黙って消える。
+    speech = [{"start": 40.0, "end": 45.0}]
+    plan = skip.skip_plan(60.0, speech, [{"start": 10.0, "end": 12.0}])
+    assert plan["spans"] == [{"start": 0.0, "end": 9.55},
+                             {"start": 12.1, "end": 39.55},
+                             {"start": 45.1, "end": 60.0}]
+    assert plan["reaction_spans"] == 1
+
+
+def test_skip_plan_stays_empty_when_no_voice_was_found():
+    # 声が1つも取れていない録画で全編を飛ばすと、録画が丸ごと消える。
+    plan = skip.skip_plan(60.0, [])
+    assert plan["spans"] == []
+    assert plan["speech_spans"] == 0
+    # 判定に使った値は空でも返す(画面が「なぜ飛ばさないのか」を名乗れないと壊れて見える)
+    assert plan["min_gap_seconds"] == 0.5
+    assert plan["voice_threshold"] == 0.1
+
+
+def test_skip_plan_merges_overlapping_content():
+    # 反応と声が重なる所で区間が二重に立つと、飛び先が声の中へ入り込む。
+    speech = [{"start": 10.0, "end": 20.0}]
+    plan = skip.skip_plan(40.0, speech, [{"start": 15.0, "end": 25.0}])
+    assert plan["spans"] == [{"start": 0.0, "end": 9.55}, {"start": 25.1, "end": 40.0}]
+
+
+def test_effective_rate_counts_only_what_is_actually_skipped():
+    plan = skip.skip_plan(100.0, [{"start": 50.0, "end": 100.0}])
+    assert plan["skip_seconds"] == 49.55
+    assert skip.effective_rate(plan, 1.0) == round(100.0 / 50.45, 2)
+    assert skip.effective_rate(plan, 2.0) == round(100.0 / (50.45 / 2), 2)
+    # 飛ばす所が無ければ倍率は名乗らない(1.0倍と書くと機能が効いたように読める)
+    assert skip.effective_rate(skip.skip_plan(100.0, []), 1.0) is None
 
 
 def test_silent_ratio_clamps_the_window_to_the_profile():

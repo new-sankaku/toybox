@@ -18,8 +18,8 @@ from tictok.api import runtime
 from tictok.api import access_log
 from tictok.api import startup
 from tictok.api.routes import (
-    ai, analytics, bulk, clips, media, monitors, pages, recordings, search, sessions,
-    storage, streamers, system, ws,
+    ai, analytics, assets, bulk, clips, media, monitors, pages, recordings, search,
+    sessions, storage, streamers, system, ws,
 )
 from tictok.core.config import get_host, get_log_level, get_port
 from tictok.core.jsonio import JsSafeJSONResponse
@@ -42,6 +42,9 @@ app.include_router(media.router)
 # 成果物を作る側(media)の直後。/api/clips のGET・DELETEはこちら、POST /api/clips/batch は
 # 投入口なのでmedia側に居る(pathは重なるがmethodが違うので一致判定には効かない)。
 app.include_router(clips.router)
+# 素材(収集時に溜めた画像)は成果物ではなく、成果物の材料。読むだけの層なので、作る側の
+# 後ろへ置く。/api/assets は既存のどのpathとも重ならない。
+app.include_router(assets.router)
 app.include_router(bulk.router)
 app.include_router(search.router)
 app.include_router(ai.router)

@@ -12,13 +12,16 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from tictok.core.battle import battle_type, gift_window_end, gift_window_fallback_duration
-from tictok.core.config import get_laugh_comment_min_w_run
+from tictok.core.config import (get_laugh_comment_min_w_run,
+                                get_pace_reaction_threshold, get_skip_voice_threshold,
+                                get_voice_threshold)
 from tictok.core import laugh_text
 from tictok.record.recorder import ffmpeg_available
 from tictok.media import hls_source
 from tictok.media import laugh_audio
 from tictok.media import smile
 from tictok.media.thumbnails import ensure_sprite, sprite_path
+from tictok.media import pace, skip, voice
 from tictok.media.waveform import (ensure_audio_profile, ensure_waveform, level_peak,
     silence_spans, silent_ratio)
 from tictok.search import indexer
@@ -107,6 +110,9 @@ async def browse_recordings(unique_id: Optional[str] = None, limit: int = 200) -
                 # 名乗らせる(空を返すと画面側がどの状態にも寄せられない)。
                 "review_state": rec.get("review_state") or REVIEW_UNCHECKED,
                 "review_updated_at": rec.get("review_updated_at"),
+                # 録画1本ぶんの覚え書き。列を持たない事実(file名・実体・中断)はhoverで
+                # 名乗るが、これはoperatorが書いて後から読み返す文字なので行に出す。
+                "memo": rec.get("memo") or "",
                 # 実体の種別。filenameは``<stem>.mp4``という身元でしかないので、画面が
                 # 「mp4というfileがある」と読ませないよう、実物が何かを併せて返す。
                 "media": media,
@@ -152,6 +158,24 @@ async def set_recording_review_api(recording_id: int, payload: RecordingReviewRe
         "review_state": updated["review_state"],
         "review_updated_at": updated["review_updated_at"],
     }
+
+
+class RecordingMemoRequest(BaseModel):
+    memo: str
+
+
+@router.patch("/api/recordings/{recording_id}/memo")
+async def set_recording_memo_api(recording_id: int, payload: RecordingMemoRequest) -> dict:
+    """録画1本の覚え書きを書き換える。
+
+    sessionのnote(履歴画面)とは別物である。1つの配信が複数の録画に割れるため、session側へ
+    書くと同じ文が録画の本数ぶん並び、どの録画の話なのかを指せない。"""
+    memo = payload.memo.strip()
+    updated = await asyncio.to_thread(
+        runtime.storage.set_recording_memo, recording_id, memo)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    return {"recording_id": recording_id, "memo": updated["memo"]}
 
 
 @router.get("/api/recordings/{recording_id}/play")
@@ -760,6 +784,84 @@ async def recording_waveform_api(recording_id: int) -> dict:
     result["silences"] = silence_spans(profile)
     result["recording_id"] = recording_id
     return result
+
+
+@router.get("/api/recordings/{recording_id}/pace")
+async def recording_pace_api(recording_id: int) -> dict:
+    """無言を早送りするための速度計画(media/pace.py)。
+
+    「誰か喋っているか」はVAD(media/voice.py)が答える。文字起こしの語の時刻で代用していた版は
+    速い区間の4.4〜43.8%が実際には声で、発声の入りを速いまま流していた — 語の時刻は文字起こしの
+    副産物であって声の測定ではない。VADにしたことで文字起こしも要らなくなった。
+
+    初回は音声を丸ごと読むため長尺で時間がかかる(実測: 40〜84分の録画で6〜13秒、実時間の
+    180〜390倍)。cache済みなら即返る。反応(笑い・叫び・拍手…)のprofileは**在れば使う**だけで
+    ここでは解析しない(録画1本で数十秒かかる)。無くても計画は声だけで成立する。
+    """
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    if not files._recording_source_exists(recording):
+        raise HTTPException(status_code=404, detail="録画fileが存在しません。")
+    path = files._resolved_recording_path(recording)
+    try:
+        profile = await voice.ensure_voice_profile(path)
+    except voice.VoiceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except hls_source.SourceMissing:
+        raise HTTPException(status_code=404, detail="録画fileが存在しません。")
+    speech = voice.speech_spans(profile)
+
+    laugh = await asyncio.to_thread(laugh_audio.load_laugh_profile, path)
+    reactions = (laugh_audio.reaction_spans(laugh, get_pace_reaction_threshold())
+                 if laugh else None)
+    # 尺はprofileが実測した音声の長さを使う。DBのduration_secondsは欠けている録画があり
+    # (実測53/454件)、そこで計画を出せなくなる理由が無い。
+    plan = pace.pace_plan(profile.get("duration_seconds"), speech, reactions)
+    # 反応の列を持たない古いsidecarは「解析済み」と名乗らせない。笑いだけ在る状態を反応まで
+    # 見たことにすると、叫びや拍手が速く流れているのに画面は済んだ顔をする。
+    plan["has_reactions"] = bool(laugh and laugh.get("reaction_probs"))
+    plan["voice_threshold"] = round(get_voice_threshold(), 3)
+    plan["recording_id"] = recording_id
+    return plan
+
+
+@router.get("/api/recordings/{recording_id}/skip")
+async def recording_skip_api(recording_id: int) -> dict:
+    """再生中に飛ばす無音区間(media/skip.py)。
+
+    早送りと同じVAD(media/voice.py)が「誰か喋っているか」を答え、同じ声profileを使う — 判定を
+    音量から移したので、この計画は波形とは無関係に出る(波形がOFFでも飛ばせる)。閾値だけは
+    早送りより厳しい: 速く流すのは取り返せるが、飛ばしたものは戻ってこない。
+
+    初回は音声を丸ごと読むため長尺で時間がかかる(実測: 40〜84分の録画で6〜13秒)。cache済みなら
+    即返る。反応(笑い・叫び・拍手…)のprofileは**在れば使う**だけでここでは解析しない。
+    """
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    if not files._recording_source_exists(recording):
+        raise HTTPException(status_code=404, detail="録画fileが存在しません。")
+    path = files._resolved_recording_path(recording)
+    try:
+        profile = await voice.ensure_voice_profile(path)
+    except voice.VoiceError as exc:
+        # 黙って空の計画を返さない。飛ばす機能で「声が1つも無い」を返すと録画が丸ごと消える。
+        raise HTTPException(status_code=503, detail=str(exc))
+    except hls_source.SourceMissing:
+        raise HTTPException(status_code=404, detail="録画fileが存在しません。")
+    speech = voice.speech_spans(profile, threshold=get_skip_voice_threshold())
+
+    laugh = await asyncio.to_thread(laugh_audio.load_laugh_profile, path)
+    reactions = (laugh_audio.reaction_spans(laugh, get_pace_reaction_threshold())
+                 if laugh else None)
+    # 尺は声profileが実測した音声の長さを使う(DBのduration_secondsは欠けている録画がある)。
+    plan = skip.skip_plan(profile.get("duration_seconds"), speech, reactions)
+    # 反応の列を持たない古いsidecarは「解析済み」と名乗らせない。笑いだけ在る状態を反応まで
+    # 見たことにすると、叫びや拍手を飛ばしているのに画面は済んだ顔をする。
+    plan["has_reactions"] = bool(laugh and laugh.get("reaction_probs"))
+    plan["recording_id"] = recording_id
+    return plan
 
 
 @router.get("/api/recordings/{recording_id}/thumbnails")

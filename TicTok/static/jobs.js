@@ -442,7 +442,7 @@ function kindLabel(domain) {
   return kindLabels[domain] || domain;
 }
 
-// 起動時sweepが自動で積んだjobは、人が投げた覚えが無いまま並ぶ。種別だけを出すと「頼んで
+// sweepが自動で積んだjobは、人が投げた覚えが無いまま並ぶ。種別だけを出すと「頼んで
 // いない処理が動いている」としか読めないので、出所を名乗らせる。
 function kindText(job) {
   const label = kindLabel(job.domain);
@@ -706,7 +706,9 @@ function onMessage(message) {
     // WSのsnapshotはfilterを通っていない直近ぶん。これで置き換えると、serverへ渡した
     // filterで拾い直した古い行が接続のたびに消える。行の出所を1つに保つため取り直す
     // (取り直しが終わるまでは今の一覧をそのまま出しておく)。
-    load();
+    // ただし画面を開いた直後の1通目は、下のload()と同じ台帳を運んでくるだけなので
+    // 取り直さない(印はcommon.jsのconnectWSが付ける)。
+    if (!message.initial) load();
     return;
   }
   if (message.type === "job_update" && message.job) {

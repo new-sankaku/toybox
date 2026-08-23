@@ -58,6 +58,8 @@ import numpy as np
 
 from tictok.core import cancel
 from tictok.core.config import (
+    get_pace_reaction_classes,
+    get_pace_reaction_threshold,
     get_laugh_audio_activation,
     get_laugh_audio_batch,
     get_laugh_audio_classes,
@@ -79,7 +81,8 @@ logger = logging.getLogger("tictok.laugh")
 
 LAUGH_SUFFIX = ".laugh.json"
 # sidecarのschema version。窓の切り方・畳み方・保存する項を変えたら上げる。
-_PROFILE_VERSION = 1
+# v2: 反応(reaction_probs)を同じ推論から併記。再生の速度計画が読む。
+_PROFILE_VERSION = 2
 # modelが学習された取り込みrate。設定値ではなくmodelの契約なので固定する。
 SAMPLE_RATE = 16000
 # pipeからの1回の読み取り量(waveformと同じ約1MB)。
@@ -409,8 +412,13 @@ def _activate(raw: np.ndarray) -> np.ndarray:
     )
 
 
-def _batch_probs(model: _Model, windows: list, indices: list) -> list:
-    """窓の束を1回のsession.runで通し、窓ごとの笑い確率(class最大)を返す。"""
+def _batch_probs(model: _Model, windows: list, groups: list) -> list:
+    """窓の束を1回のsession.runで通し、窓ごとに **class群ごとのmax** を返す。
+
+    ``groups`` はclass indexのlistのlistで、戻りは窓ごとに群と同じ長さのlist。群を複数
+    受けるのは、笑い(切り出し候補)と反応(無言の早送り)が同じ推論から別々の答えを要る
+    ためで、分けて2回走らせるとmodelを2度通すことになる。
+    """
     batch = np.stack(windows).astype(np.float32)
     try:
         with _infer_lock:
@@ -425,13 +433,15 @@ def _batch_probs(model: _Model, windows: list, indices: list) -> list:
         raise LaughAudioError(
             f"modelの出力shapeが (batch, classes) ではありません: {list(raw.shape)}"
         )
-    if max(indices) >= raw.shape[1]:
+    highest = max((max(g) for g in groups if g), default=-1)
+    if highest >= raw.shape[1]:
         raise LaughAudioError(
-            f"label fileのclass数({max(indices) + 1}以上)がmodelの出力数({raw.shape[1]})を"
+            f"label fileのclass数({highest + 1}以上)がmodelの出力数({raw.shape[1]})を"
             "超えています。modelとlabel fileの組み合わせを確認してください。"
         )
     probs = _activate(raw)
-    return [float(v) for v in probs[:, indices].max(axis=1)]
+    columns = [probs[:, g].max(axis=1) for g in groups]
+    return [[float(col[i]) for col in columns] for i in range(probs.shape[0])]
 
 
 def _ffmpeg_args(source) -> list:
@@ -447,7 +457,7 @@ def _ffmpeg_args(source) -> list:
     ]
 
 
-def _scan(source, model: _Model, indices: list, win_samples: int, hop_samples: int,
+def _scan(source, model: _Model, groups: list, win_samples: int, hop_samples: int,
           batch_size: int, on_progress=None) -> tuple:
     """音声をpipeで受けながら窓へ切り、確率列と総sample数を返す。
 
@@ -486,7 +496,7 @@ def _scan(source, model: _Model, indices: list, win_samples: int, hop_samples: i
 
     def flush() -> None:
         if batch:
-            probs.extend(_batch_probs(model, batch, indices))
+            probs.extend(_batch_probs(model, batch, groups))
             batch.clear()
 
     try:
@@ -577,7 +587,10 @@ def _build(src: Path, window: float, hop: float, on_progress=None) -> dict:
     model = _get_model()
     labels = _load_labels()
     classes = get_laugh_audio_classes()
-    indices = _class_indices(labels, classes)
+    # 笑い(切り出し候補)と反応(無言の早送り)は問いが違うので別のclass群で読む。推論は
+    # 1回のままで、畳む先だけを2つ持つ — 分けて走らせるとmodelを2度通すことになる。
+    reaction_classes = get_pace_reaction_classes()
+    groups = [_class_indices(labels, classes), _class_indices(labels, reaction_classes)]
 
     win_samples = int(round(window * SAMPLE_RATE))
     hop_samples = int(round(hop * SAMPLE_RATE))
@@ -592,13 +605,18 @@ def _build(src: Path, window: float, hop: float, on_progress=None) -> dict:
 
     started = time.monotonic()
     with hls_source.ffmpeg_source(src) as source:
-        probs, total = _scan(source, model, indices, win_samples, hop_samples, batch_size,
-                             on_progress=on_progress)
+        rows, total = _scan(source, model, groups, win_samples, hop_samples, batch_size,
+                            on_progress=on_progress)
     duration = total / SAMPLE_RATE
     profile = {
         "interval_seconds": round(hop, 3),
         "duration_seconds": round(duration, 3),
-        "probs": [round(p, _PROB_DECIMALS) for p in probs],
+        "probs": [round(row[0], _PROB_DECIMALS) for row in rows],
+        # 反応(笑い・叫び・息を呑む・拍手…)。再生の速度計画が「速く流してはいけない所」と
+        # して読む。笑いと分けてあるのは問いが違うためで、切り出し候補は「面白かったか」、
+        # こちらは「聞くに値する反応が在るか」を訊いている。
+        "reaction_probs": [round(row[1], _PROB_DECIMALS) for row in rows],
+        "reaction_classes": reaction_classes,
         "window_seconds": round(window, 3),
         "hop_seconds": round(hop, 3),
         "classes": classes,
@@ -611,13 +629,14 @@ def _build(src: Path, window: float, hop: float, on_progress=None) -> dict:
     elapsed = time.monotonic() - started
     logger.info(
         "笑い声profileを作成しました: %s（音声 %.1fs, %d windows）",
-        src.name, duration, len(probs),
+        src.name, duration, len(rows),
         extra={"event": "laugh.built",
-               "ctx": {"src": str(src), "windows": len(probs),
+               "ctx": {"src": str(src), "windows": len(rows),
                        "duration_seconds": profile["duration_seconds"],
                        "window_seconds": profile["window_seconds"],
                        "hop_seconds": profile["hop_seconds"],
-                       "classes": classes, "batch": batch_size,
+                       "classes": classes, "reaction_classes": reaction_classes,
+                       "batch": batch_size,
                        "realtime_factor": round(duration / elapsed, 2) if elapsed > 0 else None,
                        "duration_ms": int(elapsed * 1000)}},
     )
@@ -652,6 +671,8 @@ def _load_cache(src: Path, window: float, hop: float) -> dict:
     if data.get("window_seconds") != round(window, 3):
         return {}
     if data.get("classes") != get_laugh_audio_classes():
+        return {}
+    if data.get("reaction_classes") != get_pace_reaction_classes():
         return {}
     if data.get("activation") != get_laugh_audio_activation():
         return {}
@@ -788,3 +809,64 @@ def excluded_ticks(spans: Optional[list], interval: float,
         hi = min(last, int(_math.ceil(float(span_end) / interval)))
         ticks.update(range(lo, hi))
     return ticks
+
+
+def _spans_over(probs: list, interval: float, threshold: float) -> list:
+    """``threshold`` 以上が続く刻みを区間へ束ねる。刻みは ``[i*interval, (i+1)*interval)``。"""
+    spans: list = []
+    run_start = None
+    for i, prob in enumerate(list(probs) + [None]):
+        hit = prob is not None and prob >= threshold
+        if hit and run_start is None:
+            run_start = i
+        elif not hit and run_start is not None:
+            spans.append({"start": round(run_start * interval, 3),
+                          "end": round(i * interval, 3)})
+            run_start = None
+    return spans
+
+
+def reaction_spans(profile: dict, threshold: Optional[float] = None) -> list:
+    """反応(笑い・叫び・息を呑む・拍手…)が出ている区間 ``[{"start", "end"}]``。
+
+    笑いだけを見ないのは、笑いが「面白かったか」の指標であって「聞くに値する反応が
+    在るか」ではないため。class名は ``TICTOK_PACE_REACTION_CLASSES`` で決まり、profileは
+    その群のmaxを ``reaction_probs`` に持つ(cacheはclass listごと鍵に含む)。
+
+    ``reaction_probs`` を持たない古いsidecarでは空を返す。笑いの列で代用すると、反応を
+    見ているつもりで笑いしか見ていない状態が黙って続く。
+    """
+    probs = profile.get("reaction_probs")
+    interval = profile.get("interval_seconds") or 0
+    if not probs or interval <= 0:
+        return []
+    threshold = (get_pace_reaction_threshold() if threshold is None else threshold)
+    return _spans_over(probs, interval, threshold)
+
+
+def laugh_spans(profile: dict, threshold: Optional[float] = None) -> list:
+    """笑いが出ている区間 ``[{"start": 秒, "end": 秒}]``。
+
+    ``laugh_seconds`` が「窓の中の秒数」を返すのに対し、こちらは位置そのものを返す。
+    再生の速度計画は「どこを内容として扱うか」を要求するので、量ではなく場所が要る。
+
+    刻みは ``interval_seconds`` なので端の分解能もそこまでで、隣り合う刻みは1区間へ束ねる。
+    確率列は生のまま保存してあるため、閾値を変えても再解析は要らない(``_load_cache`` 参照)。
+    """
+    interval = profile["interval_seconds"]
+    probs = profile["probs"]
+    if interval <= 0 or not probs:
+        return []
+    threshold = get_laugh_audio_threshold() if threshold is None else threshold
+    return _spans_over(probs, interval, threshold)
+
+
+def load_laugh_profile(src: Path) -> dict:
+    """既に在る笑い声profileだけを返す(無ければ空dict)。**解析はしない。**
+
+    ``ensure_laugh_profile`` と分けてあるのは、解析が録画1本につき数十秒かかる処理で、
+    利用者が波形を待っている間に走らせてよいものではないため。再生の速度計画は笑いが
+    無くても成立する(語の時刻だけで決まる)ので、ここは在れば使う口に留める。
+    """
+    return _load_cache(Path(src), get_laugh_audio_window_seconds(),
+                       get_laugh_audio_hop_seconds())

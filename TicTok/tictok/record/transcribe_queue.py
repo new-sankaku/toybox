@@ -16,6 +16,12 @@ from tictok.search import indexer
 logger = logging.getLogger(__name__)
 
 
+def _backfill_targets(storage) -> tuple:
+    """backfillの母集合を1回で引く。同期でstorageを触るのでthread側で呼ぶこと。"""
+    return (storage.search_indexed_counts(), storage.transcribed_recording_ids(),
+            storage.recordings_brief())
+
+
 async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) -> dict:
     """検索indexの未構築分を埋める。GPUを使わないのでqueueとは独立に走らせる。
 
@@ -23,21 +29,28 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
       - comment: 収集済みなので、起動時に一度均せば全録画が検索対象になる。
       - 文字起こし: この機能より前に作られたtranscriptはindex経路を通っていない。ここで拾わないと
         「文字起こし済みなのに音声で検索できない」録画が残り続ける。
+
+    起動直後のserverはこのcoroutineと同じloopでrequestを捌いている。storageを触る所は
+    すべて ``to_thread`` へ出す — loop上で書き込みlockを待つと、待っているのがevent loop
+    自身になり、起動直後の画面がindexの張り終わりまで固まる。
     """
-    indexed = storage.search_indexed_counts()
-    transcribed = storage.transcribed_recording_ids()
+    indexed, transcribed, recordings = await asyncio.to_thread(_backfill_targets, storage)
     done = {"comments": 0, "transcripts": 0}
     # 失敗した録画のid。件数だけ数えて中身を捨てると、「検索に出ない録画が
     # ある」ことに誰も気付けない(backfillは起動時に黙って走るため)。
     failed: list = []
-    for recording in storage.recordings_brief():
+    for recording in recordings:
         recording_id = recording["id"]
         sources = indexed.get(recording_id, {})
-        needs_comment = indexer.SOURCE_COMMENT not in sources
+        # sessionを失った録画(実測47本)はcommentのindexを持ちようが無い —
+        # index_comments はsessionが無ければ0行で戻るだけで、次の起動でもまた
+        # 「未index」に見える。行が作れない録画をこの経路の対象にしない。
+        needs_comment = (indexer.SOURCE_COMMENT not in sources
+                         and recording.get("session_id") is not None)
         needs_transcript = recording_id in transcribed and indexer.SOURCE_STT not in sources
         if not needs_comment and not needs_transcript:
             continue
-        full = storage.get_recording(recording_id)
+        full = await asyncio.to_thread(storage.get_recording, recording_id)
         if full is None:
             continue
         try:
@@ -55,7 +68,7 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
             continue
         try:
             if needs_transcript:
-                indexer.index_transcript(storage, full)
+                await asyncio.to_thread(indexer.index_transcript, storage, full)
                 done["transcripts"] += 1
             if needs_comment:
                 await indexer.index_comments(storage, full, path)

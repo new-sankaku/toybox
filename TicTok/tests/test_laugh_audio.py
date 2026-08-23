@@ -85,6 +85,9 @@ def configured(monkeypatch, tmp_path):
     monkeypatch.setenv("TICTOK_LAUGH_AUDIO_MODEL_PATH", str(model))
     monkeypatch.setenv("TICTOK_LAUGH_AUDIO_LABELS_PATH", str(labels))
     monkeypatch.setenv("TICTOK_LAUGH_AUDIO_CLASSES", "Laughter|Giggle")
+    # 反応(無言の早送りが読む群)は同じ推論から一緒に畳む。既定の17 classはこの極小
+    # label fileに無いので、ここでも表に在る名前へ絞る。
+    monkeypatch.setenv("TICTOK_PACE_REACTION_CLASSES", "Laughter|Speech")
     monkeypatch.setattr(la, "_model", None, raising=False)
     monkeypatch.setattr(la, "_model_key", None, raising=False)
     return types.SimpleNamespace(model=model, labels=labels)
@@ -224,8 +227,9 @@ def test_windows_start_on_the_hop_grid_and_the_tail_is_zero_padded(monkeypatch,
     proc = _FakeProc(_pcm([i + 1 for i in range(total)]))
     monkeypatch.setattr(la.subprocess, "Popen", lambda *a, **k: proc)
 
-    probs, decoded = la._scan(_source(tmp_path / "x.mp4"), _model(session),
-                              [1, 3], 32, 16, 3)
+    rows, decoded = la._scan(_source(tmp_path / "x.mp4"), _model(session),
+                             [[1, 3]], 32, 16, 3)
+    probs = [row[0] for row in rows]
 
     assert decoded == total
     # 100 sample / hop 16 → 開始位置 0,16,...,96 の7窓。末尾は0詰めで拾う。
@@ -242,7 +246,7 @@ def test_windows_are_run_in_batches_of_the_configured_size(monkeypatch, configur
     proc = _FakeProc(_pcm([1] * 100))
     monkeypatch.setattr(la.subprocess, "Popen", lambda *a, **k: proc)
 
-    la._scan(_source(tmp_path / "x.mp4"), _model(session), [1], 32, 16, 3)
+    la._scan(_source(tmp_path / "x.mp4"), _model(session), [[1]], 32, 16, 3)
 
     assert [b.shape for b in session.batches] == [(3, 32), (3, 32), (1, 32)]
 
@@ -256,7 +260,8 @@ def test_a_hop_wider_than_the_window_skips_across_chunk_boundaries(monkeypatch,
     monkeypatch.setattr(la.subprocess, "Popen",
                         lambda *a, **k: _FakeProc(_pcm([i + 1 for i in range(200)])))
 
-    probs, total = la._scan(_source(tmp_path / "x.mp4"), _model(session), [1], 32, 64, 3)
+    rows, total = la._scan(_source(tmp_path / "x.mp4"), _model(session), [[1]], 32, 64, 3)
+    probs = [row[0] for row in rows]
 
     assert total == 200
     assert [round(p) for p in probs] == [1, 65, 129, 193]
@@ -271,7 +276,8 @@ def test_a_chunk_that_ends_mid_sample_does_not_shift_the_grid(monkeypatch, confi
     monkeypatch.setattr(la.subprocess, "Popen",
                         lambda *a, **k: _FakeProc(_pcm([i + 1 for i in range(100)])))
 
-    probs, total = la._scan(_source(tmp_path / "x.mp4"), _model(session), [1], 32, 16, 4)
+    rows, total = la._scan(_source(tmp_path / "x.mp4"), _model(session), [[1]], 32, 16, 4)
+    probs = [row[0] for row in rows]
 
     assert total == 100
     assert [round(p) for p in probs] == [1, 17, 33, 49, 65, 81, 97]
@@ -307,11 +313,11 @@ def test_decode_failure_and_silence_are_errors_not_an_empty_profile(monkeypatch,
     monkeypatch.setattr(la.subprocess, "Popen",
                         lambda *a, **k: _FakeProc(b"", b"boom", returncode=1))
     with pytest.raises(la.LaughAudioError):
-        la._scan(_source(tmp_path / "x.mp4"), _model(_FakeSession()), [1], 32, 16, 4)
+        la._scan(_source(tmp_path / "x.mp4"), _model(_FakeSession()), [[1]], 32, 16, 4)
 
     monkeypatch.setattr(la.subprocess, "Popen", lambda *a, **k: _FakeProc(b""))
     with pytest.raises(la.LaughAudioError):
-        la._scan(_source(tmp_path / "x.mp4"), _model(_FakeSession()), [1], 32, 16, 4)
+        la._scan(_source(tmp_path / "x.mp4"), _model(_FakeSession()), [[1]], 32, 16, 4)
 
 
 def test_stderr_is_drained_while_stdout_is_read(monkeypatch, configured, tmp_path):
@@ -321,7 +327,7 @@ def test_stderr_is_drained_while_stdout_is_read(monkeypatch, configured, tmp_pat
     monkeypatch.setattr(la.subprocess, "Popen", lambda *a, **k: proc)
 
     probs, total = la._scan(_source(tmp_path / "x.mp4"), _model(_FakeSession()),
-                            [1], 32, 16, 4)
+                            [[1]], 32, 16, 4)
 
     assert total == 64 and len(probs) == 4
 
@@ -334,9 +340,9 @@ def test_multiple_classes_are_folded_with_max_not_a_sum(monkeypatch, configured)
     session = _FakeSession(fn=lambda batch: raw)
     monkeypatch.setenv("TICTOK_LAUGH_AUDIO_ACTIVATION", "none")
 
-    probs = la._batch_probs(_model(session), [np.zeros(32, dtype=np.float32)], [1, 3])
+    probs = la._batch_probs(_model(session), [np.zeros(32, dtype=np.float32)], [[1, 3]])
 
-    assert probs == [3.0], "多labelの確率を足している"
+    assert probs == [[3.0]], "多labelの確率を足している"
 
 
 def test_logits_become_probabilities_through_the_configured_activation(monkeypatch,
@@ -346,30 +352,30 @@ def test_logits_become_probabilities_through_the_configured_activation(monkeypat
     window = [np.zeros(32, dtype=np.float32)]
 
     monkeypatch.setenv("TICTOK_LAUGH_AUDIO_ACTIVATION", "sigmoid")
-    assert la._batch_probs(_model(session), window, [1]) == [0.5]
+    assert la._batch_probs(_model(session), window, [[1]]) == [[0.5]]
 
     monkeypatch.setenv("TICTOK_LAUGH_AUDIO_ACTIVATION", "softmax")
     with pytest.raises(la.LaughAudioError):
-        la._batch_probs(_model(session), window, [1])
+        la._batch_probs(_model(session), window, [[1]])
 
 
 def test_a_label_file_wider_than_the_model_output_is_an_error(monkeypatch, configured):
     session = _FakeSession(fn=lambda batch: np.zeros((batch.shape[0], 2), dtype=np.float32))
     with pytest.raises(la.LaughAudioError):
-        la._batch_probs(_model(session), [np.zeros(32, dtype=np.float32)], [7])
+        la._batch_probs(_model(session), [np.zeros(32, dtype=np.float32)], [[7]])
 
 
 def test_an_output_that_is_not_batch_by_classes_is_an_error(monkeypatch, configured):
     session = _FakeSession(fn=lambda batch: np.zeros((3, 3, 3), dtype=np.float32))
     with pytest.raises(la.LaughAudioError):
-        la._batch_probs(_model(session), [np.zeros(32, dtype=np.float32)], [1])
+        la._batch_probs(_model(session), [np.zeros(32, dtype=np.float32)], [[1]])
 
 
 def test_a_batch_one_classes_output_is_squeezed_not_rejected(monkeypatch, configured):
     session = _FakeSession(
         fn=lambda batch: np.full((batch.shape[0], 1, 4), 1.0, dtype=np.float32))
     monkeypatch.setenv("TICTOK_LAUGH_AUDIO_ACTIVATION", "none")
-    assert la._batch_probs(_model(session), [np.zeros(32, dtype=np.float32)], [1]) == [1.0]
+    assert la._batch_probs(_model(session), [np.zeros(32, dtype=np.float32)], [[1]]) == [[1.0]]
 
 
 # --------------------------------------------------------------------------- model検査
@@ -447,6 +453,9 @@ def _profile(**over) -> dict:
         "window_seconds": 2.0,
         "hop_seconds": 1.0,
         "classes": ["Laughter", "Giggle"],
+        # 反応は同じ推論から畳んだ別の列。速度計画(media/pace.py)だけが読む。
+        "reaction_probs": [0.10, 0.8, 0.2, 0.01],
+        "reaction_classes": ["Laughter", "Speech"],
         "threshold": 0.35,
         "activation": "sigmoid",
         "sample_rate": la.SAMPLE_RATE,
@@ -500,6 +509,11 @@ def test_the_cache_follows_the_window_classes_activation_and_model(make_recordin
     monkeypatch.setenv("TICTOK_LAUGH_AUDIO_CLASSES", "Laughter")
     assert la._load_cache(mp4, 2.0, 1.0) == {}
     monkeypatch.setenv("TICTOK_LAUGH_AUDIO_CLASSES", "Laughter|Giggle")
+
+    # 反応のclass listも確率そのものを変えるので、鍵に含まれていなければならない。
+    monkeypatch.setenv("TICTOK_PACE_REACTION_CLASSES", "Laughter")
+    assert la._load_cache(mp4, 2.0, 1.0) == {}
+    monkeypatch.setenv("TICTOK_PACE_REACTION_CLASSES", "Laughter|Speech")
 
     monkeypatch.setenv("TICTOK_LAUGH_AUDIO_ACTIVATION", "none")
     assert la._load_cache(mp4, 2.0, 1.0) == {}
@@ -942,6 +956,6 @@ def test_the_real_model_accepts_a_window_of_silence(monkeypatch):
     indices = la._class_indices(labels, config.get_laugh_audio_classes())
     window = int(round(config.get_laugh_audio_window_seconds() * la.SAMPLE_RATE))
     probs = la._batch_probs(model, [np.zeros(model.fixed_samples or window,
-                                             dtype=np.float32)], indices)
+                                             dtype=np.float32)], [indices])
     assert len(probs) == 1
-    assert 0.0 <= probs[0] <= 1.0
+    assert 0.0 <= probs[0][0] <= 1.0

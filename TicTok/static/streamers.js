@@ -2672,9 +2672,23 @@ function renderDismissed(rows) {
 }
 
 // ---- WS: 収集中の更新で選択中の配信者を貼り替える ----
+// monitors/stateは収集中に高頻度で届く。一覧の取り直しはserver側で127〜207msかかるので、
+// 1件ごとに引くと収集の裏で最も重い側へ張り付く。~1秒で合体させて最大1回/秒に抑える
+// (履歴画面のscheduleReloadと同じ作法)。
+let reloadTimer = null;
+function scheduleReload() {
+  if (reloadTimer) return;
+  reloadTimer = setTimeout(() => {
+    reloadTimer = null;
+    loadStreamers();
+  }, 1000);
+}
+
 function handleMessage(msg) {
   if (msg.type === "monitors" || msg.type === "state") {
-    loadStreamers();
+    // 画面を開いた直後の1通目は、末尾のloadStreamers()と同じ内容を運んでくるだけなので
+    // 取り直さない(印はcommon.jsのconnectWSが付ける)。
+    if (!msg.initial) scheduleReload();
   }
   if ((msg.type === "stats" || msg.type === "battles") && msg.monitor === selectedUid) {
     selectStreamer(selectedUid, true);

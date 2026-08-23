@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import logging
 import random
@@ -1163,6 +1164,10 @@ class TikTokCollector:
         self._envelope_index: dict = {}
         # 進行中sessionのbattles/collab_windowsを最後に中間永続化した時刻(定期checkpoint用)。
         self._last_checkpoint_at: float = 0.0
+        # checkpointの書き出しを直列化するlock。DB書き込みはthreadへ出す(_checkpoint_progress)
+        # ので、写しを取った順に書けることを保証しないと、古い写しが新しい写しを
+        # DELETE→INSERTで上書きし得る。
+        self._checkpoint_lock = asyncio.Lock()
         # 生LinkLayer captureの記録件数(session内)。上限で頭打ちにする。
         self._linklayer_raw_count = 0
         self._owner_id: str = ""
@@ -1202,6 +1207,11 @@ class TikTokCollector:
         # The idle watchdog uses it to detect a silent half-open connection (host
         # network drop) where connect() never returns and no disconnect fires.
         self._last_data_at: Optional[float] = None
+        # 配信そのものからdataが届いた最後の時刻。``_last_data_at`` はcollector自身が
+        # 書くsystem event(再接続の記録など)でも進むため、「配信が生きていた最後の時刻」
+        # には使えない。実測で、配信が切れた後に13.6時間ぶん再接続を試み続けたsessionが
+        # あり、その間のeventは全部systemでviewer_sampleは0件だった。
+        self._last_stream_at: Optional[float] = None
         self._idle_disconnect = False
         # Reason text for a watchdog-forced reconnect, surfaced by _connect_once so
         # a video-stall reconnect reports its true cause instead of the idle default.
@@ -2108,9 +2118,14 @@ class TikTokCollector:
                            "ctx": {"recorder_state": recorder.state,
                                    "error": recorder.error}},
                 )
-                self._storage.delete_recording(recorder.recording_id)
+                # 録画の行を書き換えるのは書き込みlockを取る操作で、collectorのloopは
+                # 監視画面の配信も回している。loop上で待つと、確定の1回ごとに全画面が
+                # 止まる(doc/EVENT_LOOP_BLOCKING.md)。
+                await asyncio.to_thread(
+                    self._storage.delete_recording, recorder.recording_id)
             else:
-                self._storage.update_recording(
+                await asyncio.to_thread(
+                    self._storage.update_recording,
                     recorder.recording_id,
                     recorder.state,
                     str(recorder.output_path) if recorder.output_path else "",
@@ -2150,7 +2165,8 @@ class TikTokCollector:
         次の録画への再開(_maybe_resume_after_finalize)も落ちる。"""
         if recorder.recording_id is None or recorder.state != STATE_COMPLETED:
             return
-        recording = self._storage.get_recording(recorder.recording_id)
+        recording = await asyncio.to_thread(
+            self._storage.get_recording, recorder.recording_id)
         if recording is None:
             return
         try:
@@ -2555,6 +2571,60 @@ class TikTokCollector:
             )
         self._persist_final()
 
+    def _progress_snapshot(self) -> Optional[dict]:
+        """checkpointへ渡す現状の写しを組む。**収集と同じthread(loop上)で呼ぶこと。**
+
+        battles/collab窓/宝箱/markerはどれも受信handlerが書き換え続けるin-memory stateで、
+        Storageと違ってlockが無い。書き込み側のthreadへliveの参照を渡すと、
+        ``save_*`` のPython側の走査が「書き換わっている途中」を読む — 実測でも、別thread
+        がappendしているlistの走査は同じ呼び出しの中で200件と201件の両方を見た。
+        ``_battle_public`` のように収集中のdictを ``for ... in .values()`` で回す処理を
+        writer threadへ持って行けば、そこは ``dictionary changed size during iteration``
+        で落ちる。宝箱の行は届いた順にfieldを埋めていく(``_record_envelope``)ので、
+        埋まりかけの行が書かれることもある。
+
+        なので写しはloop上で組み、``deepcopy`` でliveのstateから切り離してから渡す。
+        ``_battle_public`` は内側のdictをcopyするが ``**rec`` の残りは浅く、それだけでは
+        切り離せない(opponents/anchor_infoはliveの参照のまま)。"""
+        if self.session_id is None:
+            return None
+        return copy.deepcopy({
+            "session_id": self.session_id,
+            "battles": [self._battle_public(b) for b in self._battles.values()
+                        if not b.get("aborted")],
+            "collab_windows": self._collab_windows_public(),
+            "envelopes": self._envelopes,
+            "markers": self._all_markers(),
+            # 失敗logのためだけの数。writer threadからliveのstateを数えさせないため
+            # 写しへ入れておく。
+            "collab_open": len(self._collab_open),
+        })
+
+    def _write_progress(self, snap: Optional[dict]) -> bool:
+        """写しをDBへ書く。**別threadから呼ばれる**ので、引数のsnap以外は読まないこと。
+
+        書けたかどうかを返す。checkpointの時刻を進めるのは呼び出し側(loop側)の役目で、
+        別threadから self を書き換えないため。best-effortで本流(受信ループ)は止めない。"""
+        if snap is None:
+            return False
+        try:
+            self._storage.save_battles(snap["session_id"], snap["battles"])
+            self._storage.save_collab_windows(snap["session_id"], snap["collab_windows"])
+            self._storage.save_envelopes(snap["session_id"], snap["envelopes"])
+            self._storage.append_markers(snap["session_id"], snap["markers"])
+        except Exception:
+            # 次のcheckpoint/finalizeが同じ内容を全置換で書き直すので自動回復する。
+            logger.warning(
+                "battle/collab窓のcheckpointに失敗しました。次のcheckpointで書き直します",
+                exc_info=True,
+                extra={"event": "collector.checkpoint_failed",
+                       "ctx": {"battles": len(snap["battles"]),
+                               "collab_open": snap["collab_open"],
+                               "collab_windows": len(snap["collab_windows"])}},
+            )
+            return False
+        return True
+
     def _persist_progress(self) -> None:
         """進行中sessionのbattles/collab_windowsをDBへ中間永続化する(finalizeはしない)。
         非graceful終了(クラッシュ/電源断/例外escape)でもBattle窓・Collab窓と、それを窓境界に
@@ -2562,30 +2632,41 @@ class TikTokCollector:
         save_battles/save_collab_windowsはsession単位のDELETE→INSERT全置換で冪等なため、
         未終了窓も終端補完して含めた現状スナップショットで安全に上書きできる。markerだけは
         追記(append_markers)で、dequeから溢れた分を消さない。best-effortで本流(受信ループ)は
-        止めない。"""
-        if self.session_id is None:
-            return
-        try:
-            self._storage.save_battles(
-                self.session_id,
-                [self._battle_public(b) for b in self._battles.values() if not b.get("aborted")],
-            )
-            self._storage.save_collab_windows(self.session_id, self._collab_windows_public())
-            self._storage.save_envelopes(self.session_id, self._envelopes)
-            self._storage.append_markers(self.session_id, self._all_markers())
+        止めない。
+
+        **同期版。このthreadでDBの書き込みlockを待つ。** coroutineからは
+        ``_checkpoint_progress`` を使うこと — loop上で待つと、analytics系が書き込み接続を
+        握っている間(実測1.3秒)そのまま全画面のフリーズになる。"""
+        if self._write_progress(self._progress_snapshot()):
             self._last_checkpoint_at = time.time()
-        except Exception:
-            # 次のcheckpoint/finalizeが同じ内容を全置換で書き直すので自動回復する。
-            logger.warning(
-                "battle/collab窓のcheckpointに失敗しました。次のcheckpointで書き直します",
-                exc_info=True,
-                extra={"event": "collector.checkpoint_failed",
-                       "ctx": {"battles": len(self._battles),
-                               "collab_open": len(self._collab_open),
-                               "collab_windows": len(self._collab_windows)}},
-            )
+
+    async def _checkpoint_progress(self) -> None:
+        """``_persist_progress`` のloop用。写しはloop上で組み、DB書き込みだけthreadへ出す。
+
+        写しを組むのをlockの中に入れているのは、「写しを取った順=書く順」を保つため。
+        外に出すと、先に取った古い写しが後から取った新しい写しをDELETE→INSERTで
+        上書きし得る(窓が一時的に巻き戻る)。写しを組むのはloop上のcopyだけなので、
+        lockを持っている時間はDB書き込みぶんだけである。"""
+        async with self._checkpoint_lock:
+            snap = self._progress_snapshot()
+            if snap is None:
+                return
+            ok = await asyncio.to_thread(self._write_progress, snap)
+        if ok:
+            self._last_checkpoint_at = time.time()
 
     def _persist_final(self) -> None:
+        """sessionの確定。**意図的に同期のまま**残している(loopは塞ぐ)。
+
+        理由は2つ。呼び出しの3箇所のうち2箇所は ``except asyncio.CancelledError`` の中で、
+        そこで ``await`` すると再度cancelを浴びて確定が途中で落ちる(sessionが ended_at
+        未確定のまま残り、以後どこからも書き直されない)。もう1つは、この本体が
+        ``_close_open_collab_windows`` や ``session_id`` のようなin-memory stateを
+        書き換えるので、丸ごとthreadへ出すと収集中のstateを別threadから触ることになる。
+
+        塞ぐのは1 sessionにつき1回(finalize_session末尾の全体解析cache計算を含む)。
+        分けるなら _persist_progress と同じ「写しはloop・書き込みはthread」の形になるが、
+        finalize_sessionはstats/timelineまで受け取るので切り分けは別の作業になる。"""
         if self.session_id is None:
             return
         connected_at = self.stats.get("connected_at")
@@ -2631,7 +2712,7 @@ class TikTokCollector:
     async def _connect_once(self) -> tuple:
         self._idle_disconnect = False
         self._forced_reason = None
-        self._mark_data()
+        self._mark_data(stream=False)
         # room_id was resolved via the browser; passing it (and skipping the
         # live check) keeps connect() off www.tiktok.com, so the WAF that
         # blocks the HTML scrape never touches the websocket path. room_info
@@ -2838,7 +2919,7 @@ class TikTokCollector:
                 and time.time() - self._last_checkpoint_at >= _PROGRESS_CHECKPOINT_INTERVAL_SECONDS
                 and (self._battles or self._collab_open or self._collab_windows)
             ):
-                self._persist_progress()
+                await self._checkpoint_progress()
             if connect_task.done() or self._stop_requested or self.state == STATE_ENDED:
                 continue
             if self._last_data_at is None:
@@ -4102,7 +4183,8 @@ class TikTokCollector:
             before = self._collab_signature()
             if connected and state is None:
                 state = {"start": now, "guests_max": 0, "channel_id": channel_id,
-                         "peers": set(), "now_peers": set(), "peer_rooms": {}}
+                         "peers": set(), "now_peers": set(), "peer_rooms": {},
+                         "opened_by": state_now["source"]}
                 self._collab_open[channel_id] = state
                 self._add_linkmic_marker("collab", "コラボ")
                 logger.info(
@@ -4132,7 +4214,9 @@ class TikTokCollector:
                      if uid in peers}
                 )
             if not connected and state is not None:
-                self._close_collab_window(channel_id, state, now, state_now["source"])
+                # 窓が確定したので即中間永続化(クラッシュ耐性)。
+                if self._close_collab_window(channel_id, state, now, state_now["source"]):
+                    await self._checkpoint_progress()
             if self._collab_signature() != before:
                 # 顔ぶれが変わった時だけstateを配る。LinkLayer eventは接続中ずっと届き続ける
                 # ため、毎回broadcastすると監視画面へsnapshotを撒き散らすことになる。
@@ -4145,21 +4229,39 @@ class TikTokCollector:
                 extra={"event": "collector.collab_handling_failed", "ctx": {}},
             )
 
+    def _open_collab_end(self, now: float) -> float:
+        """開いたままの窓に与える終端: **配信が生きていた最後の時刻**。
+
+        接続中はLinkLayer eventが止まることがあり(実測で最長1時間40分)、切断eventも
+        届かないままコラボが配信終了まで続く。そのため「最後に接続を確認できた時刻」で
+        切ると本物のコラボを取りこぼす(録画47本の照合で 0.87h → 4.12h に悪化した)。
+        逆にsessionの終了時刻をそのまま使うと、配信が切れたのにsession行だけが開いて
+        いた場合(実測13.6h/8.6h、その間viewer_sampleは0件)にその幻の尾を丸ごと
+        コラボへ数える。両方を避けるため、live websocketに最後にdataが届いた時刻
+        (``_last_data_at``)で頭打ちにする。"""
+        last = self._last_stream_at
+        return min(now, last) if last else now
+
     def _close_open_collab_windows(self, now: float) -> None:
-        """session終了時点でまだ開いている窓を、その時刻で閉じて確定させる。
+        """session終了時点でまだ開いている窓を確定させる。
 
         以前は保存せずに捨てていた(終端が実際の切断時刻ではなく「収集が終わった時刻」に
         なるため)。録画18本との照合でその前提が崩れた: コラボを繋いだまま配信が終わる
         録画が3本あり、取りこぼしの648秒がこれだった。終端が実観測でないことは
         ``closed_by`` で名乗るので、後から選り分けられる。"""
+        end = self._open_collab_end(now)
         for channel_id, state in list(self._collab_open.items()):
-            self._close_collab_window(channel_id, state, now, "session_end")
+            self._close_collab_window(channel_id, state, end, "session_end")
 
-    def _close_collab_window(self, channel_id: str, state: dict, now: float, source) -> None:
-        """接続が切れた窓を確定させる。長さ0の窓は残さない(回数だけが持ち上がる)。"""
+    def _close_collab_window(self, channel_id: str, state: dict, now: float, source) -> bool:
+        """接続が切れた窓を確定させる。長さ0の窓は残さない(回数だけが持ち上がる)。
+
+        窓を1つ残したかどうかを返す。永続化をここでやらないのは、この関数がloop上でしか
+        呼ばれないため — checkpointは呼び出し側が ``await`` で出す(``_persist_final``
+        経由の呼び出しはその直後の ``_persist_progress`` が同じ窓を書く)。"""
         self._collab_open.pop(channel_id, None)
         if now <= state["start"]:
-            return
+            return False
         self._collab_windows.append(self._collab_window_record(channel_id, state, now, source))
         logger.info(
             "channel %s でcollabの窓が閉じました（%.0f秒、最大guest %d名、%s）",
@@ -4169,8 +4271,7 @@ class TikTokCollector:
                            "duration_ms": int((now - state["start"]) * 1000),
                            "guests_max": state["guests_max"], "source": source}},
         )
-        # 窓が確定したので即中間永続化(クラッシュ耐性)。
-        self._persist_progress()
+        return True
 
     def _collab_window_record(self, channel_id: str, state: dict, end: float,
                               closed_by: str = "") -> dict:
@@ -4185,6 +4286,7 @@ class TikTokCollector:
             "guests_max": state["guests_max"],
             "version": COLLAB_WINDOW_VERSION,
             "peers": sorted(state.get("peers") or ()),
+            "opened_by": state.get("opened_by") or "",
             "closed_by": closed_by or "",
         }
 
@@ -4309,12 +4411,25 @@ class TikTokCollector:
         return {"nickname": nickname or unique_id, "unique_id": unique_id, "avatar": avatar}
 
     def _collab_windows_public(self) -> list:
-        """確定済み窓のみ。
+        """確定済み窓＋進行中の窓(暫定の終端つき)。
 
-        進行中の中間永続化(_persist_progress)ではまだ開いている窓を含めない — 終端が
-        決まっていないためで、次のcheckpointが全置換で書き直す。session終了時は
-        ``_close_open_collab_windows`` が先に走り、開いていた窓はそこで確定している。"""
-        return list(self._collab_windows)
+        開いている窓もその時点の終端で書く。以前は確定済みだけを書いており、graceful
+        終了なら ``_close_open_collab_windows`` が先に走るので漏れは無い前提だった。
+        実際にはserverの再起動・強制終了でその前提が崩れ、開いていた窓はメモリごと
+        消えていた(sessionは起動時復旧が確定させるが、in-memoryの窓は知らない)。
+        実測で38 sessionのうち13 sessionが末尾の窓を丸ごと失っていた。
+
+        終端は ``_open_collab_end`` と同じ「配信が生きていた最後の時刻」。次のcheckpointが
+        全置換(save_collab_windowsはsession単位のDELETE→INSERT)で書き直すので、
+        窓が伸びれば上書きされ、閉じれば確定形に置き換わる。"""
+        windows = list(self._collab_windows)
+        end = self._open_collab_end(time.time())
+        for channel_id, state in self._collab_open.items():
+            if end > state["start"]:
+                windows.append(
+                    self._collab_window_record(channel_id, state, end, "open")
+                )
+        return windows
 
     async def _on_battle(self, event: LinkMicBattleEvent) -> None:
         self._dump_battle_raw("LinkMicBattle", event)
@@ -4364,7 +4479,7 @@ class TikTokCollector:
             await self._stop_opponent_listeners(battle_id)
             # Battleが確定(FINISH/abort)した時点で窓が固定されるので即中間永続化する。
             # クラッシュ前でも確定済みBattleと貢献がDBに残る。
-            self._persist_progress()
+            await self._checkpoint_progress()
         else:
             logger.info(
                 "battle %s が進行中です（action=%s、相手host %d名）",
@@ -6128,7 +6243,8 @@ class TikTokCollector:
         return sec
 
     async def _record(self, kind: str, payload: dict, create_time: Optional[float] = None) -> None:
-        self._mark_data()
+        # systemはcollector自身の記録で、配信から届いたdataではない。
+        self._mark_data(stream=kind != "system")
         self.stats["events_total"] += 1
         entry = {"kind": kind, "time": time.time(), "create_time": create_time, **payload}
         # 受信eventの逐一trace。全event種が通る最高頻度pathなので level guard は必須で、
@@ -6173,11 +6289,17 @@ class TikTokCollector:
         entry = {"kind": kind, "time": time.time(), **payload}
         await self._broadcast({"type": "event", "data": entry})
 
-    def _mark_data(self) -> None:
+    def _mark_data(self, stream: bool = True) -> None:
         """Record that data just arrived over the live websocket. Resets the idle
         watchdog so an active stream (even a quiet one sending only viewer-count
-        heartbeats) is never mistaken for a frozen connection."""
-        self._last_data_at = time.time()
+        heartbeats) is never mistaken for a frozen connection.
+
+        ``stream`` は「配信そのものから届いたdataか」。collector自身が書くsystem eventと
+        接続直前のmarkはFalseで、watchdogだけを撫でて ``_last_stream_at`` は動かさない。"""
+        now = time.time()
+        self._last_data_at = now
+        if stream:
+            self._last_stream_at = now
 
     async def _notify_state(self) -> None:
         await self._broadcast({"type": "state", "data": self.snapshot()})

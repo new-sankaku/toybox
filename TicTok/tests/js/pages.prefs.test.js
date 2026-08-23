@@ -105,6 +105,11 @@ describe("画面を切り替えても表示設定が残る", () => {
     await survivesNavigation("jobs", "/jobs", { "job-flt-state": "failed" });
   });
 
+  // 種別(左pane)はbuttonの棚なのでこの型に載らない。selectで持つ表示件数だけをここで見る。
+  it("素材: 表示件数が残る", async () => {
+    await survivesNavigation("assets", "/assets", { "as-limit": "200" });
+  });
+
   it("運用log: 重要度が残る", async () => {
     await survivesNavigation("ops", "/ops", { "flt-severity": "error" });
   });

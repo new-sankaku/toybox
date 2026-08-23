@@ -18,7 +18,7 @@ class RecordingsMixin:
     """録画row(recordings表)と、容量・退避の観測。
 
     lockもDB接続も持たない。すべて Storage が所有する self._conn /
-    self._lock / self._read_lock を借りる(mixinとして Storage に混ぜられる前提)。
+    self._lock / _read_connection() を借りる(mixinとして Storage に混ぜられる前提)。
     契約の詳細はmodule docstringを参照。
     """
 
@@ -345,6 +345,21 @@ class RecordingsMixin:
                 "UPDATE recordings SET review_state = ?, review_updated_at = ? WHERE id = ?",
                 (state, time.time(), recording_id),
             )
+            self._conn.commit()
+            if cursor.rowcount <= 0:
+                return None
+            row = self._conn.execute(
+                "SELECT * FROM recordings WHERE id = ?", (recording_id,)).fetchone()
+        return dict(row) if row else None
+
+    def set_recording_memo(self, recording_id: int, memo: str) -> Optional[dict]:
+        """録画1本の覚え書きを書き換え、更新後の行を返す。存在しない録画はNone。
+
+        中身は検証しない(覚え書きなので決まった形が無い)。file名にはならないので、
+        見どころのメモと違って文字種の制約も要らない。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE recordings SET memo = ? WHERE id = ?", (memo, recording_id))
             self._conn.commit()
             if cursor.rowcount <= 0:
                 return None

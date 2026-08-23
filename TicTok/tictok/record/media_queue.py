@@ -142,7 +142,7 @@ def job_payload(row: dict, queue_position: int = 0) -> dict:
         "not_before": row.get("not_before"),
         "filename": row.get("filename"),
         "unique_id": row.get("unique_id"),
-        # 起動時sweepが自動で積んだ行。人が投げた覚えのないjobが並ぶ理由を画面が名乗れる
+        # sweepが自動で積んだ行。人が投げた覚えのないjobが並ぶ理由を画面が名乗れる
         # ようにする(同時実行を別枠で絞っているのもこの印)。
         "sweep": bool(row.get("sweep")),
         "result": row.get("result") or {},

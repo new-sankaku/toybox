@@ -182,7 +182,7 @@ async def transcribe_recording(recording_id: int, corrections: str = "keep") -> 
     # 文字起こしできて録画詳細のbuttonからは404という食い違いになっていた。
     if not files._recording_source_exists(recording):
         raise HTTPException(status_code=404, detail="録画fileが存在しません。")
-    # 起動時sweepが文字起こしのない録画を上限なしで積むので、人が開いた1本はほぼ必ず既に待機列に
+    # sweepが文字起こしのない録画を上限なしで積むので、人が開いた1本はほぼ必ず既に待機列に
     # 居る。ここで409を返すと「押しても何も始まらない」になるため、既にある行へ相乗りし、
     # その1本の順番だけを人の優先度へ上げる(同じ録画に2本は走らせない)。
     policy = media_jobs._corrections_policy({"corrections": corrections})

@@ -16,9 +16,12 @@ def test_tmp_db_has_real_schema(tmp_db, db_read):
     assert {"sessions", "events", "users", "buckets"} <= names
 
     cols = {r["name"] for r in db_read.execute("PRAGMA table_info(events)")}
-    from tictok.storage import _EVENTS_COLUMNS
+    from tictok.store._common import _events_insert_columns
 
-    missing = set(_EVENTS_COLUMNS) - cols
+    # 突き合わせるのは**DBへ書く列**であって、buffer/journalが運ぶ行の形
+    # (_EVENTS_COLUMNS)ではない。internのCONTRACT以降は両者が食い違う — 生の
+    # user_avatar はDBから消え、events側は user_avatar_id を持つ。
+    missing = set(_events_insert_columns(tmp_db._intern_phase)) - cols
     assert not missing, f"migrations did not add: {sorted(missing)}"
 
 

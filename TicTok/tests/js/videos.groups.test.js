@@ -646,18 +646,53 @@ describe("videos.js のグループと見どころ", () => {
     });
   });
 
+  // 記録先は「今どこへ入るか」を持つ1つのbuttonで、選択肢は押した時だけ出す。
+  // 事故の形は「行き先を読めないまま押す」なので、名乗り・選び直し・選んだ後の閉じ方を
+  // 実DOMで確かめる。
   describe("記録先", () => {
-    const chips = () => Array.from(doc.querySelectorAll("#dest-groups .vd-chip"));
+    const destButton = () => doc.getElementById("dest-pick");
+    const panel = () => doc.querySelector(".vd-pick");
+    const items = () => Array.from(doc.querySelectorAll(".vd-pick-item"));
+    const nameOf = (item) => item.querySelector(".vd-pick-name").textContent;
+    const countOf = (item) => item.querySelector(".vd-pick-count").textContent;
+    const choose = (label) => {
+      destButton().click();
+      const item = items().find((el) => nameOf(el) === label);
+      if (!item) throw new Error(`選択listに「${label}」がありません`);
+      item.click();
+    };
 
-    it("選択肢を畳まず並べる(今どこへ入るかが常に見える)", () => {
-      expect(chips().map((c) => c.textContent))
-        .toEqual(["未分類", "神回（3）", "罵倒集（0）", "＋ 新規", "＋ 検索語で作る"]);
-      expect(chips()[0].getAttribute("aria-checked")).toBe("true");
+    it("押すまでは名乗りだけを出す(選択肢で行を埋めない)", () => {
+      expect(panel()).toBeNull();
+      expect(destButton().textContent).toContain("記録先");
+      expect(destButton().textContent).toContain("未分類");
+      expect(destButton().getAttribute("aria-expanded")).toBe("false");
     });
 
-    it("chipを選ぶと以後の追加がそのグループへ入る", async () => {
-      chips()[1].click();
-      expect(chips()[1].getAttribute("aria-checked")).toBe("true");
+    it("押すと選択listが出て、今の行き先に印が付く", () => {
+      destButton().click();
+      expect(panel()).not.toBeNull();
+      expect(destButton().getAttribute("aria-expanded")).toBe("true");
+      expect(items().map(nameOf)).toEqual(["未分類", "神回", "罵倒集"]);
+      // 件数は溜まっている先を取り違えないための目印。未分類にも出す(取りこぼしの数)。
+      expect(items().map(countOf)).toEqual(["1", "3", "0"]);
+      expect(items()[0].getAttribute("aria-selected")).toBe("true");
+      expect(items()[0].querySelector(".vd-pick-tick").textContent).toBe("✓");
+      // 数件しか無いうちは絞り込み欄そのものが邪魔になる。
+      expect(doc.querySelector(".vd-pick-filter")).toBeNull();
+    });
+
+    it("グループを作る入口も同じ面に置く(選ぼうとして初めて無いことに気付くため)", () => {
+      destButton().click();
+      expect(Array.from(doc.querySelectorAll(".vd-pick-act")).map((b) => b.textContent))
+        .toEqual(["＋ 新規グループ", "＋ 検索語で作る"]);
+    });
+
+    it("選ぶと以後の追加がそのグループへ入り、listは閉じる", () => {
+      choose("神回");
+      expect(panel()).toBeNull();
+      expect(destButton().getAttribute("aria-expanded")).toBe("false");
+      expect(destButton().textContent).toContain("神回");
       expect(win.currentAddGroupId()).toBe(1);
       // 確認はtoastへ出す。player-statusは切り出しpathやerrorの置き場で、記録先を
       // 変えただけで復元できない出力pathが消えてはいけない。
@@ -667,15 +702,67 @@ describe("videos.js のグループと見どころ", () => {
       expect(win.localStorage.getItem("tictok.videos.cutGroup")).toBe("1");
     });
 
+    it("開いている間にもう一度押せば、選ばずに閉じられる", () => {
+      destButton().click();
+      expect(panel()).not.toBeNull();
+      destButton().click();
+      expect(panel()).toBeNull();
+      expect(win.currentAddGroupId()).toBeNull();
+    });
+
+    // グループが十数件まで増えても、目で拾えないぶんは打鍵で絞る。
+    it("多いときだけ絞り込み欄を出し、Enterで先頭の候補へ決める", async () => {
+      await page.close();
+      const many = Array.from({ length: 15 }, (_, i) => (
+        { id: i + 1, name: `棚${i + 1}`, memo: "", created_at: i }
+      ));
+      many[4].name = "歌枠";
+      await open({ "/api/groups": { items: many }, "/api/bookmarks": { items: [] } });
+      destButton().click();
+      const box = doc.querySelector(".vd-pick-filter");
+      expect(box).not.toBeNull();
+      expect(items()).toHaveLength(16);
+
+      box.value = "歌";
+      box.dispatchEvent(new win.Event("input"));
+      expect(items().filter((el) => !el.hidden).map(nameOf)).toEqual(["歌枠"]);
+
+      box.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(panel()).toBeNull();
+      expect(win.currentAddGroupId()).toBe(5);
+      expect(destButton().textContent).toContain("歌枠");
+    });
+
+    // 再生に追従するコメント欄・文字起こし欄は、1行進むたびに自分のscrollTopを動かす。
+    // これで選択listが閉じていた頃は、観ながら記録先を選ぶことができなかった。
+    it("別の枠のscrollでは閉じない(再生追従で消えない)", () => {
+      destButton().click();
+      expect(panel()).not.toBeNull();
+      doc.getElementById("comments")
+        .dispatchEvent(new win.Event("scroll", { bubbles: false }));
+      expect(panel()).not.toBeNull();
+      doc.querySelector(".vd-pick-list")
+        .dispatchEvent(new win.Event("scroll", { bubbles: false }));
+      expect(panel()).not.toBeNull();
+    });
+
+    // 閉じる理由は起点が動くこと。頁ごと動けば面の居場所は嘘になる。
+    it("起点を載せた枠がscrollすれば閉じる(面の位置が嘘になるため)", () => {
+      destButton().click();
+      expect(panel()).not.toBeNull();
+      doc.dispatchEvent(new win.Event("scroll", { bubbles: false }));
+      expect(panel()).toBeNull();
+    });
+
     it("記録先は上段tabの表示選択とは別物(見る場所と入れる場所は独立)", () => {
-      chips()[1].click();
+      choose("神回");
       tabsOf("marks-groups")[3].click();
       expect(state().groupSel).toBe("2");
       expect(win.currentAddGroupId()).toBe(1);
     });
 
     it("消えたグループを指したままにしない", async () => {
-      chips()[1].click();
+      choose("神回");
       tabsOf("marks-groups")[2].click();
       expect(state().groupSel).toBe("1");
       // 「神回」が消えた状態で引き直す。
@@ -683,10 +770,11 @@ describe("videos.js のグループと見どころ", () => {
       await page.run("refreshGroupData()");
       expect(win.currentAddGroupId()).toBeNull();
       expect(state().groupSel).toBe("");
+      expect(destButton().textContent).toContain("未分類");
     });
 
     it("取得に失敗しても手元のlistは捨てない(消えたと誤認させない)", async () => {
-      chips()[1].click();
+      choose("神回");
       tabsOf("marks-groups")[2].click();
       serve(() => { throw new Error("network down"); });
       const failure = await page.run("refreshGroupData()");

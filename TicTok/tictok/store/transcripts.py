@@ -10,7 +10,7 @@ bookmark(人)は別tableだが、いずれもrecording_idと秒数を鍵にし�
 なっていたので表ごと畳んだ。
 
 lock契約: lock保持前提のmethodは無い。各methodが自分で self._lock を取る。
-  search_scenes と search_hit_groups は _read_connection() 側(self._read_lock)を使う。
+  search_scenes と search_hit_groups は _read_connection() 側を使う。
 """
 import json
 import time
@@ -91,7 +91,7 @@ class TranscriptsMixin:
     """文字起こし・横断検索index・切り出し候補・見どころ・一括文字起こしqueue。
 
     lockもDB接続も持たない。すべて Storage が所有する self._conn /
-    self._lock / self._read_lock を借りる(mixinとして Storage に混ぜられる前提)。
+    self._lock / _read_connection() を借りる(mixinとして Storage に混ぜられる前提)。
     契約の詳細はmodule docstringを参照。
     """
 
@@ -202,7 +202,7 @@ class TranscriptsMixin:
     def replace_search_hits(self, recording_id: int, source: str, rows: list) -> int:
         """1録画・1source分のindexを差し替える。external content FTSはcontent表を
         DELETEしただけでは索引が残るので、必ず先に'delete'commandで索引を抜く。"""
-        # 表示名の読み出しは _read_lock 側なので、self._lock を取る前に済ませる
+        # 表示名の読み出しは _read_connection() 側なので、self._lock を取る前に済ませる
         # (lockの入れ子は _lock -> _buf_lock の一方向しか存在しない)。宛先を持つ本文が
         # 1件も無いsource(文字起こし・笑い声)では引かない。
         names = (self.mention_names()

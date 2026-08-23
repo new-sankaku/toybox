@@ -147,7 +147,7 @@ DBのstatusでは排他にならない。ts結合もsweepも「録画中(`status
 |---|---|---|
 | 確定側が名乗る | `recorder.finalizing_scope` / `is_finalizing`(process内のid集合) | 確定の全区間(timing map・検証) |
 | job側が待つ | `_media_job_runner` が `JobDeferred("この録画は確定処理中です。")` | 確定中に流れてきたjob。分単位で解けるので失敗にせず保留 |
-| 起動時の順序 | 起動時sweep(`_startup_sweep_bg`、ts結合・音声波形・サムネ・文字起こし)は復旧taskの完了を待ってから積む / 復旧はjobが掴んでいる録画を次回起動へ回す | 起動直後、復旧とqueueが同時に走り出す窓 |
+| 起動時の順序 | sweep(`_run_sweep`、ts結合・音声波形・サムネ・文字起こし)の1回目は復旧taskの完了を待ってから積む / 復旧はjobが掴んでいる録画を次回起動へ回す | 起動直後、復旧とqueueが同時に走り出す窓 |
 | 画面からの退避 | `_run_relocation` が1本ごとに `is_finalizing` と待機/実行中jobを見て、その録画だけ見送る(理由を失敗一覧に出す) | 手動の退避と、確定・job が重なる窓 |
 
 ## やらないこと

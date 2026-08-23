@@ -2,7 +2,7 @@
 
 `Storage` は1つのSQLite fileに対して **接続とlockを1組だけ** 持つ。methodはdomain別の
 mixin(tictok/store/)へ分けてあるが、mixinは接続もlockも持たない — すべてこのclassの
-self._conn / self._lock / self._read_lock を借りる。分けたのはfileの長さの問題であって、
+self._conn / self._lock / _read_connection() を借りる。分けたのはfileの長さの問題であって、
 所有者を分けたのではない。
 
 なぜ独立classへ分けないのか:
@@ -17,7 +17,7 @@ lockは5本。所有者はすべてこのclassで、取得順は self._lock -> s
 一方向だけが存在する(他は互いに入れ子にしない):
     _lock          書き込み接続 self._conn の直列化
     _buf_lock      batch writerのbuffer(_event_buffer / _viewer_buffer / _pending_users)
-    _read_lock     重い集計read専用接続 _LockedReader の直列化
+    _reader        重い集計read専用の接続pool(_LockedReader)。上限は設定で決まる
     _journal_lock  耐久journalのfile handle
     _ops_fail_lock ops_events書き込み失敗の計数
 
@@ -32,12 +32,13 @@ import logging
 import os
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
 from tictok import battle_migration, glove_migration, timemap_migration
 from tictok.core import perf
-from tictok.core.config import get_journal_enabled, get_log_dir
+from tictok.core.config import get_db_read_pool_size, get_journal_enabled, get_log_dir
 
 from tictok.store._common import (
     CONN_INSTRUMENTATION_VERSION,
@@ -55,9 +56,9 @@ from tictok.store._common import (
     _BATTLE_CONTRIB_CACHE_MAX,
     _BATTLE_KEY_CONTRIB_DIAMONDS,
     _EVENTS_COLUMNS,
-    _EVENTS_INSERT_SQL,
     _EXCLUDE_RESTRICTED,
     _EXCLUDE_RESTRICTED_NO_ALIAS,
+    _INTERN_PHASE_NONE,
     _LockedReader,
     _MIGRATION_BACKUP_KEY,
     _OPS_LOG_LEVELS,
@@ -73,7 +74,10 @@ from tictok.store._common import (
     _WRITE_FLUSH_INTERVAL_SECONDS,
     _coop_summary,
     _covering_recording,
+    _events_insert_sql,
     _identity_key,
+    _interned_event_positions,
+    _interned_event_normalizers,
     _migration_versions,
     _opponent_key,
     _session_ids_of,
@@ -88,6 +92,7 @@ from tictok.store.ai_cache import AiCacheMixin
 from tictok.store.ingest import IngestMixin
 from tictok.store.sessions import SessionsMixin
 from tictok.store.users import UsersMixin
+from tictok.store.assets import AssetsMixin
 from tictok.store.gifter_league import GifterLeagueMixin
 from tictok.store.battles import BattlesMixin
 from tictok.store.streamers import StreamersMixin
@@ -118,9 +123,9 @@ __all__ = [
     "_BATTLE_CONTRIB_CACHE_MAX",
     "_BATTLE_KEY_CONTRIB_DIAMONDS",
     "_EVENTS_COLUMNS",
-    "_EVENTS_INSERT_SQL",
     "_EXCLUDE_RESTRICTED",
     "_EXCLUDE_RESTRICTED_NO_ALIAS",
+    "_INTERN_PHASE_NONE",
     "_LockedReader",
     "_MIGRATION_BACKUP_KEY",
     "_OPS_LOG_LEVELS",
@@ -136,7 +141,9 @@ __all__ = [
     "_WRITE_FLUSH_INTERVAL_SECONDS",
     "_coop_summary",
     "_covering_recording",
+    "_events_insert_sql",
     "_identity_key",
+    "_interned_event_positions",
     "_migration_versions",
     "_opponent_key",
     "_session_ids_of",
@@ -154,6 +161,7 @@ class Storage(
     IngestMixin,
     SessionsMixin,
     UsersMixin,
+    AssetsMixin,
     GifterLeagueMixin,
     BattlesMixin,
     StreamersMixin,
@@ -168,6 +176,10 @@ class Storage(
     """単一のDB窓口。分割の理由・lockの所有と取得順はmodule docstringを参照。"""
 
     def __init__(self, db_path: str) -> None:
+        # 起動が遅い日に「schema/migration/退避で何秒使ったか」を名乗れるようにする。
+        # ここは1回しか通らず、migrationの重さは在るdataで変わる(実測: premigrationの
+        # 退避1.4GBだけで16秒の起動があった)。
+        _init_started = time.perf_counter()
         self._db_path = db_path
         # 接続とlockはどちらも計測付き。SQLの実行時間と順番待ちを別々に積むためで、
         # request contextの外(collector・録画・起動sweep)では計測は素通りする。
@@ -176,11 +188,10 @@ class Storage(
         self._conn.perf_phase = "db.write_conn"
         self._conn.row_factory = sqlite3.Row
         self._lock = perf.TimedLock("db.write_wait")
-        # 重い集計read専用の接続。実体は _read_connection が遅延生成し、_read_lockで
+        # 重い集計read専用の接続pool。実体は _read_connection が遅延生成する。上限で
         # 直列化する(_lockとは別物 — 集計が書き込みを待たせないためにこれを分けている)。
         self._reader: Optional[_LockedReader] = None
         self._read_init_lock = threading.Lock()
-        self._read_lock = perf.TimedLock("db.read_wait")
         # 書き込みバッチ用のバッファ(DB lockとは別のlockで保護)。identity_key単位の
         # upsert間引きキャッシュもここで持つ(liveの高頻度取り込みのみ対象)。
         self._buf_lock = threading.Lock()
@@ -189,6 +200,15 @@ class Storage(
         self._viewer_buffer: list = []
         self._pending_users: list = []
         self._user_cache: dict = {}
+        # eventsの重複文字列(avatar / badge)を event_strings のidで持つための状態。
+        # 段階は_migrateが決めて書き込む(そこまでschemaが進んでいない起動では0のまま)。
+        # cacheと採番はwriter threadを起こす前のこの時点では空で、最初のbatchが埋める。
+        self._intern_phase = _INTERN_PHASE_NONE
+        self._interned_positions = _interned_event_positions()
+        self._interned_columns = _interned_event_normalizers()
+        self._string_cache: dict = {}
+        self._next_string_id = None
+        self._events_insert_sql = _events_insert_sql(_INTERN_PHASE_NONE)
         # 終了済みBattleの窓は固定なので貢献集計を1度だけ計算してキャッシュする。
         self._battle_contrib_cache: dict = {}
         # 索引から返信の宛先(@表示名)を外すための既知表示名。読み直しはTTLで間引く
@@ -237,6 +257,13 @@ class Storage(
             if self._has_table("cut_list"):
                 self.merge_cut_list_into_bookmarks()
                 self._conn.commit()
+            # eventsの重複文字列(avatar / badge)を event_strings のidへ畳む。**旧列を落とす**
+            # ので、cut_listの統合と同じくこの区間(退避の後)で行う。冪等・再開可能で、
+            # 進める段階は _INTERN_TARGET_PHASE が決める。
+            intern_stats = self.migrate_event_interning()
+            # avatarの署名queryを落として値をまとめる。**internとは別の判断**(保存する
+            # 値そのものを変える)なので、internが済んだ後の独立した段として置く。
+            strip_stats = self._strip_avatar_signatures_locked()
             # 「この選別ruleでの選別は完走済み」。timemapの選別だけがこれを見る(下記)。
             timemap_selection = str(timemap_migration.SELECTION_VERSION)
             timemap_done = (
@@ -271,16 +298,25 @@ class Storage(
             self._set_maintenance_locked(_MIGRATION_BACKUP_KEY, _migration_versions())
             self._conn.commit()
         self.premigration_backup = premigration_backup
+        # plannerの統計(sqlite_stat1)を採り直す。**writer threadを起こす前**であることに
+        # 意味がある: ANALYZEは実測2.3秒のあいだwrite lockを保持するので、収集が動いている
+        # 間に走らせるとcollectorのdrainがその秒数だけ止まる。ここは誰もこの接続を待って
+        # いない唯一の窓である。毎起動では走らない条件はensure_planner_statsを参照。
+        planner_stats = self.ensure_planner_stats()
         self._writer = threading.Thread(
             target=self._writer_loop, name="storage-writer", daemon=True
         )
         self._writer.start()
+        _init_ms = round((time.perf_counter() - _init_started) * 1000.0, 1)
         logger.info(
-            "storageを初期化しました（db=%s）", db_path,
+            "storageを初期化しました（db=%s, %.1fs）", db_path, _init_ms / 1000.0,
             extra={"event": "storage.initialized",
                    "ctx": {"path": str(Path(db_path).resolve()),
                            "ops_events_pruned": pruned_ops,
+                           "intern": intern_stats, "avatar_strip": strip_stats,
                            "journal_enabled": self._journal_enabled,
+                           "duration_ms": _init_ms,
+                           "planner_stats": planner_stats,
                            **self._db_space_ctx()}},
         )
 
@@ -294,9 +330,10 @@ class Storage(
         書き出し(_drainは同じlockを取る)が止まっていた。WALは書き手1本と読み手複数の同時
         実行を許すので、集計だけを別接続へ逃がして本流と干渉させない。
 
-        接続は1本で、_read_lockで直列化する。threadごとに持てば集計同士も並行になるが、
-        page cacheが接続ごとに積み上がる(to_threadのpoolは数十threadあり、集計は数百MBの
-        表を舐める)。集計は人の操作で走るものなので、互いに待つ側の代償の方が軽い。
+        接続は **上限付きのpool**(既定3本、TICTOK_DB_READ_POOL_SIZE)。threadごとに持つのは
+        駄目で、page cacheが接続ごとに積み上がる(to_threadのpoolは数十threadあり、集計は
+        数百MBの表を舐める) — poolの上限はその心配に当たらない。直列1本をやめた理由と実測は
+        _LockedReader のdocstringに書いてある。
 
         見えるのはcommit済みの内容。writerは0.2秒周期でcommitするため、通常の集計はここで
         足りる。未commitのbufferまで必要とする読み取り(Battle貢献の再構成など)は、これまで
@@ -305,14 +342,17 @@ class Storage(
         """
         with self._read_init_lock:
             if self._reader is None:
-                conn = sqlite3.connect(
-                    f"{Path(self._db_path).resolve().as_uri()}?mode=ro",
-                    uri=True, check_same_thread=False, factory=perf.TimedConnection)
-                conn.perf_phase = "db.read"
-                conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA busy_timeout=5000")
-                conn.execute("PRAGMA cache_size=-65536")
-                self._reader = _LockedReader(conn, self._read_lock)
+                conns = []
+                for _ in range(max(1, get_db_read_pool_size())):
+                    conn = sqlite3.connect(
+                        f"{Path(self._db_path).resolve().as_uri()}?mode=ro",
+                        uri=True, check_same_thread=False, factory=perf.TimedConnection)
+                    conn.perf_phase = "db.read"
+                    conn.row_factory = sqlite3.Row
+                    conn.execute("PRAGMA busy_timeout=5000")
+                    conn.execute("PRAGMA cache_size=-65536")
+                    conns.append(conn)
+                self._reader = _LockedReader(conns)
             return self._reader
 
     def close(self) -> None:

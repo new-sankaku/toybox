@@ -33,7 +33,7 @@ class SessionsMixin:
     """session lifecycle・session単位の読み出し・bucket再構築。
 
     lockもDB接続も持たない。すべて Storage が所有する self._conn /
-    self._lock / self._read_lock を借りる(mixinとして Storage に混ぜられる前提)。
+    self._lock / _read_connection() を借りる(mixinとして Storage に混ぜられる前提)。
     契約の詳細はmodule docstringを参照。
     """
 
@@ -464,15 +464,23 @@ class SessionsMixin:
                 " COALESCE(NULLIF(MAX(e.user_id), ''), u.user_id) AS user_id,"
                 " COALESCE(NULLIF(MAX(e.user_unique_id), ''), u.unique_id) AS unique_id,"
                 " COALESCE(NULLIF(MAX(e.user_nickname), ''), u.nickname) AS nickname,"
-                " COALESCE(NULLIF(MAX(e.user_avatar), ''), u.avatar) AS avatar,"
+                # avatar/badgeは event_strings へinternしてある。**MAX(...\_id) にしては
+                # ならない** ―― 元のMAXは値そのものの辞書順最大で、idの最大(=最初に見た順)
+                # とは別物である。値へJOINしてから MAX を採ることで、旧と同じ行が出る。
+                # NULL(計装前で未計測)はid列もNULL、空文字はevent_stringsに1行を持つので、
+                # 下のNULLIFはinternの前後で同じに働く。
+                " COALESCE(NULLIF(MAX(av.value), ''), u.avatar) AS avatar,"
                 " SUM(e.gift_count) AS gifts, SUM(e.diamonds) AS diamonds,"
                 # Lv/badgeはその時点で変動する属性。users表(最新)へfallbackすると過去の値を
                 # 捏造するため、このSessionのevent(point-in-time)のみ。無ければ非表示。
                 " NULLIF(MAX(e.user_fans_level), 0) AS fans_level,"
                 " NULLIF(MAX(e.user_gifter_level), 0) AS gifter_level,"
-                " NULLIF(MAX(e.user_gifter_badge), '') AS gifter_badge,"
-                " NULLIF(MAX(e.user_member_badge), '') AS member_badge"
+                " NULLIF(MAX(gbv.value), '') AS gifter_badge,"
+                " NULLIF(MAX(mbv.value), '') AS member_badge"
                 " FROM events e LEFT JOIN users u ON u.identity_key = e.identity_key"
+                " LEFT JOIN event_strings av ON av.id = e.user_avatar_id"
+                " LEFT JOIN event_strings gbv ON gbv.id = e.user_gifter_badge_id"
+                " LEFT JOIN event_strings mbv ON mbv.id = e.user_member_badge_id"
                 " WHERE e.session_id = ? AND e.kind = 'gift'"
                 " GROUP BY e.identity_key ORDER BY diamonds DESC, gifts DESC LIMIT 100",
                 (session_id,),

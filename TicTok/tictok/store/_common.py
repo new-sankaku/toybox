@@ -12,14 +12,17 @@ lockにも触れないもの」だけである:
 logger もここが持つ。mixinへ分けた後も log の名前は "tictok.storage" のまま一本に
 保つ必要があるため(module別にlogを抽出する運用が、分割で壊れてはならない)。
 """
+import hashlib
 import json
 import logging
+import queue
 import sqlite3
 from typing import Optional
 
 from tictok.core.battle import BATTLE_TOPOLOGY_VERSION, GLOVE_EVENT_VERSION
 from tictok.record.transcription import TIMEMAP_VERSION
 from tictok.core.intervals import merge_intervals, subtract_intervals, total_span
+from tictok.core import perf
 
 logger = logging.getLogger("tictok.storage")
 
@@ -28,8 +31,13 @@ logger = logging.getLogger("tictok.storage")
 # 重複判定(videos.jsのFRAME_STEP_SECONDS)と同じ幅にしてある。
 CUT_SAME_RANGE_TOLERANCE = 1.0 / 30.0
 
-# events / viewer_samples のINSERT。batch(executemany)と1行隔離(execute)で同一SQLを使うため
-# 定数化する。列順はbuffer済みtupleおよびjournal記録のrowと厳密に一致させること。
+# events / viewer_samples のINSERT。batch(executemany)と1行隔離(同一SQLを1行ずつ)で同じ
+# 列順を使うため定数化する。列順はbuffer済みtupleおよびjournal記録のrowと厳密に一致させること。
+#
+# **これはDBの列名ではなくbuffer/journalが運ぶ行の形である。** intern(下記
+# _INTERNED_EVENT_COLUMNS)を入れた後、DBが持つ列名とはここが食い違う: bufferもjournalも
+# 生の文字列を運び続け、id列への差し替えは書き出し直前(_drain)にだけ起きる。DBへ投げる
+# 列名は _events_insert_sql() が段階から組み立てる。
 _EVENTS_COLUMNS = (
     "session_id", "time", "create_time", "kind", "user_id", "user_unique_id",
     "user_nickname", "identity_key", "user_avatar", "text", "comment", "gift_name",
@@ -48,14 +56,147 @@ _EVENTS_COLUMNS = (
     # collector._extra_payload にあり、NULLは「計装前で未計測」を意味する。
     "extra",
 )
-_EVENTS_INSERT_SQL = (
-    f"INSERT INTO events ({', '.join(_EVENTS_COLUMNS)})"
-    f" VALUES ({', '.join('?' * len(_EVENTS_COLUMNS))})"
-)
 _VIEWERS_INSERT_SQL = (
     "INSERT INTO viewer_samples (session_id, time, create_time, viewers, total_viewers, anonymous)"
     " VALUES (?, ?, ?, ?, ?, ?)"
 )
+
+# ----- eventsの重複文字列のintern ------------------------------------------------------
+# eventsの同じ文字列が何度も行に載る列を、値そのものではなく event_strings のidで持つ。
+# (bufferとjournalが運ぶ生の列名, DBが持つid列名) の対。
+#
+# 実測(2026-08-23, events 1,256,138行)での内訳:
+#   user_avatar        342.1MB / distinct 292,114 — 同じURLが平均4.3回
+#   user_gifter_badge   97.2MB / distinct     14  — Lv別の固定badge画像URL
+#   user_member_badge   74.7MB / distinct     19  — 同上
+# 併せてcopy DBで 1767.6MB -> 1297.1MB(-470.5MB / -26.6%)を実測した。
+#
+# **avatarの伸びは止まらない。** TikTokのavatar URLは署名付き(x-expires/x-signature)で
+# 回転するため、実在88,678人に対して新規のdistinct URLが3,735〜10,540件/日発生する。
+# internで 5.11MB/日 -> 1.30MB/日 へ落ちるが、intern表は1.23MB/日で伸び続ける。
+# badge側は種類が増えないので伸びは実質ゼロで、こちらが本命である。
+_INTERNED_EVENT_COLUMNS = (
+    ("user_avatar", "user_avatar_id"),
+    ("user_gifter_badge", "user_gifter_badge_id"),
+    ("user_member_badge", "user_member_badge_id"),
+)
+# contributor_samplesも同じ形(141,708行 / 39.1MB / distinct 21,689)で、同じ event_strings
+# へ相乗りする。あちらはbatch writerを通らない同期書き込みなのでjournalの心配が無い。
+_INTERNED_CONTRIBUTOR_COLUMNS = (("user_avatar", "user_avatar_id"),)
+
+# migrationの段階。expandとcontractを分けるのは、**旧列を落とすと読み出し側が一斉に
+# 壊れる**ためである(旧列を残したままでは1 byteも減らないので、途中で止まる形にはできない)。
+#   EXPAND   : event_strings とid列が在り、旧列とid列の両方へ書く。読み出しはどちらでも同じ
+#              答えになるので、書き換え済みの読み出し箇所と未着手の箇所が共存できる
+#   CONTRACT : 全行の突き合わせを関門にして旧列を落とし、以後はid列だけへ書く
+_INTERN_PHASE_NONE = 0
+_INTERN_PHASE_EXPAND = 1
+_INTERN_PHASE_CONTRACT = 2
+# db_maintenance表に持つ「今どこまで進んだか」。
+_INTERN_PHASE_KEY = "events_intern_phase"
+
+# **どこまで進めるかの目標。**
+#
+# eventsのavatar/badgeを読む7箇所(users / sessions / maintenance._backfill_users /
+# streamers x4 / battles)はJOIN形へ書き換え済みで、EXPAND段階の実DB(1,256,138行)で
+# 旧列形と同じ答えを返すことを確認してある(doc/DB_INTERN.md)。
+#
+# それでもEXPANDに置いてあるのは、**CONTRACTへ上げるのが「いつ本番のDBから旧列を
+# 落とすか」の決定そのもの**だからである。上げた次の再起動で、退避 -> 全行の突き合わせ
+# -> DROP COLUMN が走り、旧列の値はどこにも残らない。codeが揃ったかどうかとは別に、
+# 実行してよい時機かどうかの判断が要る。
+#
+# 上げるときはこの1行だけを _INTERN_PHASE_CONTRACT にする。上げる前に、旧列を読む形が
+# 1つも残っていないことを必ず確かめること:
+#   grep -rn "MAX(e\.user_avatar)\|MAX(e\.user_gifter_badge)\|MAX(e\.user_member_badge)" tictok/
+_INTERN_TARGET_PHASE = _INTERN_PHASE_CONTRACT
+
+# 既存行のid埋めを何行ずつcommitするか。再開条件は「id列がNULLの行」という述語そのものな
+# ので、途中で落ちてもこの粒度で続きから再開する。operatorが回す値ではない。
+_INTERN_MIGRATE_CHUNK_ROWS = 100000
+
+# 値 -> id のprocess内cacheの上限件数。**hit率のtuningではなくmemoryの天井である。**
+# 実測(直近60万event)では上限を5,000から無制限まで振っても1 batchあたりのDB問い合わせは
+# 12.38 -> 12.32件しか動かない — avatarのURLは署名が回転するので、未hitの大半はどの
+# 大きさのcacheでも持てない初見の値だからである。cache自体は効いていて、cache無しの
+# 31.46件/batchを12.32件へ61%減らす。効かないのは上限の大小だけである。
+# 40,000は実測15.3MB(1 entry 422 byte)で、users表のupsert間引き(_USER_CACHE_MAX)と同値。
+# 捨て方も揃えてある(上限到達時に古い方から1/4、dictの挿入順を利用)。
+_EVENT_STRING_CACHE_MAX = 40000
+
+
+def _events_insert_columns(phase: int) -> tuple:
+    """段階に応じた**DB側の**events列名。_EVENTS_COLUMNS(buffer/journalの行の形)とは
+    CONTRACT以降で食い違う。
+
+    EXPANDでは旧列とid列の両方へ書く(行tupleは生の値 + id 3つで、_EVENTS_COLUMNS より
+    3つ長い)。CONTRACTでは旧列がもう無いので、生の値の位置をidへ差し替えて同じ幅で書く。
+    """
+    if phase >= _INTERN_PHASE_CONTRACT:
+        renamed = {old: new for old, new in _INTERNED_EVENT_COLUMNS}
+        return tuple(renamed.get(c, c) for c in _EVENTS_COLUMNS)
+    if phase >= _INTERN_PHASE_EXPAND:
+        return _EVENTS_COLUMNS + tuple(new for _, new in _INTERNED_EVENT_COLUMNS)
+    return _EVENTS_COLUMNS
+
+
+def _events_insert_sql(phase: int) -> str:
+    """段階に応じたevents INSERTのSQL。値tupleの形は _events_insert_columns と対。"""
+    columns = _events_insert_columns(phase)
+    return (f"INSERT INTO events ({', '.join(columns)})"
+            f" VALUES ({', '.join('?' * len(columns))})")
+
+
+def _interned_event_positions() -> tuple:
+    """_EVENTS_COLUMNS 上での、intern対象列の位置。bufferとjournalの行はこの位置に
+    生の文字列を持ち、書き出し直前にだけidへ差し替わる。"""
+    return tuple(_EVENTS_COLUMNS.index(old) for old, _ in _INTERNED_EVENT_COLUMNS)
+
+
+# 署名を落として保存する列。**internとは別の判断である。** internは同じ文字列を1度だけ持つ
+# 変更で記録の中身を変えないが、こちらは保存する値そのものを変える。
+#
+# avatarのCDN URLは「画像を指すpath」と「取得のたびに変わる署名query」でできている。実測で
+# 1本301 byteのうち162 byteが署名で、URLは48,542種あるのに指している画像は25,020枚しかない。
+# 署名の有効期限は約2日で、保存済みの95.5%(1,190,818/1,246,969)は既に切れている。
+#
+# 落として困らないのは、表示がこの値を使っていないからである。画面は必ず
+# `/api/avatar?u=<URL>&id=<unique_id>` の形で呼び(static/common.js:2167 avatarSrc)、
+# AvatarProxy._load_local は **user_key(=id)のpoolを先に見る**。poolは収集時にcollectorが
+# 実体を保存したもので662,315件あり、URLは参照されない。poolに無い時だけURLでCDNへ行くが、
+# その経路は95.5%が既に期限切れで機能していない。
+#
+# badgeは対象外。Lv別の固定画像で署名が付かず(実測 gifter 14種/member 19種ともquery無し)、
+# 落とす対象が無い。**avatarとbadgeが同じevent_strings行を共有している例が1件ある**ので、
+# 行を書き換えるのではなくavatar側のidを付け替える(維持すべき不変条件)。
+_INTERN_STRIPPED_COLUMNS = frozenset({"user_avatar"})
+# 既存行の付け替えを1度だけ走らせるための世代。上げると次の起動で作り直す。
+_INTERN_STRIP_VERSION = 1
+_INTERN_STRIP_KEY = "events_intern_avatar_stripped"
+
+
+def _value_for_intern(column: str, value):
+    """internする前に値を正規化する。対象外の列と None はそのまま返す。"""
+    if value is None or column not in _INTERN_STRIPPED_COLUMNS:
+        return value
+    head, sep, _ = value.partition("?")
+    return head if sep else value
+
+
+def _interned_event_normalizers() -> tuple:
+    """_interned_event_positions() と同じ並びの、列ごとの正規化関数。"""
+    return tuple(old for old, _ in _INTERNED_EVENT_COLUMNS)
+
+
+def _string_hash(value: str) -> int:
+    """event_strings を引くためのhash。SQLiteのINTEGERに収まる符号付き64bit。
+
+    Pythonのhash()を使わない: PYTHONHASHSEEDでprocess毎に変わるため、DBへ保存すると
+    次の起動で同じ文字列が引けなくなる。blake2bは値が決まればprocessを跨いで不変である。
+    桁数を設定可能にもしない — 変えると保存済みのhashが全て無効になり、「DBの中身と
+    設定が食い違う」状態を作れてしまう。"""
+    digest = hashlib.blake2b(value.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big", signed=True)
 
 # 書き込みは単一writerスレッドでバッチ化する。add_event/add_viewer_sampleはキュー投入で
 # 即returnし、writerがN件または一定間隔でexecutemany+1commitへまとめる。
@@ -109,6 +250,11 @@ _TIMEMAP_SELECTION_KEY = "timemap_selection_version"
 # 「検索の索引を、どの畳み込みrule(normalize.FOLD_VERSION)で作ったか」。索引語そのものが
 # ruleに依存するので、版が上がったら全行を畳み直してFTSを作り直す。
 _SEARCH_FOLD_KEY = "search_fold_version"
+# 「plannerの統計(sqlite_stat1)を、eventsが何行の時点で採ったか」。値はJSONで
+# {"rows": N, "at": epoch}。sqlite_stat1の有無だけでは「在るが古い」を区別できず、
+# かといって毎起動でANALYZEすると2.3秒のwrite lockを無条件に払うことになる。行数の
+# 伸びで測るのは、planを変える要因が「表の大きさとindexの選択性」だからである。
+_ANALYZE_STATE_KEY = "planner_stats_state"
 
 
 # cut_listをbookmarksへ畳んだ版。**表を1つ落とす**ので、この版を上げないと退避を取らずに
@@ -117,8 +263,11 @@ CUT_MERGE_VERSION = 1
 
 
 def _migration_versions() -> str:
+    # internの段階もmarkerへ載せる。**旧列を落とす**破壊的なmigrationなので、段階が上がる
+    # 起動では退避を取り直させる必要がある(EXPANDとCONTRACTで別々に1回ずつ退避が要る)。
     return (f"glove={GLOVE_EVENT_VERSION},topo={BATTLE_TOPOLOGY_VERSION}"
-            f",timemap={TIMEMAP_VERSION},cutmerge={CUT_MERGE_VERSION}")
+            f",timemap={TIMEMAP_VERSION},cutmerge={CUT_MERGE_VERSION}"
+            f",intern={_INTERN_TARGET_PHASE},avstrip={_INTERN_STRIP_VERSION}")
 
 
 OPS_INFO = "info"
@@ -197,6 +346,22 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, kind);
 CREATE INDEX IF NOT EXISTS idx_events_session_kind_time ON events(session_id, kind, time);
+-- eventsの重複文字列(avatar / badge のURL)を1度だけ持つ表。列ごとに表を分けず1つに畳んで
+-- あるので、対象列を増やしてもDDLは増えない(_INTERNED_EVENT_COLUMNS に1行足すだけ)。
+-- kind列を持たないのは意図的で、同じ文字列がavatarとbadgeの両方で使われれば1行を共有する。
+--
+-- value に UNIQUE を張らない理由: valueのUNIQUE indexは実測81.5MB(292k件 x 274 byte)で、
+-- interで回収する294MBの28%をindexが食い潰す。hashのindexなら約4MBで済む。
+-- 引くときは hash で絞ってから **value を実比較** するので、hashが衝突しても別idとして
+-- 正しく扱われる(確率に頼って潰しているのではない)。
+-- 追記のみで行を消さない: 参照している行が在るかを数えるには全参照列を走査する必要があり、
+-- その費用を払う理由が無い(実測で最大の user_avatar でも intern表は1.23MB/日でしか伸びない)。
+CREATE TABLE IF NOT EXISTS event_strings (
+    id INTEGER PRIMARY KEY,
+    hash INTEGER NOT NULL,
+    value TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_event_strings_hash ON event_strings(hash);
 CREATE TABLE IF NOT EXISTS users (
     identity_key TEXT PRIMARY KEY,
     user_id TEXT,
@@ -216,6 +381,11 @@ CREATE TABLE IF NOT EXISTS users (
     league TEXT NOT NULL DEFAULT '',
     league_checked_at REAL
 );
+-- 素材画面のUserアイコン一覧が使う「最近見た順」。列の向きを ORDER BY と一字一句
+-- 揃えてある(last_seen DESC, identity_key ASC) —— 向きが片方でも違うとSQLiteは
+-- indexを順序の充足には使えず、193,360行を毎回並べ直す。identity_keyを載せているのは
+-- last_seenが重複するためで、これが無いとpageを跨いで同じ行が二度出たり抜けたりする。
+CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users(last_seen DESC, identity_key ASC);
 -- リーグ取得の待ち行列。processを跨いで残す必要がある(1件15秒で流すため、再起動で
 -- 消えると当日ぶんが丸ごと落ちる)。1人1行で、取得できた時点で消える。
 CREATE TABLE IF NOT EXISTS league_queue (
@@ -355,6 +525,11 @@ CREATE TABLE IF NOT EXISTS recordings (
     -- 「確認中」が付くと、印が観た事実を指すのか開いた事実を指すのか読めなくなる。
     review_state TEXT NOT NULL DEFAULT 'unchecked',
     review_updated_at REAL,
+    -- 録画1本ぶんの覚え書き。operatorが手で書く文字だけを入れる(自動では何も書かない)。
+    -- sessionのnoteと別に持つのは、この一覧の1行が1録画であるため: 1つの配信が最大12本の
+    -- 録画に割れており(実測)、session側に置くと同じ文がその本数ぶん並ぶ。加えてsessionを
+    -- 失った録画(session_id IS NULL、実測72本)はsession側のメモを持ちようがない。
+    memo TEXT NOT NULL DEFAULT '',
     -- 笑い声indexを最後に張ったときの条件(search.indexer.laugh_index_metaのJSON)。rule版と
     -- 共演の除外設定を持つ。NULLは「まだ張っていない、または条件が分からない」で、
     -- 一括処理(笑い声分析)の済み判定はこの列が現行の条件と一致することを見る ―― 行が
@@ -607,7 +782,7 @@ CREATE TABLE IF NOT EXISTS media_job_queue (
     not_before REAL,
     -- 最初に待機へ戻した時刻。総待ち時間の打ち切り判定に使う。
     deferred_since REAL,
-    -- 人が投げたのではなく起動時sweepが自動で積んだ行。同時実行本数を人の投入と別枠で
+    -- 人が投げたのではなくsweepが自動で積んだ行。同時実行本数を人の投入と別枠で
     -- 絞るために、paramsではなく列で持つ(claimのSQLが1文で判定できる必要がある)。
     sweep INTEGER NOT NULL DEFAULT 0
 );
@@ -694,6 +869,57 @@ CREATE TABLE IF NOT EXISTS storage_scan (
     duration_ms REAL NOT NULL DEFAULT 0,
     payload_json TEXT NOT NULL DEFAULT '{}'
 );
+-- 素材pool(Userアイコン/Giftアイコン/Emote)の走査結果cache。方針はstorage_scanと同じで、
+-- 走査は明示操作のときだけ行い、APIは常にこの表を返す(実測: avatarのpoolは662,315 entryで
+-- 1回1.2〜2.5秒。pageを開くたびに払ってよい費用ではない)。
+--
+-- storage_scanと違い**種別ごとに1行**持つ。走査費用が種別で3桁違い(実測 emote 1ms /
+-- gift_icon 0.2秒 / avatar 2.5秒)、安い2つは一覧を作るついでに数え直せるのに対し、
+-- avatarは一覧がusers表駆動でdirを歩く機会が無いためである。1行cacheに畳むと、安い2つを
+-- 更新するたびにavatarまで数え直すことになり、明示操作へ寄せた意味が消える。
+--
+-- item_count と listable_count は**同じ母集団(diskに在る素材)**を数えた別の値である。
+-- 前者は全点、後者はそのうち名前を辿れる点数で、差が「実体は在るが名乗る名前が無い素材」に
+-- ちょうど一致する。avatarだけこの2つがずれる: file名は sha1(unique_id or nickname) で、
+-- 鍵から人へ戻せるのはusers表に居る人だけだからである(実測 234,480点のうち191,844点、
+-- 差は42,636点)。**users表の行数ではない** —— あちらは「人」の数でcacheを持たない人を
+-- 含むため(実測193,359行)、item_countから引いても素材の数にはならない。
+-- **両方を同じ走査で採る** —— 片方だけが新しい値だと、画面に並ぶ2つの数字がいつの時点の
+-- ものか読めなくなる。
+--
+-- payload_json は種別ごとの付随物。今はgift_iconだけが使い、eventsから引いた
+-- {gift_id: 名前}(実測500ms)を持つ —— 一覧のたびには引けないが、名前が無いと画面がidしか
+-- 名乗れないため、走査と同じ契機で採ってここへ置く。参照先を持たない単独表なので
+-- ON DELETEの伝播は無く、種別ごとに全置換する。
+CREATE TABLE IF NOT EXISTS asset_scan (
+    kind TEXT PRIMARY KEY,
+    scanned_at REAL NOT NULL,
+    duration_ms REAL NOT NULL DEFAULT 0,
+    item_count INTEGER NOT NULL DEFAULT 0,
+    listable_count INTEGER NOT NULL DEFAULT 0,
+    total_bytes INTEGER NOT NULL DEFAULT 0,
+    payload_json TEXT NOT NULL DEFAULT '{}'
+);
+-- Userアイコンの「配信者ごとの出現回数」。asset_scan.payload_json に入れられない唯一の
+-- 集計なので表にする: 配信者×視聴者で、実測93,621行(配信者3人)ある。JSONに畳むと
+-- 1行が数MBになり、一覧を1page出すたびに全部parseすることになる。
+--
+-- streamer='' の行は**全配信者を通した合計**。queryを1本にするために持つ(合計を毎回
+-- GROUP BYで作ると、配信者を選ばない既定の一覧が毎回93,621行を畳むことになる)。
+-- 鍵が identity_key で avatar_key(sha1)でないのは、一覧の1行が「素材」ではなく「人」
+-- だからである(users表と直接joinできる形にしておく)。
+-- 参照先を持たない単独表。走査のたびに全置換するので ON DELETE の伝播も要らない。
+CREATE TABLE IF NOT EXISTS asset_avatar_freq (
+    streamer TEXT NOT NULL,
+    identity_key TEXT NOT NULL,
+    uses INTEGER NOT NULL,
+    PRIMARY KEY (streamer, identity_key)
+);
+-- 「出現の多い順」をindexだけで満たすためのもの。列の向きをORDER BYと揃えてある
+-- (idx_users_last_seen と同じ理由)。これが無いと、その配信者の行(実測で最大62,000行)を
+-- 1page出すたびに並べ直すことになる。
+CREATE INDEX IF NOT EXISTS idx_asset_avatar_freq_uses
+    ON asset_avatar_freq(streamer, uses DESC, identity_key ASC);
 -- 容量の時系列。storage_scanとは役割が違うので別表にする: あちらは「最新の内訳」1行を
 -- 全置換で持つcacheで、増減の履歴が原理的に残らない(予測が出せない)。こちらは追記のみで、
 -- 1行が1時点のsnapshotである。1日1回程度なので行数は年365行規模にしかならない。
@@ -1042,25 +1268,52 @@ class _ReadResult:
 
 
 class _LockedReader:
-    """集計read専用の接続を1本だけ共有するためのwrapper。
+    """集計read専用の接続を**上限付きで**共有するpool。
 
-    executeのたびにlockを取り、行を読み切ってから返す。cursorのまま外へ返すと、まだ
-    読み終えていない結果集合の裏で別threadが同じ接続へqueryを流せてしまう。呼び出し側は
-    sqlite3.Connectionと同じ書き方(``execute(...).fetchall()``)のままでよい。
+    executeのたびに空いている接続を1本借り、行を読み切ってから返す。cursorのまま外へ
+    返すと、まだ読み終えていない結果集合の裏で別threadが同じ接続へqueryを流せてしまう。
+    呼び出し側は sqlite3.Connection と同じ書き方(``execute(...).fetchall()``)のままでよい。
+
+    **かつては1本に直列化していた。** 理由は「threadごとに持つとpage cacheが接続ごとに
+    積み上がる(to_threadのpoolは数十threadあり、集計は数百MBの表を舐める)」であり、これは
+    今も正しい。上限付きのpoolはその心配に当たらない — 接続数は _read_pool_size で決まる
+    数本で、threadの数では増えない。
+
+    直列のままにしなかったのは、直列化の代償が測れる大きさになったからである。配信者画面は
+    profile / cohort / 期間別rankingなどを**同時に**投げるので、直列だと後続は前の合計を
+    待つ。実測(本番の複製・921 battle窓を各threadが舐める):
+
+    | 同時 | 接続1本(直列) | pool | |
+    | ---: | ---: | ---: | ---: |
+    | 1 |  237ms |  209ms | 1.13倍 |
+    | 2 |  458ms |  295ms | 1.55倍 |
+    | 4 | 1001ms |  300ms | **3.33倍** |
+
+    **この判断はcohortのcache化とprofileのJSON parse削減より後でしか成立しない。** それ以前
+    に測ったときはpoolの方が遅かった(profile 1,069 -> 1,511ms) — 数秒のCPU律速な集計が
+    重なると、並べても互いのCPUを食い合うだけだった。先に律速をSQL側へ寄せたので逆転した。
     """
 
-    __slots__ = ("_conn", "_lock")
+    __slots__ = ("_free", "_conns")
 
-    def __init__(self, conn: sqlite3.Connection, lock) -> None:
-        self._conn = conn
-        self._lock = lock
+    def __init__(self, conns, lock=None) -> None:
+        # lock引数は受け取らない設計へ移ったが、呼び出し側の互換のため位置引数は残す。
+        self._conns = list(conns)
+        self._free: "queue.LifoQueue" = queue.LifoQueue()
+        for conn in self._conns:
+            self._free.put(conn)
 
     def execute(self, sql: str, params=()) -> _ReadResult:
-        # lock待ちとSQL本体は別の内訳へ積む(接続は1本なので、集計が重なった回は待ちが
-        # 支配する)。SQL自体はTimedConnectionが ``db.read`` として測る。
-        with self._lock:
-            return _ReadResult(self._conn.execute(sql, params).fetchall())
+        # 空き待ちとSQL本体は別の内訳へ積む。SQL自体はTimedConnectionが ``db.read``。
+        with perf.timer("db.read_wait"):
+            conn = self._free.get()
+        try:
+            return _ReadResult(conn.execute(sql, params).fetchall())
+        finally:
+            self._free.put(conn)
 
     def close(self) -> None:
-        with self._lock:
-            self._conn.close()
+        for _ in self._conns:
+            self._free.get()
+        for conn in self._conns:
+            conn.close()

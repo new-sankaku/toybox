@@ -535,6 +535,51 @@ def test_patch_recording_review_round_trips_to_the_browse_list(client, make_srv_
     assert rec["review_updated_at"] > 0
 
 
+# 録画1本ぶんの覚え書き。一覧の行から直に書くので、既定値を名乗らないと画面は欄に何を
+# 入れればよいか決められない(nullを入れると入力欄が"null"を表示する)。
+def test_browse_recordings_reports_an_empty_memo_by_default(client, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    body = client.get("/api/recordings/browse").json()
+    rec = next(r for r in body["recordings"] if r["recording_id"] == recording_id)
+    assert rec["memo"] == ""
+
+
+def test_patch_recording_memo_round_trips_to_the_browse_list(client, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    response = client.patch(
+        f"/api/recordings/{recording_id}/memo", json={"memo": "  音ズレあり  "})
+    assert response.status_code == 200
+    # 前後の空白は落とす(欄を空にしたつもりの空白1文字が、書いたメモとして残る)。
+    assert response.json()["memo"] == "音ズレあり"
+
+    body = client.get("/api/recordings/browse").json()
+    rec = next(r for r in body["recordings"] if r["recording_id"] == recording_id)
+    assert rec["memo"] == "音ズレあり"
+
+
+def test_patch_recording_memo_can_clear_the_memo(client, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    client.patch(f"/api/recordings/{recording_id}/memo", json={"memo": "残す"})
+    assert client.patch(
+        f"/api/recordings/{recording_id}/memo", json={"memo": ""}).json()["memo"] == ""
+
+
+# メモは録画に付く。1つの配信が複数の録画に割れるので、session側へ書くとどの録画の話かを
+# 指せなくなる ―― 別物であることをAPIの上でも保証しておく。
+def test_recording_memo_is_independent_of_the_session_note(client, make_srv_recording):
+    session_id, recording_id, _ = make_srv_recording()
+    client.patch(f"/api/recordings/{recording_id}/memo", json={"memo": "録画のメモ"})
+    client.patch(f"/api/sessions/{session_id}", json={"note": "配信のメモ"})
+    body = client.get("/api/recordings/browse").json()
+    rec = next(r for r in body["recordings"] if r["recording_id"] == recording_id)
+    assert rec["memo"] == "録画のメモ"
+
+
+def test_patch_recording_memo_404_for_unknown_recording(client):
+    response = client.patch("/api/recordings/99999999/memo", json={"memo": "x"})
+    assert response.status_code == 404
+
+
 def test_recording_path_reports_the_review_state(client, make_srv_recording):
     """検索hit経由で開いた録画は一覧の値を持たない。再生画面の印はここから出る。"""
     _, recording_id, _ = make_srv_recording()
@@ -851,6 +896,93 @@ def test_transcript_api_says_whether_it_has_word_times(client, server, make_srv_
 
     assert client.get(f"/api/recordings/{plain_id}/transcript").json()["word_times"] == 0
     assert client.get(f"/api/recordings/{worded_id}/transcript").json()["word_times"] == 1
+
+
+def test_pace_api_plans_from_voice_activity_not_the_transcript(
+        client, server, make_srv_recording, monkeypatch):
+    """無言の早送りの計画。「誰か喋っているか」はVADが答える。
+
+    語の時刻で代用していた版は、速い区間の4.4〜43.8%が実際には声だった(語の時刻はVADより
+    0.22〜0.30秒遅れる)。文字起こしを一切用意せずに計画が返ることで、その独立を固定する。"""
+    _, recording_id, _ = make_srv_recording()
+
+    async def fake_profile(path):
+        # 0.1秒刻みの声確率。0〜1秒と20〜21秒だけ声。
+        probs = [0.0] * 300
+        for i in list(range(0, 10)) + list(range(200, 210)):
+            probs[i] = 0.9
+        return {"interval_seconds": 0.1, "duration_seconds": 30.0, "probs": probs}
+
+    monkeypatch.setattr(server.routes.recordings.voice, "ensure_voice_profile", fake_profile)
+
+    plan = client.get(f"/api/recordings/{recording_id}/pace").json()
+    assert plan["speech_spans"] == 2
+    assert plan["fast"] == [{"start": 1.1, "end": 19.7}, {"start": 21.1, "end": 30.0}]
+    # 反応(笑い・叫び・拍手…)は解析済みの録画でしか使えない。画面が「速く流れる反応が
+    # ある」と名乗れるよう、無いことを黙って0件に混ぜない。
+    assert plan["has_reactions"] is False
+
+
+def test_pace_api_says_nothing_rather_than_guessing_when_the_voice_scan_fails(
+        client, server, make_srv_recording, monkeypatch):
+    """解析に失敗したら503。黙って空の計画を返すと、その録画は全編が速く流れる。"""
+    _, recording_id, _ = make_srv_recording()
+
+    async def boom(path):
+        raise server.routes.recordings.voice.VoiceError("model が読めません")
+
+    monkeypatch.setattr(server.routes.recordings.voice, "ensure_voice_profile", boom)
+    response = client.get(f"/api/recordings/{recording_id}/pace")
+    assert response.status_code == 503
+    assert "model" in response.json()["detail"]
+
+
+def test_pace_api_404s_for_an_unknown_recording(client):
+    assert client.get("/api/recordings/999999/pace").status_code == 404
+
+
+def test_skip_api_plans_from_voice_activity_without_the_waveform(
+        client, server, make_srv_recording, monkeypatch):
+    """無音skipの計画。判定は音量ではなくVADで、波形とは別のresponseで届く。
+
+    音量で判定していた版は、実録画5本で尺の1.1〜13.8%しか飛ばせず(誰も喋っていない時間は
+    45〜59%ある)、しかも飛ばした時間の3.0〜9.7%が声だった。波形を一切用意せずに計画が
+    返ることで、その独立を固定する。"""
+    _, recording_id, _ = make_srv_recording()
+
+    async def fake_profile(path):
+        # 0.1秒刻みの声確率。0〜1秒と20〜21秒だけ声。
+        probs = [0.0] * 300
+        for i in list(range(0, 10)) + list(range(200, 210)):
+            probs[i] = 0.9
+        return {"interval_seconds": 0.1, "duration_seconds": 30.0, "probs": probs}
+
+    monkeypatch.setattr(server.routes.recordings.voice, "ensure_voice_profile", fake_profile)
+
+    plan = client.get(f"/api/recordings/{recording_id}/skip").json()
+    assert plan["speech_spans"] == 2
+    # 声の手前(guard)を後ろ(lead)より厚く残す。着地が語頭より後ろへ回ると語頭が消え、
+    # 消えたこと自体が画面に残らない。
+    assert plan["spans"] == [{"start": 1.1, "end": 19.55}, {"start": 21.1, "end": 30.0}]
+    assert plan["has_reactions"] is False
+
+
+def test_skip_api_says_nothing_rather_than_guessing_when_the_voice_scan_fails(
+        client, server, make_srv_recording, monkeypatch):
+    """解析に失敗したら503。空の計画は「声が1件も無い」＝全編が飛ぶ、を意味してしまう。"""
+    _, recording_id, _ = make_srv_recording()
+
+    async def boom(path):
+        raise server.routes.recordings.voice.VoiceError("model が読めません")
+
+    monkeypatch.setattr(server.routes.recordings.voice, "ensure_voice_profile", boom)
+    response = client.get(f"/api/recordings/{recording_id}/skip")
+    assert response.status_code == 503
+    assert "model" in response.json()["detail"]
+
+
+def test_skip_api_404s_for_an_unknown_recording(client):
+    assert client.get("/api/recordings/999999/skip").status_code == 404
 
 
 def test_transcript_export_splits_srt_but_not_txt(client, server, make_srv_recording):
@@ -1807,7 +1939,7 @@ def test_transcribing_one_recording_goes_through_the_job_queue(
 
 def test_transcribing_one_recording_joins_and_promotes_the_sweep_row(
         client, server, make_srv_recording, monkeypatch):
-    """起動時sweepが積んだ行へ相乗りし、その1本の順番だけを人の優先度へ上げる。
+    """sweepが積んだ行へ相乗りし、その1本の順番だけを人の優先度へ上げる。
 
     sweepは文字起こしのない録画を上限なしで積むので、人が開いた1本はほぼ必ず既に待機列に居る。
     二重投入として409を返すと「押しても何も始まらない」になり、順番を上げないと数百本の
@@ -3754,7 +3886,7 @@ def test_the_pack_sweep_skips_live_packed_and_recent_recordings(server, monkeypa
         rows.append(r)
     monkeypatch.setattr(server.runtime.storage, "list_recordings", lambda limit=0: rows)
 
-    got = server.startup._startup_sweep_candidates({"pack": 10})["pack"]
+    got = server.startup._sweep_candidates({"pack": 10})["pack"]
 
     assert [r["id"] for r in got] == [4], "録画中/束ね済み/直近書き込みのどれかを拾っている"
 
@@ -3771,8 +3903,8 @@ def test_the_pack_sweep_honours_the_per_start_limit(server, monkeypatch):
         rows.append(row)
     monkeypatch.setattr(server.runtime.storage, "list_recordings", lambda limit=0: rows)
 
-    assert len(server.startup._startup_sweep_candidates({"pack": 2})["pack"]) == 2
-    assert len(server.startup._startup_sweep_candidates({"pack": 0})["pack"]) == 0
+    assert len(server.startup._sweep_candidates({"pack": 2})["pack"]) == 2
+    assert len(server.startup._sweep_candidates({"pack": 0})["pack"]) == 0
 
 
 def test_the_startup_sweep_skips_recordings_that_already_failed(server, monkeypatch):
@@ -3794,7 +3926,7 @@ def test_the_startup_sweep_skips_recordings_that_already_failed(server, monkeypa
         lambda kinds, states: {"pack": {1, 3}},
     )
 
-    got = server.startup._startup_sweep_candidates({"pack": 10})["pack"]
+    got = server.startup._sweep_candidates({"pack": 10})["pack"]
 
     assert [r["id"] for r in got] == [2], "失敗で終わった録画を積み直している"
 
@@ -3810,13 +3942,15 @@ async def test_the_startup_sweep_marks_what_it_queues_and_yields_the_queue(serve
     row["ended_at"] = time.time() - 86400
     monkeypatch.setattr(server.runtime.storage, "list_recordings", lambda limit=0: [row])
     monkeypatch.setattr(server.runtime.storage, "get_recording", lambda rid: row)
-    async def _no_stt_sweep():
+    async def _no_stt_sweep(since=0.0):
         return {"added": 0, "candidates": 0}
 
     monkeypatch.setattr(server.startup, "_sweep_transcriptions", _no_stt_sweep)
     # 波形だけを1本積ませる。他の種別まで積むと、印とpriorityがどの種別のものか読めない。
-    limits = {"pack_sweep_per_start": 0, "sprite_sweep_per_start": 0,
-              "waveform_sweep_per_start": 1}
+    # 0を並べる先はSWEEP_LIMIT_SETTINGSから引く — 種別が増えたときに、書き忘れた種別だけが
+    # 実設定(既定10)で積まれてこのtestが落ちる。
+    limits = {setting: 0 for setting in server.startup.SWEEP_LIMIT_SETTINGS.values()}
+    limits["waveform_sweep_per_start"] = 1
     real_get = server.runtime.settings.get
     monkeypatch.setattr(server.runtime.settings, "get",
                         lambda key, *a: limits.get(key, real_get(key, *a)))
@@ -3829,7 +3963,7 @@ async def test_the_startup_sweep_marks_what_it_queues_and_yields_the_queue(serve
     monkeypatch.setattr(server.media_jobs.media_job_queue, "enqueue", _capture)
     monkeypatch.setattr(server.media_jobs.media_job_queue, "pending_for", lambda kind, rid: None)
 
-    await server.startup._startup_sweep_bg()
+    await server.startup._run_sweep()
 
     assert len(enqueued) == 1, "波形を1本も積んでいない"
     kwargs = enqueued[0][1]
@@ -3840,7 +3974,7 @@ async def test_the_startup_sweep_marks_what_it_queues_and_yields_the_queue(serve
 def test_the_startup_sweep_picks_recordings_without_a_waveform(server, monkeypatch):
     """波形cacheが無い録画だけを拾い、既に在るものは拾わないこと。
 
-    在るものまで積むと、起動のたびに全録画ぶんのdecodeがqueueへ並ぶ。"""
+    在るものまで積むと、sweepのたびに全録画ぶんのdecodeがqueueへ並ぶ。"""
     from tictok.media.waveform import waveform_artifact_paths
 
     rows = []
@@ -3855,10 +3989,173 @@ def test_the_startup_sweep_picks_recordings_without_a_waveform(server, monkeypat
         path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(server.runtime.storage, "list_recordings", lambda limit=0: rows)
 
-    got = server.startup._startup_sweep_candidates({"waveform": 10})["waveform"]
+    got = server.startup._sweep_candidates({"waveform": 10})["waveform"]
 
     # 古い方から片付けるので、新しい順の一覧を逆に辿った順番で返る。
     assert [r["id"] for r in got] == [3, 1], "cacheの有無を見ていない"
+
+
+def test_the_sweep_holds_sidecars_for_recordings_awaiting_pack(server, monkeypatch):
+    """ts結合待ちの録画へは、同じ回に音声波形・サムネ・声profileを積まないこと。
+
+    packは.tsの本数・合計byte・最新mtimeを書き換える — それがsidecarのcache指紋そのもの
+    なので、束ねる前に作ったsidecarはpackの完了と同時に全部無効になる。同じ回に両方積むと
+    順序では防げない: packの行は同じ録画のsidecarが待機列に居るだけで自分を保留にする
+    (_pack_recording)ため、完了順が必ず逆になる。実測では保留237件が全てpackで、両方在る
+    録画81本のうち79本(98%)でpackが後に終わり、そのsidecarは再生時に作り直しになっていた。
+
+    束ね済みの録画は待たせない(仕事がもう無い)。"""
+    rows = []
+    for i, packed in enumerate((False, True), start=1):
+        row, _ = _sweep_recording(server, f"0220{i}_tester_20260101_120000", packed=packed)
+        row["id"] = i
+        row["ended_at"] = time.time() - 86400
+        rows.append(row)
+    monkeypatch.setattr(server.runtime.storage, "list_recordings", lambda limit=0: rows)
+
+    got = server.startup._sweep_candidates({"pack": 10, "waveform": 10})
+
+    assert [r["id"] for r in got["pack"]] == [1], "束ねるべき録画を拾っていない"
+    assert [r["id"] for r in got["waveform"]] == [2], "束ね待ちの録画へ波形を積んでいる"
+    # 見送った回は次の周期を全件走査へ戻す合図になる。絞り込みのままだと、束ね終わった
+    # 録画のended_atはsinceの窓より古く、二度と候補に上がらない。
+    assert got.held == 1
+
+
+async def test_the_silence_skip_job_builds_the_same_profile_the_player_asks_for(
+    server, monkeypatch, make_srv_recording
+):
+    """jobが作るのは再生画面と同じ経路の同じsidecar。別の作り方は持たない。
+
+    別経路で作ると、jobが作ったものを再生画面が「指紋が違う」と作り直す — 先回りした意味が
+    無くなるうえ、その事実がどこにも出ない。"""
+    _, recording_id, _ = make_srv_recording()
+    seen = []
+
+    async def fake_profile(path):
+        seen.append(path)
+        return {"interval_seconds": 0.1, "duration_seconds": 12.0, "probs": [0.0] * 120}
+
+    monkeypatch.setattr(server.media_jobs.voice, "ensure_voice_profile", fake_profile)
+    stages = []
+
+    async def report(stage, pct):
+        stages.append((stage, pct))
+
+    result = await server.media_jobs._run_media_job(
+        {"kind": "voice", "recording_id": recording_id, "job_id": "voicejob"}, report)
+
+    assert len(seen) == 1
+    assert result["kind"] == "voice" and result["points"] == 120
+    assert stages[0][0] == "無音skipの解析を生成中…"
+    assert stages[-1] == ("完了", 100)
+
+
+def test_the_sweep_queues_the_silence_skip_scan_for_recordings_without_it(
+    server, monkeypatch
+):
+    """無音skipの解析(声profile)も、波形・サムネと同じsweepで積むこと。
+
+    人がその場で待つ生成物なので、配信が終わった後に自動で作られていないと、再生画面で
+    「無音を飛ばす」を入れた人が毎回待つ。判定はsidecarの実在だけで、DBに印は持たない。"""
+    from tictok.media.voice import voice_artifact_paths
+
+    rows = []
+    for i in range(1, 4):
+        row, _ = _sweep_recording(server, f"0210{i}_tester_20260101_120000")
+        row["id"] = i
+        # 声の解析も素材を読むだけなので、静穏判定は録画の終了時刻で行う。
+        row["ended_at"] = time.time() - 86400
+        rows.append(row)
+    for path in voice_artifact_paths(Path(rows[1]["path"])):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(server.runtime.storage, "list_recordings", lambda limit=0: rows)
+
+    got = server.startup._sweep_candidates({"voice": 10})["voice"]
+
+    assert [r["id"] for r in got] == [3, 1], "解析済みの録画まで積んでいる"
+
+
+def test_the_periodic_sweep_only_looks_at_recordings_that_ended_since_the_last_run(
+    server, monkeypatch
+):
+    """2回目以降のsweepが、前回以降に終わった録画だけを見ること。
+
+    走査は録画ごとにfileの確認を伴い、全部作り終えた後はlimitが埋まらないので毎回最後まで
+    走る。30分ごとに全録画ぶんの確認を繰り返すと、録画が貯まるほど周期そのものが重くなる。"""
+    now = time.time()
+    rows = []
+    for i, ended in enumerate((now - 86400, now - 3600), start=1):
+        row, _ = _sweep_recording(server, f"0400{i}_tester_20260101_120000")
+        row["id"] = i
+        row["ended_at"] = ended
+        rows.append(row)
+    monkeypatch.setattr(server.runtime.storage, "list_recordings", lambda limit=0: rows)
+
+    got = server.startup._sweep_candidates({"waveform": 10}, since=now - 7200)
+
+    assert [r["id"] for r in got["waveform"]] == [2], "前回より前に終わった録画まで見ている"
+
+
+async def test_the_periodic_sweep_narrows_the_transcription_candidates_too(
+    server, monkeypatch
+):
+    """文字起こしの候補も前回以降に絞ること。
+
+    投入側は録画ごとに素材のdir走査を行うので、絞らないと、素材が消えて毎回見送られる録画
+    (実測89件)を周期のたびに数え直すことになる。"""
+    now = time.time()
+    rows = [{"id": 1, "ended_at": now - 86400}, {"id": 2, "ended_at": now - 60}]
+    monkeypatch.setattr(server.runtime.storage, "untranscribed_recordings", lambda: rows)
+    passed = []
+
+    async def _capture(recordings, priority=0, sweep=False, corrections="keep"):
+        passed.extend(r["id"] for r in recordings)
+        return {"added": 0, "candidates": len(recordings)}
+
+    monkeypatch.setattr(server.media_jobs, "_enqueue_stt_jobs", _capture)
+
+    await server.startup._sweep_transcriptions(since=now - 3600)
+
+    assert passed == [2], "前回より前に終わった録画まで投入している"
+
+
+async def test_the_sweep_loop_repeats_and_widens_after_a_saturated_run(server, monkeypatch):
+    """繰り返しのsweepが前回以降だけを見つつ、上限まで積んだ回の次は全件へ戻すこと。
+
+    絞り込みが効かないと周期ごとに全録画を走査し、逆に上限まで積んだ回の後まで絞ると、
+    溢れたぶんが次の起動まで拾われない。"""
+    import asyncio
+
+    values = {"sweep_interval_minutes": 30, "pack_sweep_quiet_minutes": 15}
+    real_get = server.runtime.settings.get
+    monkeypatch.setattr(server.runtime.settings, "get",
+                        lambda key, *a: values.get(key, real_get(key, *a)))
+    seen = []
+    verdicts = iter([True, False, False])
+
+    async def _fake_sweep(after=None, since=0.0):
+        seen.append(since)
+        return next(verdicts)
+
+    monkeypatch.setattr(server.startup, "_run_sweep", _fake_sweep)
+
+    class _Stop(Exception):
+        pass
+
+    async def _fake_sleep(seconds):
+        assert seconds == 30 * 60, "設定した間隔で待っていない"
+        if len(seen) >= 3:
+            raise _Stop
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    with pytest.raises(_Stop):
+        await server.startup._sweep_loop_bg()
+
+    assert seen[0] == 0.0, "起動直後の1回目が全件になっていない"
+    assert seen[1] == 0.0, "上限まで積んだ回の次が全件へ戻っていない"
+    assert 0 < seen[2] <= time.time() - 15 * 60, "前回以降へ絞れていない(静穏待ちのぶん遡る)"
 
 
 # ===== reel(切り出しの連結) =====

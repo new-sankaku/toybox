@@ -1931,7 +1931,9 @@ function handleMessage(msg) {
     return;
   }
   if (msg.type === "monitors" || msg.type === "state") {
-    scheduleReload();
+    // 画面を開いた直後の1通目は、下のloadSessions()と同じ内容を運んでくるだけなので
+    // 取り直さない(印はcommon.jsのconnectWSが付ける)。
+    if (!msg.initial) scheduleReload();
   }
 }
 
@@ -1975,4 +1977,6 @@ window.addEventListener("popstate", () => {
   else if (!wanted && currentSessionId !== null) closeDetail(true);
 });
 connectWS(handleMessage);
-setInterval(loadKpi, 30000);
+// KPI帯は全sessionの通算集計で、warmでも毎回0.35秒かかる。開きっぱなしにする画面なので、
+// 見えていない間は引かない(pollWhileVisibleが表へ戻った時にまとめて1回引き直す)。
+pollWhileVisible(loadKpi, 30000);

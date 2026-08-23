@@ -1,8 +1,8 @@
 """起動時にだけ走る処理と、lifespan。
 
 中断jobの後始末 -> 孤児中間物の掃除 -> queue起動 -> 各background task、という順序は
-lifespanのcommentが理由を持っている。起動時sweepが「finalizeでやると落ちたときに誰も
-再開しない」の答えとして置かれていることも同様(``_startup_sweep_bg`` 参照)。
+lifespanのcommentが理由を持っている。派生物のsweepが「finalizeでやると落ちたときに誰も
+再開しない」の答えとして置かれていることも同様(``_run_sweep`` / ``_sweep_loop_bg`` 参照)。
 
 依存は runtime / files / fsfacts / disk / media_jobs。
 """
@@ -159,14 +159,15 @@ async def _reclaim_normalizations_bg():
         )
 
 
-# 起動時sweepが積む映像job。「素材を書き換えない」「消えても作り直せる」「無いと人がその場で
+# sweepが積む映像job。「素材を書き換えない」「消えても作り直せる」「無いと人がその場で
 # 待たされる」を満たす種別だけを置く。焼き込み・Up出力・再mp4化・音量正規化を入れないのは、
-# 不可逆な成果物を作るか元mp4を差し替える処理で、人が投げた覚えの無いまま起動のたびに走って
+# 不可逆な成果物を作るか元mp4を差し替える処理で、人が投げた覚えの無いまま自動で走って
 # よい理由が無いため(文字起こしは同じ台帳だが本数で区切らないので_sweep_transcriptionsが持つ)。
-STARTUP_SWEEP_LIMIT_SETTINGS = {
+SWEEP_LIMIT_SETTINGS = {
     "pack": "pack_sweep_per_start",
     "waveform": "waveform_sweep_per_start",
     "sprite": "sprite_sweep_per_start",
+    "voice": "voice_sweep_per_start",
 }
 
 # 自動では積み直さないstate。理由はstorage.media_job_recording_ids_in_statesを参照。
@@ -175,6 +176,10 @@ SWEEP_BLOCKING_STATES = ("failed", "skipped", "cancelled")
 # 候補を探す走査範囲。全録画を毎回見に行かないための上限で、limit件が埋まればここまで
 # 読まずに切り上げる。
 SWEEP_SCAN_LIMIT = 5000
+
+# 定期sweepを止めている(間隔0)あいだ、設定を読み直す間隔。設定は画面から変えられるので、
+# taskは畳まず待つだけにする(畳むと、有効へ戻しても次の起動まで繰り返しが復活しない)。
+SWEEP_IDLE_POLL_SECONDS = 60.0
 
 
 def _pack_sweep_ready(row: dict, quiet: float) -> bool:
@@ -195,33 +200,79 @@ def _pack_sweep_ready(row: dict, quiet: float) -> bool:
     return newest <= quiet
 
 
+def _recording_finished_at(row: dict) -> float:
+    """録画が終わった時刻。確定していない行にはended_atが無いので開始時刻で代える。"""
+    return float(row.get("ended_at") or row.get("started_at") or 0.0)
+
+
 def _sidecar_sweep_ready(row: dict, fact: str, quiet: float, memo: dict) -> bool:
-    """音声波形 / サムネの候補か。cacheが既に在るもの、素材もmp4も無いもの、終わったばかりの
-    録画を外す。
+    """音声波形 / サムネ / 無音skipの解析の候補か。cacheが既に在るもの、素材もmp4も無いもの、
+    終わったばかりの録画を外す。
 
     「終わったばかり」をpackのようなfileの更新時刻ではなく録画の終了時刻で見るのは、これらが
     素材を**読むだけ**の処理だから。早すぎた場合に出来るのは指紋の合わないcacheであって、
     壊れた素材ではない(作り直しは再生画面が要求した時点で生成側が判断する)。"""
-    if (row.get("ended_at") or row.get("started_at") or 0.0) > quiet:
+    if _recording_finished_at(row) > quiet:
         return False
     if fsfacts._sidecar_done_in(row, fact, memo):
         return False
     return files._recording_source_exists(row)
 
 
-def _startup_sweep_candidates(limits: dict) -> dict:
+def _awaiting_pack(row: dict, blocked_pack) -> bool:
+    """この録画は、これからts結合で素材(.ts)を束ね直されるか。
+
+    束ね直しは.tsの本数・合計byte・最新mtimeを変える。それは音声波形・サムネ・声profileの
+    cache指紋そのもの(``waveform._source_key`` / ``hls_source.fingerprint``)なので、束ねる前に
+    作ったsidecarはpackが終わった瞬間にまとめて無効になる。sweepの走査でpackを先に積んでも、
+    同じ録画のsidecar jobが待機列に居るだけで ``_pack_recording`` は自分を保留にする
+    (``pending_media_job_keys`` は待機中の行も返す)ため、実際の完了順は逆になる — 実測では
+    保留の記録237件が**全てpack**(1回60秒 × 99 job = 待ち合計4.0時間)、台帳に残っている
+    保留中の行76件も全てpack、packとsidecarの両方を完了した録画97本のうち**79本(81%)で
+    packが後**に終わっており、その79本のsidecarは人が再生を押した時点で作り直しになっていた。
+
+    順序は「積む順」ではなく「**同時に積まない**」で保つ。束ね待ちの録画にはsidecarを積まず、
+    束ねた後の周期で積む。ts結合が二度と走らない録画(素材が無い / 前回failed・skipped・
+    cancelled)は待っても束ねられないので、待たせずそのまま積む。"""
+    if row["id"] in blocked_pack:
+        return False
+    dirs = files._recording_media_dirs(row)
+    return bool(dirs) and not hls_pack.is_packed(dirs[0])
+
+
+class _Candidates(dict):
+    """``{種別: [録画, ...]}`` に「ts結合待ちで見送った件数」を添えたもの。
+
+    dictのままなのは、呼び出し側も試験も種別で引くだけだから。``held`` をtupleの第2要素に
+    しなかったのは、この形が既に ``[kind]`` として読まれているため(``fsfacts._BoundedCache``
+    と同じ流儀 — 同じ形のまま性質を1つだけ足す)。"""
+
+    held = 0
+
+
+def _sweep_candidates(limits: dict, since: float = 0.0) -> _Candidates:
     """種別ごとの投入対象を、録画一覧の**1回の走査**でまとめて選ぶ。
 
     種別ごとに独立して走査すると、同じ録画のstat・dir一覧を種別の数だけ繰り返すことになる。
     どの種別もlimit件で満ちたところで打ち切る。
 
     古い順に見るのは、新しい録画ほど再生・焼き込みで触られる可能性が高いためで、触られにくい
-    ものから片付ける。"""
+    ものから片付ける。
+
+    ``since`` を渡すと、それ以降に終わった録画だけを見る(定期sweepの2回目以降)。全件の走査は
+    録画ごとにfileの確認を伴い、作り終えた後はlimitが埋まらないので毎回最後まで走ることに
+    なる。絞るのは**費用が掛かる判定の手前**であって、上限や除外の規則は変わらない。
+
+    ts結合待ちの録画にはsidecar(音声波形・サムネ・声profile)を積まない。理由と実測は
+    ``_awaiting_pack``。見送った件数は ``held`` に残す — 見送った録画は次の周期で拾う必要が
+    あるが、そのended_atは大抵 ``since`` の窓より古く、絞り込みのままでは二度と見に来ない。"""
     quiet = time.time() - int(runtime.settings.get("pack_sweep_quiet_minutes")) * 60
     blocked = runtime.storage.media_job_recording_ids_in_states(
         tuple(limits), SWEEP_BLOCKING_STATES)
+    # packをsweepしない設定(上限0)なら束ね直しは自動では起きないので、待たせる相手が居ない。
+    gate_on_pack = "pack" in limits
     memo: dict = {}
-    out: dict = {kind: [] for kind in limits}
+    out = _Candidates((kind, []) for kind in limits)
     # list_recordingsは新しい順。古い方から片付けるので並べ直す。
     rows = runtime.storage.list_recordings(limit=SWEEP_SCAN_LIMIT)
     rows.reverse()
@@ -230,34 +281,53 @@ def _startup_sweep_candidates(limits: dict) -> dict:
             break
         if (row.get("status") or "") == "recording":
             continue
+        if since and _recording_finished_at(row) < since:
+            continue
+        awaiting_pack = None  # 遅延評価。sidecarが要る録画でしか払わない。
         for kind, limit in limits.items():
             if len(out[kind]) >= limit or row["id"] in blocked.get(kind, ()):
                 continue
             if kind == "pack":
                 ready = _pack_sweep_ready(row, quiet)
             else:
-                fact = "waveform_done" if kind == "waveform" else "sprite_done"
-                ready = _sidecar_sweep_ready(row, fact, quiet, memo)
+                ready = _sidecar_sweep_ready(
+                    row, fsfacts.SIDECAR_JOB_FACTS[kind], quiet, memo)
+                if ready and gate_on_pack:
+                    if awaiting_pack is None:
+                        awaiting_pack = _awaiting_pack(row, blocked.get("pack", ()))
+                    if awaiting_pack:
+                        out.held += 1
+                        continue
             if ready:
                 out[kind].append(row)
     return out
 
 
-async def _sweep_transcriptions() -> dict:
+async def _sweep_transcriptions(since: float = 0.0) -> dict:
     """文字起こしのない録画をまとめてqueueへ積む。積んだ件数と候補数を返す。
 
     本数で区切らないのは、GPUを1本ずつ直列に使い、再起動をまたいで残るため。全部積んでも
-    同時に走るのは常に1本で、終わらなかったぶんは次の起動でそのまま続く。文字起こし済みと
+    同時に走るのは常に1本で、終わらなかったぶんは次のsweepでそのまま続く。文字起こし済みと
     待機/実行中は ``untranscribed_recordings`` と投入時の二重投入judgeで外れるので、積み直し
-    にはならない。"""
+    にはならない。
+
+    ``since`` は ``_sweep_candidates`` と同じ意味の絞り込み。投入側は録画ごとに素材のdir走査を
+    行うので、既に見送った録画(素材が消えている等)を周期のたびに数え直さない。"""
     if not int(runtime.settings.get("transcribe_sweep_enabled")):
         return {"added": 0, "candidates": 0}
+    rows = runtime.storage.untranscribed_recordings()
+    if since:
+        rows = [row for row in rows if _recording_finished_at(row) >= since]
     return await media_jobs._enqueue_stt_jobs(
-        runtime.storage.untranscribed_recordings(), priority=media_jobs.SWEEP_JOB_PRIORITY, sweep=True)
+        rows, priority=media_jobs.SWEEP_JOB_PRIORITY, sweep=True)
 
 
-async def _startup_sweep_bg(after=None):
-    """起動のたびに、まだ作られていない派生物を少しずつqueueへ積む。
+async def _run_sweep(after=None, since: float = 0.0) -> bool:
+    """まだ作られていない派生物を少しずつqueueへ積む。上限まで積んだ種別があるか、ts結合待ちで
+    sidecarを見送った録画があればTrueを返す。
+
+    戻り値を使うのは呼び出し側(``_sweep_loop_bg``)だけで、「積み残しがある」の合図として
+    次の周期を全件走査へ戻すために使う。
 
     ``after`` は中断録画の復旧task。**それが終わるまで積まない**: 復旧は録画をもう一度
     確定させる処理で、session dirの素材を最後まで読む。復旧の対象はDB上 interrupted
@@ -266,15 +336,15 @@ async def _startup_sweep_bg(after=None):
     FileNotFoundで落ちた)。sweepは急ぐ処理ではないので、ここは待てば済む。
 
     積む先は種別ごとに違うが、置き場所がここに揃っているのは同じ問いに答えるため —
-    「finalizeでやると落ちたときに誰も再開しない」。起動時sweepなら、失敗しても次の起動で
+    「finalizeでやると落ちたときに誰も再開しない」。sweepなら、失敗しても次の周期・次の起動で
     また積まれて自然に収束する。
 
     自分では処理せずqueueへ積む。既存のqueueが直列化・進捗・cancel・他の重いjobとの排他を
     すべて持っているので、二重に実装しない。sweepが積んだ行はpriorityを下げ(順番を人へ譲る)、
-    同時実行本数も別枠で絞る(get_media_queue_sweep_concurrency)ので、起動直後に人が投げた
-    jobがsweepの後ろで待たされることはない。"""
+    同時実行本数も別枠で絞る(get_media_queue_sweep_concurrency)ので、人が投げたjobが
+    sweepの後ろで待たされることはない。"""
     limits = {kind: int(runtime.settings.get(setting))
-              for kind, setting in STARTUP_SWEEP_LIMIT_SETTINGS.items()}
+              for kind, setting in SWEEP_LIMIT_SETTINGS.items()}
     limits = {kind: limit for kind, limit in limits.items() if limit > 0}
     try:
         if after is not None:
@@ -283,7 +353,7 @@ async def _startup_sweep_bg(after=None):
         # 文字起こしは映像jobと台帳もworkerも別なので、映像側の候補選びを待たせない。
         # to_threadへ逃がさない: enqueueはworkerを起こすasyncio.Eventを叩くので、別threadから
         # 呼ぶと起床が届かず、次のidle pollまで止まって見える(一括投入APIと同じ理由)。
-        stt = await _sweep_transcriptions()
+        stt = await _sweep_transcriptions(since)
         if stt["added"]:
             runtime.logger.info(
                 "音声の文字起こしに %d件の録画をqueueへ入れました（候補 %d件）",
@@ -292,8 +362,13 @@ async def _startup_sweep_bg(after=None):
                        "ctx": {"queued": stt["added"], "candidates": stt["candidates"]}},
             )
         if not limits:
-            return
-        candidates = await asyncio.to_thread(_startup_sweep_candidates, limits)
+            return False
+        candidates = await asyncio.to_thread(_sweep_candidates, limits, since)
+        # 上限まで積んだ回に加え、ts結合待ちでsidecarを見送った回も次を全件走査へ戻す。
+        # 見送った録画のended_atは大抵``since``の窓(既定45分)より古く、絞り込みのままだと
+        # 束ね終わった後も二度と候補に上がらない。
+        saturated = (any(len(rows) >= limits[kind] for kind, rows in candidates.items())
+                     or candidates.held > 0)
         queued: dict = {}
         for kind, rows in candidates.items():
             for row in rows:
@@ -302,26 +377,65 @@ async def _startup_sweep_bg(after=None):
                         kind, row["id"], recording=row, stem=files._recording_label(row),
                         priority=media_jobs.SWEEP_JOB_PRIORITY, sweep=True)
                 except HTTPException:
-                    continue  # 既にqueueに居る等。次の起動で拾えばよい。
+                    continue  # 既にqueueに居る等。次のsweepで拾えばよい。
                 queued[kind] = queued.get(kind, 0) + 1
         if not queued:
-            return
+            return saturated
         runtime.logger.info(
-            "起動時のsweepで %d件のjobをqueueへ入れました: %s",
+            "sweepで %d件のjobをqueueへ入れました: %s",
             sum(queued.values()),
             ", ".join(f"{media_jobs.MEDIA_JOB_TITLES[k]} {n}" for k, n in queued.items()),
             extra={"event": "sweep.queued",
-                   "ctx": {"queued": queued, "limits": limits,
+                   "ctx": {"queued": queued, "limits": limits, "since": since,
                            "candidates": {k: len(v) for k, v in candidates.items()},
+                           "held_for_pack": candidates.held, "saturated": saturated,
                            "concurrency": get_media_queue_sweep_concurrency()}},
         )
+        return saturated
     except asyncio.CancelledError:
         raise
     except Exception:
         runtime.logger.exception(
-            "起動時のsweepがqueueへ入れられませんでした（未作成の派生物はそのまま残ります）",
-            extra={"event": "sweep.failed", "ctx": {}},
+            "sweepがqueueへ入れられませんでした（未作成の派生物はそのまま残ります）",
+            extra={"event": "sweep.failed", "ctx": {"since": since}},
         )
+        # 途中で落ちた回は、どこまで見たのか分からない。次は全件から見直す。
+        return True
+
+
+async def _sweep_loop_bg(after=None):
+    """起動後に1回、以降は設定した間隔で ``_run_sweep`` を回す。
+
+    起動時にしか走らなかった頃は、serverを起動したまま録り続けると、新しい録画の音声波形も
+    文字起こしも次の再起動まで作られなかった。commentの検索indexが同じ穴を持っていて、
+    録画の確定時に張り直す修正が後から入っている(collector._index_recording_comments)。
+
+    それでも確定callbackから直接積まずここで繰り返すのは3つの理由による。
+      - ts結合(pack)が素材の.tsを束ね直すと、音声波形・サムネのcache指紋(.tsの本数・合計
+        byte・最新mtime)が外れて作り直しになる。sweepは同じ走査で束ね待ちの録画を見分け、
+        その録画のsidecarを**同じ回には積まない**ので「ts結合 -> 波形・サムネ」の順序が
+        保たれる(``_awaiting_pack``)。
+      - 静穏待ち(pack_sweep_quiet_minutes)や失敗録画の除外といった候補の規則が1箇所に残る。
+      - 確定callbackは1回きりで、そこで落ちれば誰も再開しない。周期なら次で収束する。
+
+    2回目以降は前回のsweep以降に終わった録画だけを見る(``since``)。全件走査は録画ごとに
+    fileの確認を伴い、作り終えた後はlimitが埋まらないので毎回最後まで走ることになる。
+    遡り幅に静穏待ちのぶんを足すのは、前回「終わったばかり」で見送った録画を落とさないため。
+    上限まで積んだ回の次だけは、積み残しを拾うために全件へ戻す。"""
+    since = 0.0
+    first = True
+    while True:
+        minutes = int(runtime.settings.get("sweep_interval_minutes"))
+        if first or minutes > 0:
+            started = time.time()
+            saturated = await _run_sweep(after if first else None, since=since)
+            after, first = None, False
+            quiet = int(runtime.settings.get("pack_sweep_quiet_minutes")) * 60
+            since = 0.0 if saturated else started - quiet
+        else:
+            # 止めているあいだに終わった録画がある。再開するときは全件から見直す。
+            since = 0.0
+        await asyncio.sleep(minutes * 60 if minutes > 0 else SWEEP_IDLE_POLL_SECONDS)
 
 
 async def _backfill_search_index_bg():
@@ -390,8 +504,15 @@ async def lifespan(app: FastAPI):
     # manager.restore()は実配信へ繋いで録画を始め、_recover_interrupted_recordings_bgは
     # 素材を見て中断録画を確定させる。孤児が書き続けたままそれをやると、確定した尺が直後
     # から嘘になり、同じdirを2つのffmpegが書く(実測: 録画行12.0秒に対しdirは16,861.8秒)。
-    await asyncio.to_thread(orphan_capture.sweep, runtime._RECORD_ROOTS)
-    await runtime.manager.startup()
+    # resolverのbrowserは録画のfileに一切触らない(live URLの解決だけ)ので、孤児の掃除と
+    # 同時に起こしてよい。順に待つと、冷えた起動では合計12.0秒になっていた(2026-08-21
+    # 08:41: 掃除5.8s + browser 6.2s)。restore()の前に両方が終わっている点は変わらない。
+    resolver_ready = asyncio.create_task(runtime.manager.startup())
+    try:
+        await asyncio.to_thread(orphan_capture.sweep, runtime._RECORD_ROOTS)
+    finally:
+        # 掃除が失敗しても、起こしかけたbrowserは必ず回収する(残すとprocessが浮く)。
+        await resolver_ready
     no_restore = get_no_restore()
     if no_restore:
         # 監視の復元だけを止める。復元は起動数秒後に実配信へ接続して録画を開始するので、
@@ -423,9 +544,10 @@ async def lifespan(app: FastAPI):
     # なるが、それはrequestごとの所要時間には「全員が少しずつ遅い」としか出ない。
     loop_lag_task = asyncio.create_task(perf.loop_lag_monitor())
     # まだ作られていない派生物(ts結合・音声波形・サムネ・文字起こし)をqueueへ積む。queueを
-    # 起こした後に置くのは、積んだ瞬間から流れ始めてほしいため。積むのは中断録画の復旧が
-    # 終わってから(``_startup_sweep_bg`` 参照)。
-    startup_sweep_task = asyncio.create_task(_startup_sweep_bg(recovery_task))
+    # 起こした後に置くのは、積んだ瞬間から流れ始めてほしいため。1回目を積むのは中断録画の
+    # 復旧が終わってから(``_run_sweep`` 参照)で、以降は設定間隔で繰り返す
+    # (``_sweep_loop_bg`` 参照。起動したまま録り続けても新しい録画が置き去りにならない)。
+    sweep_task = asyncio.create_task(_sweep_loop_bg(recovery_task))
     # ffmpeg/ffprobe are resolved from PATH at call time, so a missing binary surfaces
     # only when a recording fails to start. Stating it once at startup turns "no
     # recordings were produced last night" into a one-line answer.
@@ -468,9 +590,9 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
     await gifter_league_worker.aclose()
-    startup_sweep_task.cancel()
+    sweep_task.cancel()
     try:
-        await startup_sweep_task
+        await sweep_task
     except asyncio.CancelledError:
         pass
     loop_lag_task.cancel()

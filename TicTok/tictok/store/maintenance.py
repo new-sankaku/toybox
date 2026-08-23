@@ -20,14 +20,32 @@ import time
 from pathlib import Path
 
 from tictok.core import dbmaint
-from tictok.core.config import get_db_backup_before_migration
+from tictok.core.config import (
+    get_db_analyze_enabled,
+    get_db_analyze_growth_ratio,
+    get_db_backup_before_migration,
+)
 
 from tictok.store._common import (
+    _ANALYZE_STATE_KEY,
+    _INTERN_MIGRATE_CHUNK_ROWS,
+    _INTERN_PHASE_CONTRACT,
+    _INTERN_PHASE_EXPAND,
+    _INTERN_PHASE_KEY,
+    _INTERN_PHASE_NONE,
+    _INTERN_TARGET_PHASE,
+    _INTERNED_CONTRIBUTOR_COLUMNS,
+    _INTERN_STRIPPED_COLUMNS,
+    _INTERN_STRIP_KEY,
+    _INTERN_STRIP_VERSION,
+    _INTERNED_EVENT_COLUMNS,
     _MIGRATION_BACKUP_KEY,
     _SEARCH_FOLD_KEY,
     _SQLITE_FATAL_ERRORNAMES,
     _SQLITE_FATAL_MESSAGES,
+    _events_insert_sql,
     _migration_versions,
+    _string_hash,
     _valid_owner_id,
     logger,
 )
@@ -37,7 +55,7 @@ class MaintenanceMixin:
     """DB保守・schema migration。
 
     lockもDB接続も持たない。すべて Storage が所有する self._conn /
-    self._lock / self._read_lock を借りる(mixinとして Storage に混ぜられる前提)。
+    self._lock / _read_connection() を借りる(mixinとして Storage に混ぜられる前提)。
     契約の詳細はmodule docstringを参照。
     """
 
@@ -76,9 +94,13 @@ class MaintenanceMixin:
         versions = _migration_versions()
         with self._lock:
             done = self._get_maintenance_locked(_MIGRATION_BACKUP_KEY)
+            # eventsを含めるのは、重複文字列のintern(migrate_event_interning)が**events表の
+            # 旧列を落とす**ためである。これを入れないと、battlesとtranscriptsが空でeventsだけ
+            # 在るDBが、退避を取らないまま旧列を落とすことになる ―― 落とした値はどこにも残らない。
             has_rows = self._conn.execute(
                 "SELECT 1 WHERE EXISTS(SELECT 1 FROM battles)"
-                " OR EXISTS(SELECT 1 FROM transcripts)").fetchone() is not None
+                " OR EXISTS(SELECT 1 FROM transcripts)"
+                " OR EXISTS(SELECT 1 FROM events)").fetchone() is not None
             # cut_listの統合は表そのものを落とす。上の2表が空でも、畳む行が残っていれば
             # 守る対象は在る。
             if not has_rows and self._has_table("cut_list"):
@@ -111,6 +133,90 @@ class MaintenanceMixin:
                    "ctx": {"versions": versions, **result}},
         )
         return {"taken": True, "versions": versions, **result}
+
+    # ----- plannerの統計(sqlite_stat1) --------------------------------------------------
+
+    def _events_row_estimate_locked(self) -> int:
+        """eventsの行数の当たり。lock保持前提。
+
+        COUNT(*)ではなくMAX(rowid)で測る。eventsは実測120万行あり、COUNT(*)は毎起動で
+        index 1本を頭から舐める。ここで欲しいのは「前回ANALYZEの時点からどれだけ伸びたか」
+        という一桁の精度で、rowidはINTEGER PRIMARY KEY(=rowid)なのでB-treeの右端1回で済む。
+
+        session削除でrowidが飛んでも過大評価になるだけで、ANALYZEが早めに走るという
+        安全側へ倒れる。"""
+        row = self._conn.execute("SELECT MAX(rowid) AS n FROM events").fetchone()
+        return int(row["n"] or 0)
+
+    def ensure_planner_stats(self) -> dict:
+        """plannerの統計(sqlite_stat1)を採り直す。__init__からのみ呼ぶ(lockは自分で取る)。
+
+        **なぜ要るのか。** 統計が無いとSQLiteは全てのindexを同じ経験則で見積もる。実データ
+        では、Battleの貢献集計(battles.battle_gift_contributions)がその見積もりで
+        ``idx_events_kind_identity`` を選び、Battle 1件ごとに全gift eventを走査していた。
+        正しいのは ``idx_events_session_kind_time`` で、copy DBでの実測は1,417窓あたり
+        4,596ms(統計なし)対 526ms(統計あり)、返る行は6,269行で完全一致。
+
+        **なぜ起動時なのか。** ANALYZEは書き込みであり、実測2.3秒のあいだwrite lockを
+        保持する。収集中に走らせるとcollectorのdrainがその間止まる。__init__のこの地点は
+        writer threadを起こす前で、まだ誰もこの接続を待っていない唯一の窓である。
+
+        **なぜ毎起動ではないのか。** 起動は実測1.65秒で、2.3秒を無条件に足すと倍以上になる。
+        統計が動く要因は表の大きさとindexの選択性なので、eventsの行数の伸びで測る
+        (閾値はTICTOK_DB_ANALYZE_GROWTH_RATIO)。統計そのものが無い起動は伸びに関わらず
+        必ず採る — 無い状態は「古い」ではなく「plannerが誤選択する」状態である。
+
+        **なぜ analysis_limit を掛けないのか。** 掛けると速いが効かない。同じcopy DBで
+        ``analysis_limit=1000`` を測ると0.94秒で終わる代わりにplanは
+        ``idx_events_kind_identity`` のまま変わらなかった(sampleが足りずindexの選択性を
+        誤ったまま記録する)。速いが効かない統計は、無い統計より悪い — 「ANALYZE済み」と
+        いうmarkerだけが残る。
+
+        失敗は握り潰さない。ここで落ちるのはdisk full / I-O / 破損の類で、どのみち数秒後に
+        writerが同じ壁に当たる。統計が採れないまま黙って起動すると、遅さの原因が
+        「統計が無い」ことだと誰も辿れなくなる。"""
+        if not get_db_analyze_enabled():
+            return {"analyzed": False, "skipped": "disabled"}
+        with self._lock:
+            has_stats = self._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'sqlite_stat1'"
+            ).fetchone() is not None
+            rows = self._events_row_estimate_locked()
+            state = self._get_maintenance_locked(_ANALYZE_STATE_KEY)
+        baseline = None
+        if state:
+            try:
+                baseline = int(json.loads(state)["rows"])
+            except (ValueError, TypeError, KeyError):
+                # markerが読めない = 前回いつ採ったか分からない。採り直す方へ倒す。
+                baseline = None
+        ratio = get_db_analyze_growth_ratio()
+        if has_stats and baseline is not None:
+            growth = rows - baseline
+            if growth < baseline * ratio:
+                return {"analyzed": False, "skipped": "fresh", "rows": rows,
+                        "baseline_rows": baseline, "growth_rows": growth}
+        started = time.monotonic()
+        with self._lock:
+            # ANALYZEの前に開いている暗黙のtransactionを閉じる。migrationの書き込みを
+            # 巻き込んだまま数秒のtransactionを開くと、write lockの保持がそのぶん延びる。
+            self._conn.commit()
+            # 0 = 上限なし。値の根拠はdocstringを参照(1000では plan が変わらない)。
+            self._conn.execute("PRAGMA analysis_limit=0")
+            self._conn.execute("ANALYZE")
+            self._set_maintenance_locked(
+                _ANALYZE_STATE_KEY, json.dumps({"rows": rows, "at": time.time()})
+            )
+            self._conn.commit()
+        duration_ms = round((time.monotonic() - started) * 1000.0, 1)
+        result = {"analyzed": True, "rows": rows, "baseline_rows": baseline,
+                  "had_stats": has_stats, "duration_ms": duration_ms}
+        logger.info(
+            "plannerの統計を採り直しました（events %d 行 / %.1f 秒）",
+            rows, duration_ms / 1000.0,
+            extra={"event": "storage.planner_stats_analyzed", "ctx": result},
+        )
+        return result
 
     def db_file_status(self) -> dict:
         """DB fileとWALのsize、載っているvolumeの空き。画面が「今どれだけの物を退避するのか」
@@ -372,13 +478,18 @@ class MaintenanceMixin:
             " ON search_hits(source, started_at)"
         )
         columns = [row["name"] for row in self._conn.execute("PRAGMA table_info(events)")]
+        # internで落とした列を足し直さないための判定。**目標(_INTERN_TARGET_PHASE)ではなく
+        # DBが実際にどこまで進んだかで見る。** 目標だけを見ると、CONTRACT済みのDBに対して
+        # 目標をEXPANDへ戻した起動が、空の旧列を復活させてしまう ―― 書き込みはid列だけへ
+        # 行くので、旧列を読む箇所には黙ってNULLが並ぶ。段階は前へしか進まない。
+        interned = self._intern_phase_locked() >= _INTERN_PHASE_CONTRACT
         if "comment" not in columns:
             self._conn.execute("ALTER TABLE events ADD COLUMN comment TEXT")
             logger.info("events表にcomment columnを追加しました")
         if "count" not in columns:
             self._conn.execute("ALTER TABLE events ADD COLUMN count INTEGER")
             logger.info("events表にcount columnを追加しました")
-        if "user_avatar" not in columns:
+        if "user_avatar" not in columns and not interned:
             self._conn.execute("ALTER TABLE events ADD COLUMN user_avatar TEXT")
             logger.info("events表にuser_avatar columnを追加しました")
         if "gift_image" not in columns:
@@ -393,10 +504,10 @@ class MaintenanceMixin:
         if "user_fans_level" not in columns:
             self._conn.execute("ALTER TABLE events ADD COLUMN user_fans_level INTEGER")
             logger.info("events表にuser_fans_level columnを追加しました")
-        if "user_gifter_badge" not in columns:
+        if "user_gifter_badge" not in columns and not interned:
             self._conn.execute("ALTER TABLE events ADD COLUMN user_gifter_badge TEXT")
             logger.info("events表にuser_gifter_badge columnを追加しました")
-        if "user_member_badge" not in columns:
+        if "user_member_badge" not in columns and not interned:
             self._conn.execute("ALTER TABLE events ADD COLUMN user_member_badge TEXT")
             logger.info("events表にuser_member_badge columnを追加しました")
         if "user_gifter_level" not in columns:
@@ -602,6 +713,17 @@ class MaintenanceMixin:
                        "ctx": {"table": "recordings",
                                "column": "review_state,review_updated_at"}},
             )
+        if "memo" not in recording_columns:
+            # 録画1本ぶんの覚え書き。既存行は空で始める(推測で何かを書くと、operatorが
+            # 書いた文字と区別が付かなくなる)。
+            self._conn.execute(
+                "ALTER TABLE recordings ADD COLUMN memo TEXT NOT NULL DEFAULT ''"
+            )
+            logger.info(
+                "recordings表にmemo columnを追加しました",
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "recordings", "column": "memo"}},
+            )
         target_columns = [row["name"] for row in self._conn.execute("PRAGMA table_info(monitored_targets)")]
         if "record_video" not in target_columns:
             self._conn.execute(
@@ -744,7 +866,7 @@ class MaintenanceMixin:
                        "ctx": {"table": "media_job_queue", "column": "stages_json"}},
             )
         if "sweep" not in media_job_columns:
-            # 起動時sweepが自動で積んだ行の目印。既存行は人の投入として0で入る(実際、この列が
+            # sweepが自動で積んだ行の目印。既存行は人の投入として0で入る(実際、この列が
             # 無かった頃に積まれたsweep行はpackだけで、人の投入と同じ扱いで走っていた)。
             self._conn.execute(
                 "ALTER TABLE media_job_queue ADD COLUMN sweep INTEGER NOT NULL DEFAULT 0"
@@ -955,6 +1077,304 @@ class MaintenanceMixin:
             self._conn.execute("ALTER TABLE ops_events ADD COLUMN duration_ms REAL")
             logger.info("ops_events表にduration_ms columnを追加しました")
 
+    # ----- eventsの重複文字列のintern ---------------------------------------------------
+    # 段階を2つに分けてある理由は _common.py の _INTERN_PHASE_* を参照。要点は「旧列を残した
+    # ままでは1 byteも減らないので途中で止まる形にできない」ことと、「落とした瞬間に、まだ
+    # 書き換えていない読み出し箇所のavatarとbadgeが消える」ことの両立である。
+
+    # 既存行のid埋めに使う一時的なUNIQUE index。valueで引くのはここだけで、常設にすると
+    # 実測81.5MB(292k件 x 274 byte)を払い続けることになる ―― 回収する294MBの28%である。
+    _INTERN_TEMP_INDEX = "tmp_event_strings_value"
+
+    def _intern_targets(self) -> tuple:
+        """(表名, 旧列名, id列名) の組。eventsとcontributor_samplesが同じ event_strings を
+        共有する。対象を増やすときは _common.py の _INTERNED_* に足すだけでよい。"""
+        targets = [("events", old, new) for old, new in _INTERNED_EVENT_COLUMNS]
+        targets += [("contributor_samples", old, new)
+                    for old, new in _INTERNED_CONTRIBUTOR_COLUMNS]
+        return tuple(targets)
+
+    def _intern_phase_locked(self) -> int:
+        raw = self._get_maintenance_locked(_INTERN_PHASE_KEY)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return _INTERN_PHASE_NONE
+
+    def _apply_intern_phase(self, phase: int) -> None:
+        """段階を storage の書き込み経路へ反映する。以後のINSERTはこのSQLで書かれる。"""
+        self._intern_phase = phase
+        self._events_insert_sql = _events_insert_sql(phase)
+
+    def migrate_event_interning(self) -> dict:
+        """eventsの重複文字列を event_strings のidへ畳む。__init__の退避後の区間から呼ぶ。
+
+        **冪等で再開可能である。** 再開条件は「id列がNULLの行」という述語そのもので、
+        chunkごとにcommitするので途中で落ちても続きから進む。旧列は §CONTRACT の全行
+        突き合わせを通るまで残るため、どの時点で止まっても真実は旧列側に在る。
+
+        破壊的(旧列を落とす)なので、呼び出しは必ず _backup_before_migrations の後に置く。
+        """
+        started = time.monotonic()
+        phase = self._intern_phase_locked()
+        target = _INTERN_TARGET_PHASE
+        if phase >= target:
+            self._apply_intern_phase(phase)
+            return {"phase": phase, "skipped": "already_at_target"}
+        summary: dict = {"phase_before": phase, "filled": {}, "interned_rows": 0}
+        if phase < _INTERN_PHASE_EXPAND:
+            summary.update(self._intern_expand_locked())
+            phase = _INTERN_PHASE_EXPAND
+            self._set_maintenance_locked(_INTERN_PHASE_KEY, str(phase))
+            self._conn.commit()
+        self._apply_intern_phase(phase)
+        if target >= _INTERN_PHASE_CONTRACT and phase < _INTERN_PHASE_CONTRACT:
+            contracted = self._intern_contract_locked()
+            summary.update(contracted)
+            if contracted.get("dropped"):
+                phase = _INTERN_PHASE_CONTRACT
+                self._set_maintenance_locked(_INTERN_PHASE_KEY, str(phase))
+                self._conn.commit()
+                self._apply_intern_phase(phase)
+        summary["phase"] = phase
+        summary["duration_ms"] = round((time.monotonic() - started) * 1000.0, 1)
+        logger.info(
+            "eventsの重複文字列のinternを進めました（段階 %d -> %d, %.1fs）",
+            summary["phase_before"], phase, summary["duration_ms"] / 1000.0,
+            extra={"event": "storage.intern_migrated", "ctx": summary},
+        )
+        return summary
+
+    def _intern_expand_locked(self) -> dict:
+        """id列を足し、intern表を作り、既存行のidを埋める。**旧列は残す。**
+
+        旧列を残したこの段階を経由するのは、読み出し側(events のavatar/badgeを読む7箇所)の
+        書き換えが1回では終わらないためである。両方の列が同じ真実を持っている間は、書き換え
+        済みの箇所と未着手の箇所が同じ答えを返す。
+        """
+        for table, old, new in self._intern_targets():
+            columns = [r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")]
+            if old not in columns:
+                continue  # 既に落とし済み(CONTRACT後にこの起動が来た)
+            if new not in columns:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {new} INTEGER")
+                logger.info(
+                    "%s表に %s columnを追加しました", table, new,
+                    extra={"event": "storage.schema_migrated",
+                           "ctx": {"table": table, "column": new}},
+                )
+        self._conn.commit()
+        # 前回が一時indexを張ったまま落ちていることがある。常設にしない約束なので必ず消す。
+        self._conn.execute(f"DROP INDEX IF EXISTS {self._INTERN_TEMP_INDEX}")
+        self._conn.execute(
+            f"CREATE UNIQUE INDEX {self._INTERN_TEMP_INDEX} ON event_strings(value)")
+        try:
+            added = self._intern_collect_values_locked()
+            filled = self._intern_fill_ids_locked()
+        finally:
+            # 一時indexは必ず落とす。例外で抜けても常設化させない。
+            self._conn.execute(f"DROP INDEX IF EXISTS {self._INTERN_TEMP_INDEX}")
+            self._conn.commit()
+        return {"interned_rows": added, "filled": filled}
+
+    def _intern_collect_values_locked(self) -> int:
+        """対象列のdistinct値を event_strings へ入れる。一時UNIQUE index保持前提。
+
+        distinct値を丸ごとmemoryへ載せない: user_avatarだけで実測292,114件 x 274 byte =
+        80MBある。cursorを流しながら少しずつ入れる。既に在る値は ``INSERT OR IGNORE`` が
+        弾くので、途中で落ちた前回の続きからでも同じ結果になる。
+        """
+        next_id = self._conn.execute(
+            "SELECT COALESCE(MAX(id), 0) + 1 FROM event_strings").fetchone()[0]
+        added = 0
+        for table, old, _new in self._intern_targets():
+            columns = [r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")]
+            if old not in columns:
+                continue
+            cursor = self._conn.execute(
+                f"SELECT DISTINCT {old} AS v FROM {table} WHERE {old} IS NOT NULL")
+            while True:
+                chunk = cursor.fetchmany(10000)
+                if not chunk:
+                    break
+                rows = []
+                for row in chunk:
+                    rows.append((next_id, _string_hash(row["v"]), row["v"]))
+                    next_id += 1
+                cur = self._conn.executemany(
+                    "INSERT OR IGNORE INTO event_strings (id, hash, value) VALUES (?, ?, ?)",
+                    rows)
+                added += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                self._conn.commit()
+        return added
+
+    def _intern_fill_ids_locked(self) -> dict:
+        """既存行のid列を埋める。一時UNIQUE index保持前提。
+
+        chunkごとにcommitする。``{new} IS NULL`` が再開条件そのものなので、途中で落ちても
+        次の起動が残りだけを進める(やり直しではない)。
+        """
+        filled: dict = {}
+        for table, old, new in self._intern_targets():
+            columns = [r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")]
+            if old not in columns:
+                continue
+            done = 0
+            while True:
+                cur = self._conn.execute(
+                    f"UPDATE {table} SET {new} ="
+                    f" (SELECT s.id FROM event_strings s WHERE s.value = {table}.{old})"
+                    f" WHERE rowid IN (SELECT rowid FROM {table}"
+                    f"  WHERE {old} IS NOT NULL AND {new} IS NULL LIMIT ?)",
+                    (_INTERN_MIGRATE_CHUNK_ROWS,),
+                )
+                self._conn.commit()
+                if not cur.rowcount:
+                    break
+                done += cur.rowcount
+            if done:
+                filled[f"{table}.{new}"] = done
+        return filled
+
+    def _strip_avatar_signatures_locked(self) -> dict:
+        """既存のavatar値から署名queryを落とし、idを付け替える。
+
+        **self._lock保持前提**(_locked)。呼び出し元の __init__ が migration区間ごと lock を
+        持っているので、ここで取り直すと自分自身で待って進まなくなる(この lock は再帰的では
+        ない)。同じ区間に居る _intern_expand_locked / _intern_contract_locked と同じ約束。
+
+        **これはinternとは別の判断である。** internは同じ文字列を1度だけ持つ変更で記録の
+        中身を変えないが、こちらは保存する値そのものを変える。落としてよい根拠と、落として
+        表示が壊れない理由は _common.py の _INTERN_STRIPPED_COLUMNS に書いてある。
+
+        **行を書き換えず、idを付け替える。** event_strings は avatar と badge が相乗りする
+        共有表で、実データに両方から参照されている行が1件ある。UPDATE event_strings SET
+        value=... で潰すと、badge側が別の文字列を指し始める。
+
+        付け替えた結果どこからも参照されなくなった行だけを消す。参照の判定は4つのid列
+        (events 3列 + contributor_samples 1列)すべてに対して行う。
+
+        冪等。2度目は付け替える行が無く、消す行も無い。
+        """
+        version = str(_INTERN_STRIP_VERSION)
+        if self._get_maintenance_locked(_INTERN_STRIP_KEY) == version:
+            return {"stripped": False, "skipped": "already_done"}
+        started = time.monotonic()
+        targets = [(t, new) for t, old, new in self._intern_targets()
+                   if old in _INTERN_STRIPPED_COLUMNS]
+        cols = [r["name"] for r in self._conn.execute("PRAGMA table_info(events)")]
+        if "user_avatar_id" not in cols:
+            # internがまだEXPANDへ到達していない起動。次の起動で揃う。
+            return {"stripped": False, "skipped": "intern_not_ready"}
+        remap: dict = {}
+        for table, idcol in targets:
+            rows = self._conn.execute(
+                f"SELECT DISTINCT s.id AS id, s.value AS value FROM event_strings s"
+                f" WHERE s.id IN (SELECT {idcol} FROM {table}"
+                f"                WHERE {idcol} IS NOT NULL)").fetchall()
+            for row in rows:
+                head, sep, _ = row["value"].partition("?")
+                if not sep:
+                    continue
+                remap[row["id"]] = head
+        if not remap:
+            self._set_maintenance_locked(_INTERN_STRIP_KEY, version)
+            self._conn.commit()
+            return {"stripped": True, "remapped_values": 0, "rows": 0, "deleted": 0}
+        # 落とした後の値を intern する(既存行が在ればそれを使う)。
+        wanted = sorted(set(remap.values()))
+        self._intern_values_locked(set(wanted))
+        new_ids = {value: self._string_cache[value] for value in wanted}
+        pairs = [(old_id, new_ids[value]) for old_id, value in remap.items()
+                 if new_ids[value] != old_id]
+        # 対応表をtempへ置いて、表ごとに**1回のUPDATE**で付け替える。
+        # 1値ずつ `WHERE user_avatar_id = ?` を投げてはいけない: この列にindexは無く、
+        # 29万値それぞれが125万行の全走査になる(実測10分でも終わらなかった)。
+        self._conn.execute("DROP TABLE IF EXISTS temp._avatar_strip_map")
+        self._conn.execute(
+            "CREATE TEMP TABLE _avatar_strip_map"
+            " (old_id INTEGER PRIMARY KEY, new_id INTEGER NOT NULL)")
+        self._conn.executemany(
+            "INSERT INTO temp._avatar_strip_map (old_id, new_id) VALUES (?, ?)", pairs)
+        moved = 0
+        for table, idcol in targets:
+            cur = self._conn.execute(
+                f"UPDATE {table} SET {idcol} ="
+                f" (SELECT m.new_id FROM temp._avatar_strip_map m WHERE m.old_id = {idcol})"
+                f" WHERE {idcol} IN (SELECT old_id FROM temp._avatar_strip_map)")
+            moved += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            self._conn.commit()
+        self._conn.execute("DROP TABLE temp._avatar_strip_map")
+        # どこからも参照されなくなった行を消す。共有表なので4列すべてを見る。
+        refs = " UNION ".join(
+            f"SELECT {new} AS id FROM {table} WHERE {new} IS NOT NULL"
+            for table, _, new in self._intern_targets())
+        cur = self._conn.execute(
+            f"DELETE FROM event_strings WHERE id NOT IN ({refs})")
+        deleted = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        self._set_maintenance_locked(_INTERN_STRIP_KEY, version)
+        self._conn.commit()
+        result = {"stripped": True, "remapped_values": len(pairs), "rows": moved,
+                  "deleted": deleted,
+                  "duration_ms": round((time.monotonic() - started) * 1000.0, 1)}
+        logger.warning(
+            "avatarの署名を落として値をまとめました（%d値 -> 付け替え %d行 / 不要になった"
+            "%d行を削除, %.1fs）。**VACUUMするまでfileは縮みません。**",
+            len(pairs), moved, deleted, result["duration_ms"] / 1000.0,
+            extra={"event": "storage.avatar_signatures_stripped", "ctx": result},
+        )
+        return result
+
+    def _intern_contract_locked(self) -> dict:
+        """全行の突き合わせを関門にして旧列を落とす。**唯一の安全弁なので外さないこと。**
+
+        突き合わせは ``IS NOT`` で行う(``!=`` はNULL同士でNULLを返して素通りする)。NULLと
+        空文字の区別もこれで保たれる: NULLの行はid列もNULLでJOIN先もNULL、空文字は
+        event_stringsに1行を持つので、読み出し側の ``NULLIF(MAX(...), '')`` が旧と同じに働く。
+        """
+        mismatched: dict = {}
+        for table, old, new in self._intern_targets():
+            columns = [r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")]
+            if old not in columns:
+                continue
+            bad = self._conn.execute(
+                f"SELECT COUNT(*) FROM {table} t"
+                f" LEFT JOIN event_strings s ON s.id = t.{new}"
+                f" WHERE t.{old} IS NOT s.value"
+            ).fetchone()[0]
+            if bad:
+                mismatched[f"{table}.{old}"] = bad
+        if mismatched:
+            # 落とせば元の値はどこにも残らない。1行でも食い違うなら進まない。
+            logger.error(
+                "internの突き合わせが一致しないため旧列を落としません: %s", mismatched,
+                extra={"event": "storage.intern_verify_failed",
+                       "ctx": {"mismatched": mismatched}},
+            )
+            return {"dropped": False, "mismatched": mismatched}
+        dropped = []
+        for table, old, _new in self._intern_targets():
+            columns = [r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")]
+            if old not in columns:
+                continue
+            self._conn.execute(f"ALTER TABLE {table} DROP COLUMN {old}")
+            dropped.append(f"{table}.{old}")
+        self._conn.commit()
+        # **VACUUMするまでfileは縮まない。それどころか一時的に大きくなる。**
+        # DROP COLUMNは行をその場で書き直すので、空いたのはpage内の隙間(断片化)であって
+        # 空きpageではない。実測(1,256,138行): 1767.6MB -> 落とした直後2042.4MB(freelistは
+        # 100.9MBしか載らない) -> VACUUM後1262.6MB(-505.0MB / -28.6%, VACUUM自体は16.8秒)。
+        # 新しい行は小さくなるので**伸びる速さはここで落ちる**が、大きさが戻るのはVACUUMの後。
+        # 自動では走らせない(vacuum()のdocstringの通り、全書き込みを止めるため)。
+        logger.warning(
+            "internの突き合わせが全行一致したので旧列を落としました: %s"
+            "（DB fileはVACUUMするまで縮みません。実測では一時的に約275MB大きくなり、"
+            "VACUUM後に約505MB小さくなります）", dropped,
+            extra={"event": "storage.intern_contracted",
+                   "ctx": {"dropped": dropped, "vacuum_required": True}},
+        )
+        return {"dropped": True, "dropped_columns": dropped, "vacuum_required": True}
+
     def _migration_done(self, name: str) -> bool:
         row = self._conn.execute(
             "SELECT 1 FROM settings WHERE key = ?", (f"_migration:{name}",)
@@ -1067,13 +1487,34 @@ class MaintenanceMixin:
     def _backfill_users(self) -> None:
         """既存eventからusers表を再構成する(migration一度きり)。時系列順に同じupsert
         を適用するので、live取り込みと完全に同じ最新値上書きロジックになる。lock保持前提。"""
+        # avatar/badgeは event_strings へinternする列だが、**この method は _migrate から
+        # (= intern migrationより前に)呼ばれる**。そのときはまだ旧列しか埋まっていないので、
+        # 今この瞬間に値を持っている側から読む。段階で分岐するのではなく実際の列で判断する
+        # のは、_migrate の途中とintern後の両方から辿り着くためである。
+        # 集約が無い(1行ずつ時系列にupsertする)ので、MAXの読み替えは要らない。
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(events)")}
+        selects, joins = [], []
+        for alias, (old, new) in zip(
+            ("av", "gbv", "mbv"),
+            (("user_avatar", "user_avatar_id"),
+             ("user_gifter_badge", "user_gifter_badge_id"),
+             ("user_member_badge", "user_member_badge_id")),
+        ):
+            label = {"user_avatar": "avatar", "user_gifter_badge": "gifter_badge",
+                     "user_member_badge": "member_badge"}[old]
+            if old in columns:
+                selects.append(f"e.{old} AS {label}")
+            else:
+                selects.append(f"{alias}.value AS {label}")
+                joins.append(f" LEFT JOIN event_strings {alias} ON {alias}.id = e.{new}")
         rows = self._conn.execute(
-            "SELECT identity_key, user_id, user_unique_id AS unique_id, user_nickname AS nickname,"
-            " user_avatar AS avatar, user_fans_level AS fans_level,"
-            " user_gifter_level AS gifter_level,"
-            " user_gifter_badge AS gifter_badge, user_member_badge AS member_badge, time"
-            " FROM events WHERE identity_key IS NOT NULL AND identity_key != ''"
-            " ORDER BY time"
+            "SELECT e.identity_key, e.user_id, e.user_unique_id AS unique_id,"
+            " e.user_nickname AS nickname, e.user_fans_level AS fans_level,"
+            " e.user_gifter_level AS gifter_level, e.time, "
+            + ", ".join(selects)
+            + " FROM events e" + "".join(joins)
+            + " WHERE e.identity_key IS NOT NULL AND e.identity_key != ''"
+            " ORDER BY e.time"
         ).fetchall()
         count = 0
         for row in rows:

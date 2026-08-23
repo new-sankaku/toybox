@@ -16,7 +16,7 @@ class MediaJobsMixin:
     """映像job queue(焼き込み / Up出力 / 再mp4化)。
 
     lockもDB接続も持たない。すべて Storage が所有する self._conn /
-    self._lock / self._read_lock を借りる(mixinとして Storage に混ぜられる前提)。
+    self._lock / _read_connection() を借りる(mixinとして Storage に混ぜられる前提)。
     契約の詳細はmodule docstringを参照。
     """
 
@@ -42,7 +42,7 @@ class MediaJobsMixin:
         """1件投入して行を返す。重複投入の抑止は呼び出し側(pending_media_job_for)で行う:
         「同じ焼き込みをもう一度」は再出力として正当な要求なので、ここでは拒まない。
 
-        ``sweep`` は起動時sweepが自動で積んだ行の目印。workerはこの印の付いた行の同時実行
+        ``sweep`` はsweepが自動で積んだ行の目印。workerはこの印の付いた行の同時実行
         本数を人の投入と別枠で絞る(claim_next_pending_media_job)。"""
         with self._lock:
             self._conn.execute(
@@ -96,7 +96,7 @@ class MediaJobsMixin:
 
     def media_job_recording_ids_in_states(self, kinds, states) -> dict:
         """``{kind: {recording_id, ...}}``。指定stateで終わった行を1件でも持つ録画を種別ごとに
-        集める。起動時sweepが「前回そうなった録画」を自動で積み直さないために使う。
+        集める。sweepが「前回そうなった録画」を自動で積み直さないために使う。
 
         sweepの候補判定は成果物の実在なので、失敗・skip・取り消しで終わった録画は成果物が
         無いまま残り、次の起動でまた候補に戻る。音声の無い録画のように結果が変わらないものは、
@@ -137,7 +137,7 @@ class MediaJobsMixin:
         差し替えるので、その裏で同じmp4を読んでいる焼き込みは途中で足元を抜かれる。
         直列workerの時代はこれが起こり得なかったため、並列化と一緒に明示する。
 
-        ``sweep_limit`` は起動時sweepが積んだ行の同時実行上限(0で無制限)。sweepは人が待って
+        ``sweep_limit`` はsweepが積んだ行の同時実行上限(0で無制限)。sweepは人が待って
         いない自動投入なので、workerを全部占めると人の投入がその後ろで待たされる。数え方と
         掴み方を同じlockの中に置くのは、上限判定と掴みが別呼び出しだと2人のworkerが同時に
         「まだ空きがある」と判断できてしまうため。
@@ -309,7 +309,7 @@ class MediaJobsMixin:
     def promote_media_job(self, job_id: str, priority: int) -> bool:
         """待機中の行の順番だけを上げる。上げたらTrueを返す。
 
-        起動時sweepは文字起こしのない録画を上限なしで積むので、人が今開いた1本はほぼ必ず既に待機列に
+        sweepは文字起こしのない録画を上限なしで積むので、人が今開いた1本はほぼ必ず既に待機列に
         居る(しかもsweep priorityで最後尾)。二重投入を拒むだけだと、人がその場で待っている
         1本が数百本の自動投入の後ろで動かないままになる。行を作り直さずpriorityだけ上げる
         のは、同じ録画に2本走らせない約束を崩さないため。

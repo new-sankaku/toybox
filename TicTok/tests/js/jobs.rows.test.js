@@ -270,7 +270,7 @@ describe("jobs.js の行の組み立て", () => {
       expect(win.kindText({ domain: "みしらぬ処理" })).toBe("みしらぬ処理");
     });
 
-    it("起動時sweepが積んだjobは自動と名乗る", () => {
+    it("sweepが積んだjobは自動と名乗る", () => {
       expect(win.kindText({ domain: "overlay", sweep: true })).toBe("焼き込み（自動）");
     });
 

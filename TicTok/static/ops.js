@@ -329,7 +329,9 @@ async function loadFilterOptions() {
 async function loadSummary() {
   const el = document.getElementById("ops-summary");
   try {
-    const data = await apiSend("GET", "/api/ops/summary");
+    // navのbadgeと同じ1本へ相乗りする(fetchOpsSummaryはcommon.js)。別々に引くと、
+    // この画面を開くたびに同じrequestが2本並ぶ。
+    const data = await fetchOpsSummary();
     const counts = data.counts || {};
     el.textContent = `直近${Math.round(data.window_hours)}時間: error ${fmtNum(counts.error)}`
       + ` / warning ${fmtNum(counts.warning)} / info ${fmtNum(counts.info)}`;
@@ -536,6 +538,6 @@ loadFilterOptions();
 loadSummary();
 loadEvents(false);
 loadPerf();
-setInterval(pollOpsUpdates, OPS_BADGE_POLL_MS);
+pollWhileVisible(pollOpsUpdates, OPS_BADGE_POLL_MS);
 // jobの進捗はJob画面が持つ。この画面はWSを接続表示とtopbarのjob badgeのためだけに使う。
 connectWS(() => {});

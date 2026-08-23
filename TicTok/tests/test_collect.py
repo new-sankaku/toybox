@@ -1784,10 +1784,14 @@ async def test_collector_without_a_prefetcher_still_records_events(collector):
 # ---------------- コラボ(非BattleのLinkMic)窓 ----------------
 
 
-def _link_event(channel_id, rooms):
-    """LinkLayerEventのgroup_change_content形。roomsは (room_id, uid, status)。"""
+def _link_event(channel_id, rooms, source=None):
+    """LinkLayerEventのgroup_change_content形。roomsは (room_id, uid, status)。
+
+    ``source`` はそのsnapshotを出した操作の名乗り(実payloadのfield)。退出系の値が
+    入るとv4はrosterを読まない。"""
     return SimpleNamespace(
         channel_id=channel_id,
+        source=source,
         group_change_content=C._sim_group_change(rooms),
     )
 
@@ -2001,31 +2005,164 @@ async def test_collab_peer_identity_falls_silent_when_the_room_cannot_be_read(
 
 
 @pytest.mark.asyncio
-async def test_open_collab_window_is_held_back_until_the_session_ends(collector, monkeypatch):
-    """進行中は終端が決まらないので中間永続化に含めず、session終了時にその時刻で確定する。
+async def test_open_collab_window_is_persisted_provisionally(collector, monkeypatch):
+    """接続中の窓も暫定の終端つきで書く。session終了時に確定形へ置き換わる。
 
-    以前は終了時も捨てていた。録画18本の照合で、コラボを繋いだまま配信が終わる録画が
-    3本(計648秒)あり、取りこぼしの一角だった。終端が実観測でないことは closed_by で
-    名乗る。"""
+    以前は確定済みの窓しか書いていなかった。graceful終了なら
+    ``_close_open_collab_windows`` が先に走るので漏れは無い前提だったが、serverの
+    再起動・強制終了でその前提が崩れ、開いていた窓はメモリごと消えていた(実測で
+    38 sessionのうち13 sessionが末尾の窓を失っていた)。"""
     collector.room_id = 111
     collector._owner_id = "own"
     monkeypatch.setattr(collector, "_persist_progress", lambda: None)
-    monkeypatch.setattr(C.time, "time", lambda: 1000.0)
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(C.time, "time", lambda: clock["t"])
 
     await collector._on_link_layer(_link_event("ch1", [
         ("111", "own", "GROUP_STATUS_LINKED"),
         ("222", "peer", "GROUP_STATUS_LINKED"),
     ]))
-
     assert collector._collab_open, "接続中の窓は状態としては持つ"
-    assert collector._collab_windows_public() == [], "終端が決まるまでは保存しない"
+
+    clock["t"] = 1200.0
+    provisional = collector._collab_windows_public()
+    assert len(provisional) == 1, "落ちても残るよう、開いている窓も書く"
+    assert provisional[0]["closed_by"] == "open", "終端が暫定であることを名乗る"
+    assert (provisional[0]["start"], provisional[0]["end"]) == (1000.0, 1200.0)
 
     collector._close_open_collab_windows(1300.0)
     assert collector._collab_open == {}
-    window = collector._collab_windows_public()[0]
+    windows = collector._collab_windows_public()
+    assert len(windows) == 1, "確定形が暫定形を置き換える(全置換で保存されるため)"
+    window = windows[0]
     assert (window["start"], window["end"]) == (1000.0, 1300.0)
     assert window["closed_by"] == "session_end"
     assert window["version"] == C.COLLAB_WINDOW_VERSION
+
+
+@pytest.mark.asyncio
+async def test_leave_snapshot_does_not_open_a_collab_window(collector, monkeypatch):
+    """退出操作で出たsnapshotのrosterは読まない(v4)。
+
+    ``click_quick_leave_button`` 等のsnapshotは、抜ける本人をまだLINKEDのまま載せた
+    **変化前のroster**である。v3はこれを「まだ繋がっている」と読み、コラボが終わった
+    瞬間に窓を開いて次のsnapshotが届くまで(実測で最長1時間40分)ソロ時間をコラボに
+    数えていた。録画47本の照合で、この署名の窓は14,230秒中22秒しか映像と一致しない。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(C.time, "time", lambda: clock["t"])
+    linked = [("111", "own", "GROUP_STATUS_LINKED"), ("222", "peer", "GROUP_STATUS_LINKED")]
+
+    await collector._on_link_layer(
+        _link_event("ch1", linked, source="click_quick_leave_button"))
+    assert collector._collab_open == {}, "退出のsnapshotでは窓を開かない"
+
+    # 通常のsnapshotなら開く。退出系だけを外していることの対照。
+    await collector._on_link_layer(
+        _link_event("ch1", linked, source="SOURCE_TYPE_FRIEND_LIST[REPLY_STATUS_AGREE]"))
+    assert len(collector._collab_open) == 1
+
+    # 開いている窓を、退出のsnapshotで閉じもしない(状態を語っていないため)。
+    clock["t"] += 100.0
+    await collector._on_link_layer(
+        _link_event("ch1", [("111", "own", "GROUP_STATUS_LINKED")],
+                    source="click_quick_leave_button"))
+    assert len(collector._collab_open) == 1, "退出のsnapshotは開閉のどちらにも使わない"
+
+
+@pytest.mark.asyncio
+async def test_own_disconnect_snapshot_closes_the_window(collector, monkeypatch):
+    """``leave_with_user_click_disconnect`` は自分が切ったことの名乗りなので閉じる。
+
+    退出系snapshotを一律に無視すると、コラボが終わっても閉じる合図が無くなり、次の
+    snapshotが届くまで窓が開いたままになる(実測47分)。生captureに4件あり、4件とも
+    映像のコラボはその1〜4秒後に終わっていた。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(C.time, "time", lambda: clock["t"])
+    linked = [("111", "own", "GROUP_STATUS_LINKED"), ("222", "peer", "GROUP_STATUS_LINKED")]
+
+    await collector._on_link_layer(
+        _link_event("ch1", linked, source="SOURCE_TYPE_FRIEND_LIST[REPLY_STATUS_AGREE]"))
+    assert len(collector._collab_open) == 1
+
+    # rosterは変化前のまま(全員LINKED)だが、名乗りの方が切断を告げている。
+    clock["t"] += 200.0
+    await collector._on_link_layer(
+        _link_event("ch1", linked, source="leave_with_user_click_disconnect"))
+    assert collector._collab_open == {}
+    window = collector._collab_windows[0]
+    assert (window["start"], window["end"]) == (1000.0, 1200.0)
+
+
+@pytest.mark.asyncio
+async def test_a_guest_in_my_own_room_is_not_a_collab(collector, monkeypatch):
+    """相手が自室に居るentryはco-hostではない(自室へゲストを上げるmulti-guest)。
+
+    group_change側は自室entryを is_own として既に除いており、list/join_direct側だけが
+    残っていた。実測1件(35分)を録画で確かめたところ、画面は最後まで配信者ひとりで
+    共演は映っていない。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+    monkeypatch.setattr(C.time, "time", lambda: 1000.0)
+
+    guest_in_own_room = SimpleNamespace(
+        channel_id="ch1",
+        join_direct_content=SimpleNamespace(all_users=SimpleNamespace(linked_list=[
+            SimpleNamespace(link_user=SimpleNamespace(uid="own", room_id=111)),
+            SimpleNamespace(link_user=SimpleNamespace(uid="guest", room_id=111)),
+        ])),
+    )
+    await collector._on_link_layer(guest_in_own_room)
+    assert collector._collab_open == {}, "自室のゲストでは窓を開かない"
+
+    peer_in_another_room = SimpleNamespace(
+        channel_id="ch1",
+        join_direct_content=SimpleNamespace(all_users=SimpleNamespace(linked_list=[
+            SimpleNamespace(link_user=SimpleNamespace(uid="own", room_id=111)),
+            SimpleNamespace(link_user=SimpleNamespace(uid="peer", room_id=222)),
+        ])),
+    )
+    await collector._on_link_layer(peer_in_another_room)
+    assert len(collector._collab_open) == 1, "別室の相手なら従来どおり開く"
+
+
+@pytest.mark.asyncio
+async def test_open_collab_window_ends_when_the_stream_last_sent_data(collector, monkeypatch):
+    """開いたままの窓の終端は「配信が生きていた最後の時刻」で頭打ちにする。
+
+    配信が切れた後もcollectorは再接続を試み続け、sessionはその間開いたままになる
+    (実測13.6時間、その間viewer_sampleは0件)。session終了時刻で閉じると、その幻の尾を
+    丸ごとコラボに数える。``_last_data_at`` はcollector自身が書くsystem eventでも進むため
+    使えない — 配信由来のdataだけが動かす ``_last_stream_at`` で切る。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(C.time, "time", lambda: clock["t"])
+
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_LINKED"),
+        ("222", "peer", "GROUP_STATUS_LINKED"),
+    ]))
+    clock["t"] = 1200.0
+    await collector._record("comment", {"user": {"unique_id": "v"}, "comment": "やあ"})
+    stream_last = collector._last_stream_at
+
+    # 配信が切れ、再接続の記録(system)だけが積まれていく。
+    clock["t"] = 9000.0
+    await collector._record("system", {"text": "再接続します (1/100回目)。"})
+    assert collector._last_stream_at == stream_last, "systemは配信由来のdataではない"
+    assert collector._last_data_at == 9000.0, "idle watchdogは撫でる"
+
+    collector._close_open_collab_windows(9000.0)
+    window = collector._collab_windows[0]
+    assert window["end"] == 1200.0, "配信が最後にdataを送った時刻で閉じる"
 
 
 @pytest.mark.asyncio
@@ -2066,4 +2203,3 @@ async def test_a_peers_departure_keeps_the_window_open_for_the_remaining_peers(
     assert collector._collab_open == {}, "最後の相手が抜けたら閉じる"
     window = collector._collab_windows[0]
     assert (window["start"], window["end"]) == (1000.0, 1200.0)
-    assert window["closed_by"] == "finish_content:peer"

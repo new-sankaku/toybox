@@ -459,7 +459,7 @@ async function refreshDiskRows() {
   renderDiskRows(capacityReport);
 }
 
-setInterval(refreshDiskRows, DISK_POLL_MS);
+pollWhileVisible(refreshDiskRows, DISK_POLL_MS);
 
 document.getElementById("cap-reload").addEventListener("click", async () => {
   const btn = document.getElementById("cap-reload");

@@ -931,9 +931,9 @@ def test_claim_takes_one_job_at_a_time_and_marks_it_running(tmp_db, recording_id
 
 
 def test_claim_caps_how_many_sweep_jobs_run_at_once(tmp_db, recording_id, make_session):
-    """起動時sweepが積んだ行でworkerを埋め尽くさないこと。
+    """sweepが積んだ行でworkerを埋め尽くさないこと。
 
-    sweepは人が待っていない自動投入で、起動のたびに数十本積まれる。全枠を取られると、
+    sweepは人が待っていない自動投入で、起動直後は数十本積まれる。全枠を取られると、
     その直後に人が投げたjobはsweepが1本終わるまで始まらない。"""
     second = tmp_db.create_recording(make_session("b"), "b", "b.mp4", "b.mp4", "hd", 1.0)
     third = tmp_db.create_recording(make_session("c"), "c", "c.mp4", "c.mp4", "hd", 1.0)

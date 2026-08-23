@@ -10,7 +10,6 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body class="app-dashboard">
-  <div class="scanlines" aria-hidden="true"></div>
 
   <div class="app-shell">
     <h1 class="visually-hidden">配信者</h1>
@@ -233,26 +232,24 @@
           <!-- 共演構成: 配信時間をコラボ / Battle / ソロへ分解する。割合と、1時間あたりの回数。 -->
           <section class="result-block">
             <h3 class="result-subtitle">■ 共演構成 <span class="result-sub-note">（配信時間に占めるコラボ・Battleの割合と、配信1時間あたりの回数）</span> <span id="sm-coop-note" class="result-sub-note"></span></h3>
-            <!-- コラボ窓(LinkMic)の判定は録画映像で検証済み。v2は18録画との照合で
-                 「窓が在る区間の境界は秒単位で正しいが、コラボ時間を数%取りこぼす」
-                 (映像19.1h 対 窓17.7h)。過大計上だったv1とは向きが逆。取りこぼしの
-                 原因2つ(他の参加者の離脱で窓が閉じる / 繋いだまま配信が終わった窓を
-                 捨てる)をv3で直したので、集計はv3の窓が貯まるのを待っている。 -->
-            <p class="data-warning">
-              <b>⚠ 入力データ再計測中</b> — コラボ窓（LinkMic）の判定を作り直しました（v3）。
-              v2までの窓は<b>集計から除外</b>しており、コラボ比率・ソロ比率・共演計・下のグラフは
-              <b>新ruleで再計測中</b>です。v2は録画18本との照合で、窓の境界は秒単位で正しい一方
-              <b>コラボ時間を数%取りこぼす</b>ことが判りました（過大計上だったv1とは逆向き）。
-              原因の「他の参加者が抜けただけで窓が閉じる」「繋いだまま配信が終わった窓を捨てる」
-              をv3で直しています。Battle比率・Battle回数・平均Battle長は
-              別経路（battles）のため影響ありません。
+            <!-- コラボ窓(LinkMic)の判定は録画映像で検証済み。v4は47録画(33.3GB・映像38.36h)
+                 との照合で、幻0.11h / 取りこぼし0.88h。v3で見つかった欠陥(退出snapshotで
+                 窓が開く / 再接続retry期間を飲み込む / serverが落ちると開いていた窓が消える
+                 / 自室のゲストをコラボに数える)は
+                 doc/COOP_COMPOSITION.md に記録した。過去の窓は生captureから作り直してある。 -->
+            <p class="result-sub-note">
+              コラボ窓（LinkMic）の判定は録画47本・映像38.4時間と突き合わせて検証しています（v4）。
+              照合できた範囲で、映像にコラボが映っていないのに窓がある時間が0.1時間、
+              逆に映っているのに窓が無い時間が0.9時間残っています（後者のほとんどは、
+              収集を始めた時点で既にコラボ中だった配信です）。
+              コラボ収集を始める前の配信は集計対象外です。
             </p>
             <div class="a-kpibar sm-conc" id="sm-coop"></div>
             <div class="sm-mix" id="sm-coop-mix"></div>
             <div class="sm-mix-legend" id="sm-coop-legend"></div>
 
             <!-- コラボ比率の推移: 配信ごとの「配信時間に占めるコラボの割合」と、その移動平均 -->
-            <h4 class="result-subtitle sm-subtitle">コラボ比率の推移 <span class="data-warning-inline">⚠ 検証中</span> <span class="result-sub-note">（古い→新しい・棒=その配信のコラボ比率）</span> <span id="sm-coop-trend-note" class="result-sub-note"></span></h4>
+            <h4 class="result-subtitle sm-subtitle">コラボ比率の推移 <span class="result-sub-note">（古い→新しい・棒=その配信のコラボ比率）</span> <span id="sm-coop-trend-note" class="result-sub-note"></span></h4>
             <div class="x-chartwrap"><canvas id="sm-coop-trend"></canvas></div>
             <div id="sm-coop-trend-empty" class="feed-empty">コラボの記録がありません。</div>
 

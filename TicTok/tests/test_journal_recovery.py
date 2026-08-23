@@ -397,3 +397,96 @@ def test_prune_runs_after_the_scan_so_expiring_files_still_contribute(
     assert summary["sessions"] == 1
     assert _db_counts(storage, session_id) == (2, 0)
     assert not old.exists()
+
+
+# ===== 数え直しを避けるcache ===================================================
+#
+# journalは保持期間ぶん全部が数える対象で、起動のたびに同じ数字を出し直していた
+# (実測350MBで6〜10秒)。追記onlyなので、既に数えた区間の件数は二度と変わらない。
+# ここで固定するのは1点だけ: **cacheが在っても無くても、出る件数は全走査と同じ。**
+
+
+def test_count_cache_gives_the_same_numbers_as_a_full_scan(storage, journal_dir):
+    """2回目の数え上げ(cacheあり)が、1回目(全走査)と同じ件数を返す。"""
+    paths = _corpus(journal_dir)
+
+    first = storage._count_journal_rows(paths)
+    assert (journal_dir / "count_cache.json").is_file()
+    second = storage._count_journal_rows(paths)
+
+    assert second == first
+
+
+def test_appended_rows_are_counted_once_and_only_once(storage, journal_dir):
+    """cacheの続きから数えても、追記ぶんが二重に乗らない。"""
+    path = _write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(1, 100.0)),
+        ("v", _viewer_row(1, 101.0)),
+    ])
+    assert storage._count_journal_rows([path]) == ({1: 1}, {1: 1})
+
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"t": "e", "r": _event_row(1, 102.0)}) + "\n")
+
+    assert storage._count_journal_rows([path]) == ({1: 2}, {1: 1})
+
+
+def test_a_line_without_its_newline_is_counted_but_not_cached(storage, journal_dir):
+    """改行で終わっていない最終行は、数には入れるがcacheには残さない。
+
+    その行は「どこまで読んだか」に記録できない。数えたうえで位置を進めれば次の起動で
+    二度数え、数えなければDBから欠けた最後の1件が復元されなくなる。どちらも避けるため、
+    この行が在るfileはcacheの対象から外して次回は頭から数える。
+    """
+    path = _write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(1, 100.0)),
+    ])
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"t": "e", "r": _event_row(1, 101.0)}))   # 改行なし
+
+    # 全走査と同じ2件。何度数えても増えない。
+    assert storage._count_journal_rows([path]) == ({1: 2}, {})
+    assert storage._count_journal_rows([path]) == ({1: 2}, {})
+    cached = json.loads((journal_dir / "count_cache.json").read_text(encoding="utf-8"))
+    assert path.name not in cached["files"]
+
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("\n")
+
+    assert storage._count_journal_rows([path]) == ({1: 2}, {})
+    assert storage._count_journal_rows([path]) == ({1: 2}, {})
+
+
+def test_an_unusable_cache_is_counted_from_scratch(storage, journal_dir):
+    """cacheが壊れている/版が違う/fileが縮んだときは、頭から数え直して同じ数を出す。"""
+    paths = _corpus(journal_dir)
+    expected = storage._count_journal_rows(paths)
+    cache = journal_dir / "count_cache.json"
+
+    cache.write_text("これはJSONではない", encoding="utf-8")
+    assert storage._count_journal_rows(paths) == expected
+
+    cache.write_text(json.dumps({"version": 0, "files": {}}), encoding="utf-8")
+    assert storage._count_journal_rows(paths) == expected
+
+    # 数えた位置よりfileが短い = 追記onlyの前提が崩れている。cacheは使えない。
+    stored = json.loads(cache.read_text(encoding="utf-8"))
+    for entry in stored["files"].values():
+        entry["offset"] += 10_000
+    cache.write_text(json.dumps(stored), encoding="utf-8")
+    assert storage._count_journal_rows(paths) == expected
+
+
+def test_count_cache_does_not_change_what_gets_restored(storage, journal_dir):
+    """cacheを挟んでも、復元される行はcacheが無いときと同じ。"""
+    session_id = _session_with_events(storage, 1)
+    _write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(session_id, 1000.0)),
+        ("e", _event_row(session_id, 1001.0)),
+    ])
+    storage._count_journal_rows(storage._journal_files())   # cacheを作らせておく
+
+    summary = storage.recover_from_journal()
+
+    assert summary["sessions"] == 1
+    assert _db_counts(storage, session_id) == (2, 0)

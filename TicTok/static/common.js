@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   ["/fans", "Fan台帳"],
   ["/analytics", "全体解析"],
   ["/jobs", "Job"],
+  ["/assets", "素材"],
   ["/ops", "運用log"],
   ["/settings", "設定"],
 ];
@@ -243,7 +244,18 @@ async function apiSend(method, path, body) {
   return res.json();
 }
 
+// 画面を開いた直後の接続で最初に届く monitors / jobs は、pageが起動時に自分で引いた
+// のと同じ内容を運んでくる。これを合図に取り直すpageは、開くたびに同じrequestを2度出す
+// (実測: /api/sessions 256KBが50msと2010msの2回、/api/jobsが97msと1674ms、
+//  /api/streamersが134msと2311ms。2回目はいずれもこのsnapshotを受けての再読み込み)。
+// 初回接続の初回snapshotにだけ印を付け、pageは印のあるmessageでは取り直さない。
+// 再接続時は印を付けない ―― 切れていた間の変化は取り直さないと拾えない。
+let wsFirstConnect = true;
+
 function connectWS(onMessage) {
+  const firstConnect = wsFirstConnect;
+  wsFirstConnect = false;
+  const seenSnapshot = new Set();
   const indicators = [
     document.getElementById("ws-indicator"),
     document.getElementById("ws-indicator-foot"),
@@ -261,6 +273,11 @@ function connectWS(onMessage) {
   ws.onopen = () => setStatus(true, "Server接続: ONLINE");
   ws.onmessage = (msg) => {
     const data = JSON.parse(msg.data);
+    if (firstConnect && !seenSnapshot.has(data.type)
+        && (data.type === "monitors" || data.type === "jobs")) {
+      seenSnapshot.add(data.type);
+      data.initial = true;
+    }
     applyJobBar(data);
     onMessage(data);
   };
@@ -2301,23 +2318,76 @@ function userCell(user, opts = {}) {
 // 表は.table-wrap(overflow:auto)の中にあるため、absoluteのmenuはscroll枠でclipされる。
 // position:fixedでviewport基準に出し、開いた時のButton位置から座標を決める。
 let openRowMenu = null;
+// 起点にした要素。開いた元をもう一度押した時にmenuが閉じるのは、この要素の中の
+// clickを「外側のclick」と読まないため(toggle以外を起点にできるので、classでは足りない)。
+let openRowMenuAnchor = null;
+// 閉じる時に呼び戻す。開いた側が持っている状態(起点のaria-expanded)を戻せるようにする。
+let openRowMenuOnClose = null;
 
 function closeRowMenu() {
   if (!openRowMenu) return;
+  const onClose = openRowMenuOnClose;
   openRowMenu.remove();
   openRowMenu = null;
+  openRowMenuAnchor = null;
+  openRowMenuOnClose = null;
+  if (onClose) onClose();
 }
 
 document.addEventListener("click", (ev) => {
-  if (openRowMenu && !openRowMenu.contains(ev.target) && !ev.target.closest(".row-menu-toggle")) {
-    closeRowMenu();
-  }
+  if (!openRowMenu) return;
+  if (openRowMenu.contains(ev.target)) return;
+  if (ev.target.closest(".row-menu-toggle")) return;
+  if (openRowMenuAnchor && openRowMenuAnchor.contains(ev.target)) return;
+  closeRowMenu();
 });
 document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") closeRowMenu();
 });
 window.addEventListener("resize", closeRowMenu);
-document.addEventListener("scroll", closeRowMenu, true);
+// 閉じる理由は「起点が動いて、面の居場所が嘘になる」こと。だから閉じるのは起点を載せて
+// いる枠(と頁そのもの)がscrollした時だけにする ―― どのscrollでも閉じていた頃は、再生に
+// 追従するコメント欄が1行進むたびに、開いている面が黙って消えていた。
+// 面の中の一覧が縦へ流れるのは起点と無関係なので、当然そのままにする。
+document.addEventListener("scroll", (ev) => {
+  if (!openRowMenu) return;
+  const target = ev.target;
+  // 頁そのもののscrollはdocumentが名乗る。この場合は起点も一緒に動く。
+  const node = target instanceof Node ? target : document.documentElement;
+  const scrolled = node.nodeType === 9 ? node.documentElement : node;
+  if (openRowMenu.contains(scrolled)) return;
+  if (openRowMenuAnchor && !scrolled.contains(openRowMenuAnchor)) return;
+  closeRowMenu();
+}, true);
+
+// 起点の直下(入り切らなければ直上)へ、viewport基準で置く。
+function placeFloating(anchor, node) {
+  const rect = anchor.getBoundingClientRect();
+  const size = node.getBoundingClientRect();
+  const left = Math.max(4, Math.min(rect.right - size.width, window.innerWidth - size.width - 4));
+  const below = rect.bottom + 2;
+  const top = below + size.height > window.innerHeight
+    ? Math.max(4, rect.top - size.height - 2)
+    : below;
+  node.style.left = `${left}px`;
+  node.style.top = `${top}px`;
+}
+
+// menu以外の浮遊面(選択listなど)も同じ1枚だけを開く。別々の開閉を持つと、2枚が
+// 同時に出たまま互いの外側clickを取り合う。
+function openPanelAt(anchor, node, onClose) {
+  closeRowMenu();
+  document.body.appendChild(node);
+  placeFloating(anchor, node);
+  openRowMenu = node;
+  openRowMenuAnchor = anchor;
+  openRowMenuOnClose = onClose || null;
+  return node;
+}
+
+function isPanelOpenFor(anchor) {
+  return Boolean(openRowMenu && openRowMenuAnchor === anchor);
+}
 
 // items: [{ label, title, danger, disabled, onSelect }]。返り値は操作列へ入れるtoggle Button。
 // 任意の要素を起点にmenuを出す。toggle Buttonを介さず「押した場所でそのまま選ばせる」
@@ -2339,16 +2409,7 @@ function openMenuAt(anchor, items) {
     });
     menu.appendChild(btn);
   });
-  document.body.appendChild(menu);
-  const rect = anchor.getBoundingClientRect();
-  const size = menu.getBoundingClientRect();
-  const left = Math.max(4, Math.min(rect.right - size.width, window.innerWidth - size.width - 4));
-  const below = rect.bottom + 2;
-  const top = below + size.height > window.innerHeight ? Math.max(4, rect.top - size.height - 2) : below;
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
-  openRowMenu = menu;
-  return menu;
+  return openPanelAt(anchor, menu);
 }
 
 function rowMenu(items, opts) {
@@ -2795,6 +2856,27 @@ function renderDiskBar(container, data) {
   });
 }
 
+// ---- 定期取得: 見えていない画面では止める ----
+// この画面群は開きっぱなしにして使うので、tabを裏へ回した後も同じ周期でserverを叩き続けて
+// いた(実測: 履歴画面の/api/dashboardは41KB・毎回334〜357msで、cacheが効かないまま
+// 30秒ごとに焼き続ける)。誰も読んでいない間は呼ばない。表へ戻った時は、隠れている間に
+// 周期をまたいでいれば即座に1回引く ―― 戻った瞬間に古い値が出たままにしないため。
+// 初回の取得は呼び出し側が自分で行う(この関数は周期だけを持つ)。
+function pollWhileVisible(fn, intervalMs) {
+  let lastRun = Date.now();
+  const run = () => {
+    lastRun = Date.now();
+    fn();
+  };
+  setInterval(() => {
+    if (document.visibilityState === "hidden") return;
+    run();
+  }, intervalMs);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && Date.now() - lastRun >= intervalMs) run();
+  });
+}
+
 function showDiskUnavailable(container) {
   container.innerHTML = "";
   const err = document.createElement("span");
@@ -2820,7 +2902,7 @@ async function loadDiskBar() {
 
 if (document.getElementById("disk-bar")) {
   loadDiskBar();
-  setInterval(loadDiskBar, DISK_POLL_MS);
+  pollWhileVisible(loadDiskBar, DISK_POLL_MS);
 }
 
 // ---- 運用logのerror badge(全画面共通のnav) ----
@@ -2841,14 +2923,32 @@ function opsBadgeElement() {
   return badge;
 }
 
+// navのbadgeと運用log画面の件数欄は同じ /api/ops/summary を出所にする。別々に引くと、
+// 運用logを開くたびに同じrequestが2本並ぶ(以降も同じ60秒周期で2本ずつ)。進行中の1本を
+// 共有し、直後の呼び出しはその結果へ相乗りさせる。周期が同じでも起動時刻が数ms
+// ずれるため、解決済みの結果も短い間だけ持ち回る。
+const OPS_SUMMARY_SHARE_MS = 3000;
+let opsSummaryShared = null;
+function fetchOpsSummary() {
+  if (!opsSummaryShared) {
+    const promise = apiSend("GET", "/api/ops/summary");
+    opsSummaryShared = promise;
+    // 失敗は持ち回らない。次の呼び出しには引き直させる。
+    promise.then(
+      () => setTimeout(() => { if (opsSummaryShared === promise) opsSummaryShared = null; },
+                       OPS_SUMMARY_SHARE_MS),
+      () => { if (opsSummaryShared === promise) opsSummaryShared = null; },
+    );
+  }
+  return opsSummaryShared;
+}
+
 async function loadOpsBadge() {
   const badge = opsBadgeElement();
   if (!badge) return;
   let data;
   try {
-    const res = await fetch("/api/ops/summary");
-    if (!res.ok) throw new Error(String(res.status));
-    data = await res.json();
+    data = await fetchOpsSummary();
   } catch (e) {
     badge.textContent = "?";
     badge.className = "nav-badge unknown";
@@ -2869,7 +2969,7 @@ async function loadOpsBadge() {
 
 if (navLink("/ops")) {
   loadOpsBadge();
-  setInterval(loadOpsBadge, OPS_BADGE_POLL_MS);
+  pollWhileVisible(loadOpsBadge, OPS_BADGE_POLL_MS);
 }
 
 // ---- 共通UI: 通知toast ----
