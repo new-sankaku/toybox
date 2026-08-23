@@ -1,0 +1,43 @@
+# AI_Video_up は実験場も兼ねているため、既定で全部を無視し、
+# 運用に要る code と doc だけを明示的に許可する。
+# 対象外: POC/計測 script、model(.pth/.onnx/.engine)、venv、
+#         素材 動画、screenshot、出力・cache。
+
+/*
+!/.gitignore
+!/*.bat
+/claude*.bat
+
+# 計測結果の文書のみ(比較画像は除く)
+!/doc/
+doc/*
+!doc/*.md
+
+# vup: 高画質化 tool
+!/vup/
+vup/*
+!vup/README.md
+!vup/vup.py
+!vup/models_registry.py
+!vup/srvgg.py
+!vup/tilediff.py
+!vup/trt_backend.py
+
+# vfi: 補完 model の共通層(vfi2 から import する)
+!/vfi/
+vfi/*
+!vfi/README.md
+!vfi/rifelib.py
+!vfi/vfilib.py
+
+# vfi2: フレーム補完 tool
+!/vfi2/
+vfi2/*
+!vfi2/vfi.py
+!vfi2/fastio.py
+!vfi2/lib.py
+!vfi2/retime.py
+!vfi2/runner.py
+!vfi2/doc/
+vfi2/doc/*
+!vfi2/doc/*.md
