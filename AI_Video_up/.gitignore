@@ -1,43 +1,81 @@
-# AI_Video_up は実験場も兼ねているため、既定で全部を無視し、
-# 運用に要る code と doc だけを明示的に許可する。
-# 対象外: POC/計測 script、model(.pth/.onnx/.engine)、venv、
-#         素材 動画、screenshot、出力・cache。
+# AI_Video_up
+# code・doc・計測 script は入れる。生成物と素材と巨大 binary は入れない。
 
-/*
-!/.gitignore
-!/*.bat
-/claude*.bat
+# Python 環境(requirements.txt から作り直す)
+vup/venv/
+__pycache__/
+*.pyc
 
-# 計測結果の文書のみ(比較画像は除く)
-!/doc/
-doc/*
-!doc/*.md
+# model と TensorRT engine
+# 第三者 repo の clone や再取得できる weight、GPU 毎に作り直す engine。
+vup/models/
+vup/trt_engines/
+vfi/models/
+vfi/engines/
+vfi/onnx/
+vfi2/models/
+vfi2/engines/
+vfi2/onnx/
 
-# vup: 高画質化 tool
-!/vup/
-vup/*
-!vup/README.md
-!vup/vup.py
-!vup/models_registry.py
-!vup/srvgg.py
-!vup/tilediff.py
-!vup/trt_backend.py
+# 計測の出力・作業場・cache
+vfi/out/
+vfi/work/
+vfi2/out/
+vfi2/work/
+vup/compare/
+vup/compare_msel/
+vup/_qcache/
 
-# vfi: 補完 model の共通層(vfi2 から import する)
-!/vfi/
-vfi/*
-!vfi/README.md
-!vfi/rifelib.py
-!vfi/vfilib.py
+# results は計測記録の構造化 data だけ残し、frame dump は外す
+vfi/results/*
+!vfi/results/*.json
+!vfi/results/*.jsonl
+!vfi/results/*.csv
+vfi2/results/*
+!vfi2/results/*.json
+!vfi2/results/*.jsonl
+!vfi2/results/*.csv
 
-# vfi2: フレーム補完 tool
-!/vfi2/
-vfi2/*
-!vfi2/vfi.py
-!vfi2/fastio.py
-!vfi2/lib.py
-!vfi2/retime.py
-!vfi2/runner.py
-!vfi2/doc/
-vfi2/doc/*
-!vfi2/doc/*.md
+# 素材の動画と screenshot
+*.mkv
+*.mp4
+*.webm
+*.avi
+_screenshots/
+_screenshots_up/
+
+# frame の生 dump
+*.npy
+*.npz
+*.pkl
+
+# 第三者 tool の丸ごと配置(exe/dll/weight 込み)
+realesrgan-ncnn-vulkan-v0.2.0-windows/
+
+# weight・engine・書庫・実行 binary(拡張子での保険)
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+*.engine
+*.7z
+*.exe
+*.dll
+
+# 計測 script が作る GPU の排他 lock(実行時 file)
+vup/GPU_LOCK
+vup/GPU_LOCK.*
+
+# repo 全体では除外しているが、この folder では残す
+!claude --dangerously-skip-permissions.bat
+
+# 画像は入れない(素材の版権が絡むため)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.bmp
+*.tif
+*.tiff

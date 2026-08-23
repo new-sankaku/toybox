@@ -317,8 +317,18 @@ disk を空けたい場合は folder ごと消して構いません（次回作�
 ## 環境
 
 Windows 11 / RTX 4070 Ti 12GB / Python 3.10 / torch 2.10+cu126 / TensorRT 11.2 /
-ffmpeg full build。venv は `python -m venv --system-site-packages venv` で作成しています。
-`torch.compile` のために `triton-windows` を入れています。
+ffmpeg full build。`torch.compile` のために `triton-windows` を入れています。
+
+venv は `AI_Video_up/0_環境を作る.bat` で作ります（`AI_Video_up/requirements.txt` から
+`vup/venv` へ入れます）。1〜8 の bat と `vfi2` も同じ venv を使います。
+torch と torchvision は cu126 版が PyPI に無いため、bat が
+`--extra-index-url https://download.pytorch.org/whl/cu126` を足しています。
+
+model の重みは git に入れていません。`models_registry.py` に載っている名前（`sd-fast`,
+`photo` など）は初回実行時に `models/` へ自動で落とします。漫画用の bat 7 が使う
+`2x_MangaJaNai_1500p_V1_ESRGAN_90k.pth` と `2x_IllustrationJaNai_V1_ESRGAN_120k.pth` は
+registry に無く、path 直指定なので `models/manga/` と `models/color/` へ自分で置いてください。
+`vfi2` の model は `vfi2/models/` へ各 repo を clone してください。
 
 ## 起動時間
 
