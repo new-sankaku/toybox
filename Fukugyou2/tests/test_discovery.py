@@ -41,19 +41,45 @@ def test_product_labeler_requires_the_configured_number_of_axes():
     assert label(strong) and not label(weak)
 
 
-def test_propose_reserves_slots_for_paired_queries():
-    pos = [["invoice", "ocr"], ["invoice", "billing"], ["invoice", "ledger"]]
-    neg = [["game"], ["game", "fun"], ["photo"]]
+def _cases(docs):
+    return [{"title": " ".join(d), "tagline": None, "story_text": None} for d in docs]
 
-    class Sco(dict):
-        pass
-    sco = {"ngram_max": 1, "min_count": 2, "min_docs": 2, "top_k": 10,
-           "pair_with_accepted": True, "max_anchors": 2, "max_pair_terms": 4}
-    cases_pos = [{"title": " ".join(d), "tagline": None, "story_text": None} for d in pos]
-    cases_neg = [{"title": " ".join(d), "tagline": None, "story_text": None} for d in neg]
-    cand = dq.propose(cases_pos, cases_neg, set(), sco, set(), ["saas"], limit=6)
-    assert any(c.startswith("+saas ") for c in cand)
+
+SCO = {"ngram_max": 1, "min_count": 2, "min_docs": 2, "top_k": 10, "min_g2": 0.0,
+       "min_log_ratio": 0.0, "pair_with_accepted": True, "max_anchors": 2, "max_pair_terms": 4}
+
+
+def test_propose_reserves_slots_for_paired_queries():
+    pos = _cases([["invoice", "ocr"], ["invoice", "billing"], ["invoice", "ledger"]])
+    neg = _cases([["game"], ["game", "fun"], ["photo"]])
+    cand = dq.propose(pos, neg, set(), SCO, set(), ["saas"], limit=6)
+    terms = [c["term"] for c in cand]
+    assert any(t.startswith("+saas ") for t in terms)
     assert len(cand) <= 6
+
+
+def test_propose_keeps_the_keyness_numbers_for_the_record():
+    pos = _cases([["invoice", "ocr"], ["invoice", "billing"], ["invoice", "ledger"]])
+    neg = _cases([["game"], ["game", "fun"], ["photo"]])
+    cand = dq.propose(pos, neg, set(), SCO, set(), [], limit=3)
+    assert all("g2" in c and "log_ratio" in c for c in cand)
+
+
+def test_label_vocabulary_is_matched_by_stem_not_exact_token():
+    stems = {"automat", "workflow", "arr"}
+    assert dq.is_label_vocabulary("automation", stems)
+    assert dq.is_label_vocabulary("workflows", stems)
+    assert dq.is_label_vocabulary("workflows automation", stems)
+    assert not dq.is_label_vocabulary("scheduling", stems)
+    assert not dq.is_label_vocabulary("arrival", stems), "短い語幹は前方一致に使わない"
+
+
+def test_ngrams_are_built_before_stopword_removal():
+    """「browser for automations」から "browser automations" を作ってはいけません。"""
+    cases = _cases([["browser", "for", "automations"]])
+    docs = dq.docs_of(cases, {"for"}, ngram_max=2)
+    assert "browser automations" not in docs[0]
+    assert "browser" in docs[0] and "automations" in docs[0]
 
 
 def test_discovery_config_declares_a_metric_for_every_kind():

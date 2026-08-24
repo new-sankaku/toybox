@@ -1,0 +1,31 @@
+{
+ "tool": "collect_cases",
+ "started_at": "2026-08-24T07:46:57+00:00",
+ "git_commit": "a4661b44c12199701b1db4db2a5263403ab85191",
+ "python": "3.11.15",
+ "platform": "Linux-6.18.44-fc-v21-x86_64-with-glibc2.39",
+ "params": {
+  "queries": "/home/user/toybox/Fukugyou2/config/queries_failure.txt",
+  "kind": "failure",
+  "sources": "/home/user/toybox/Fukugyou2/config/sources.yaml",
+  "limit": 20,
+  "hits": 6,
+  "min_points": 150,
+  "since_years": 8.0,
+  "out": "/home/user/toybox/Fukugyou2/log"
+ },
+ "counts": {
+  "added": 1,
+  "duplicated": 37,
+  "total": 419,
+  "queries": 13
+ },
+ "failures": [],
+ "outputs": [
+  "/home/user/toybox/Fukugyou2/log/cases-20260824.jsonl"
+ ],
+ "ended_at": "2026-08-24T07:47:10+00:00",
+ "requests": {
+  "hn.algolia.com": 13
+ }
+}

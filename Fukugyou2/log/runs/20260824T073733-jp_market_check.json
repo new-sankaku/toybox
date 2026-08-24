@@ -1,0 +1,31 @@
+{
+ "tool": "jp_market_check",
+ "started_at": "2026-08-24T07:37:33+00:00",
+ "git_commit": "a4661b44c12199701b1db4db2a5263403ab85191",
+ "python": "3.11.15",
+ "platform": "Linux-6.18.44-fc-v21-x86_64-with-glibc2.39",
+ "params": {
+  "categories": "/home/user/toybox/Fukugyou2/config/categories.yaml",
+  "sources": "/home/user/toybox/Fukugyou2/config/sources.yaml",
+  "limit": 1,
+  "only": [
+   "billing"
+  ],
+  "out": "/home/user/toybox/Fukugyou2/log"
+ },
+ "counts": {
+  "categories": 1,
+  "total_in_file": 6,
+  "failures": 0
+ },
+ "failures": [],
+ "outputs": [
+  "/home/user/toybox/Fukugyou2/log/jp-market-20260824.json"
+ ],
+ "ended_at": "2026-08-24T07:37:47+00:00",
+ "requests": {
+  "hn.algolia.com": 2,
+  "qiita.com": 5,
+  "zenn.dev": 3
+ }
+}

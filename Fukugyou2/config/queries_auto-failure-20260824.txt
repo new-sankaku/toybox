@@ -1,5 +1,15 @@
-# failure の検索語（自動発見 2026-08-24）。人が書いた語ではありません。
-# 生成: tools/discover_queries.py / 実測値は log/discovery-failure-20260824-044340.json にあります。
-# 採用条件: 適合率 >= 0.2 / 該当 5〜20000件
+# failure の検索語（自動発見 2026-08-24）
+# 生成: tools/discover_queries.py / 実測値は log/discovery-failure-20260824-074435.json
+# 採用条件: 適合率の下限(Wilson) >= 0.2 または 新規 positive >= 2 / 該当 5〜20000件
+# 注: 失敗事例側は人が書いた定義から出発します（doc/METHOD.md §5A）。どの語が自動発見でどの語が定義由来かは file 末尾に書いています。
 
-"shutting down" money
+"postmortem"
+"post-mortem"
+"winding down"
+"shutting down"
+"shut down"
+"sunsetting"
+"we failed"
+"startup died"
+
+# 内訳: "postmortem" = 定義由来（人が書いた語） / "post-mortem" = 定義由来（人が書いた語） / "winding down" = 定義由来（人が書いた語） / "shutting down" = 定義由来（人が書いた語） / "shut down" = 定義由来（人が書いた語） / "sunsetting" = 定義由来（人が書いた語） / "we failed" = 定義由来（人が書いた語） / "startup died" = 定義由来（人が書いた語）

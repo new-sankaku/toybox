@@ -17,6 +17,7 @@ qiita:
   auth: none
   token_env: QIITA_TOKEN
   total_count_header: total-count
+  rate_remaining_header: rate-remaining
   rate_limit_note: 認証なし 60 req/h、token あり 1000 req/h
   sleep_seconds: 1.0
   timeout_seconds: 30
@@ -40,3 +41,9 @@ page_fetch:
   max_pages_per_case: 2
   sleep_seconds: 1.5
   timeout_seconds: 25
+
+# 1回の実行で送る request 数の上限（host ごと）。超えたらその場で止まります。
+budget:
+  hn.algolia.com: 400
+  qiita.com: 50
+  zenn.dev: 60

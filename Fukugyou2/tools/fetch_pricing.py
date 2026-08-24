@@ -27,7 +27,18 @@ import casebase as cb
 
 TAG = re.compile(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>|<[^>]+>")
 SPACE = re.compile(r"\s+")
-PRICING_HREF = re.compile(r"""(?i)href\s*=\s*["']([^"']*(?:pricing|/plans?\b|/price)[^"']*)["']""")
+HREF = re.compile(r"""(?i)href\s*=\s*["']([^"']+)["']""")
+
+
+def pricing_links(html: str, base: str, paths: list[str]) -> list[str]:
+    """本文中の link から、config/sources.yaml の pricing_paths に当たるものを拾います。"""
+    keys = [p.strip("/").lower() for p in paths]
+    out = []
+    for href in HREF.findall(html):
+        low = href.lower()
+        if any(k in low for k in keys):
+            out.append(urllib.parse.urljoin(base, href))
+    return out
 SKIP_HOSTS = ("news.ycombinator.com",)
 
 
@@ -75,6 +86,8 @@ def main(argv=None) -> int:
     ap.add_argument("--sources", default=cb.path("config", "sources.yaml"))
     ap.add_argument("--limit", type=int, default=40, help="見に行く事例数の上限（全走査の禁止）")
     ap.add_argument("--min-points", type=int, default=0, help="この点数未満の事例は見に行かない")
+    ap.add_argument("--kind", choices=["product", "failure"], default="product",
+                    help="価格表があるのは製品化事例です。既定は product のみを見に行きます")
     ap.add_argument("--out", default=cb.path("log"))
     ns = ap.parse_args(argv)
 
@@ -94,34 +107,42 @@ def main(argv=None) -> int:
     for c in cases:
         if c["case_id"] in done or (c.get("points") or 0) < ns.min_points:
             continue
+        if ns.kind and c.get("kind") != ns.kind:
+            continue
         host = urllib.parse.urlsplit(c["url"]).netloc.lower()
         if not c["url"].startswith("http") or host.endswith(SKIP_HOSTS):
             continue
         targets.append(c)
+    targets.sort(key=lambda c: -(c.get("points") or 0))
+    dropped = max(0, len(targets) - ns.limit)
     targets = targets[:ns.limit]
 
     print(f"入力 {cases_path}")
     print(f"対象 {len(targets)}件（取得済み {len(done)}件は飛ばします / 上限 --limit {ns.limit}）")
 
+    budget = cb.Budget(cb.load_yaml(ns.sources).get("budget", {}))
+    manifest = cb.Manifest("fetch_pricing", vars(ns))
     rows, cache = [], {}
     timeout, sleep = int(conf["timeout_seconds"]), float(conf["sleep_seconds"])
     for i, c in enumerate(targets, 1):
         rec = {"case_id": c["case_id"], "title": c["title"], "url": c["url"],
-               "fetched_on": cb.today().isoformat(), "robots": None, "pages": [], "matches": [], "errors": []}
+               "fetched_on": cb.today().isoformat(), "robots": None, "state": "not_attempted",
+               "pages": [], "matches": [], "errors": []}
         allowed = robots_allowed(c["url"], cache, timeout)
         rec["robots"] = {True: "allowed", False: "disallowed", None: "unknown"}[allowed]
         if allowed is not True:
             rec["errors"].append(f"robots {rec['robots']} のため取得しません")
+            rec["state"] = "not_attempted"
             rows.append(rec)
             print(f"  [{i:>3}/{len(targets)}] skip robots={rec['robots']:<10} {c['title'][:48]}")
             continue
 
-        urls = [c["url"]]
-        for u in list(urls):
-            if len(rec["pages"]) >= int(conf["max_pages_per_case"]):
-                break
+        urls, i = [c["url"]], 0
+        while i < len(urls) and len(rec["pages"]) < int(conf["max_pages_per_case"]):
+            u = urls[i]
+            i += 1
             try:
-                html, final, status = cb.http_text(u, timeout=timeout)
+                html, final, status = cb.http_text(u, timeout=timeout, budget=budget)
             except cb.SourceError as e:
                 rec["errors"].append(str(e))
                 continue
@@ -130,21 +151,31 @@ def main(argv=None) -> int:
             rec["pages"].append({"url": final, "status": status, "text_length": len(text)})
             rec["matches"].extend(match_all(patterns, text))
             if not rec["matches"] and len(rec["pages"]) < int(conf["max_pages_per_case"]):
-                m = PRICING_HREF.search(html)
-                if m:
-                    nxt = urllib.parse.urljoin(final, m.group(1))
-                    if robots_allowed(nxt, cache, timeout) is True and nxt not in urls:
+                for nxt in pricing_links(html, final, conf["pricing_paths"]):
+                    if nxt not in urls and robots_allowed(nxt, cache, timeout) is True:
                         urls.append(nxt)
+                        break
             time.sleep(sleep)
 
+        rec["state"] = "fetched" if rec["pages"] else "failed"
         rows.append(rec)
-        mark = f"価格の証拠 {len(rec['matches'])}件" if rec["matches"] else ("取得失敗" if rec["errors"] else "証拠なし")
+        mark = f"価格の証拠 {len(rec['matches'])}件" if rec["matches"] else (
+            "取得失敗" if rec["state"] == "failed" else "証拠なし")
         print(f"  [{i:>3}/{len(targets)}] {mark:<16} {c['title'][:48]}")
 
     cb.write_jsonl(out_path, cb.read_jsonl(out_path) + rows if os.path.exists(out_path) else rows)
     hit = sum(1 for r in rows if r["matches"])
-    err = sum(1 for r in rows if r["errors"])
-    print(f"\n価格の証拠あり {hit}件 / 取得できず {err}件 / 対象 {len(rows)}件")
+    fetched = sum(1 for r in rows if r["state"] == "fetched")
+    failed = sum(1 for r in rows if r["state"] == "failed")
+    skipped = sum(1 for r in rows if r["state"] == "not_attempted")
+    manifest.count(targets=len(rows), with_evidence=hit, fetched=fetched,
+                   failed=failed, not_attempted=skipped, dropped_over_limit=dropped)
+    manifest.output(out_path)
+    manifest.write(ns.out, budget)
+    if dropped:
+        print(f"\n注意: --limit {ns.limit} を超えた {dropped}件は見に行っていません（黙って切りません）。")
+    print(f"\n価格の証拠あり {hit}件 / 取得したが証拠なし {fetched - hit}件 / "
+          f"取得失敗 {failed}件 / 取りに行かなかった {skipped}件")
     print(f"書き出し: {out_path}")
     print(f"生 HTML: {os.path.join(ns.out, 'raw', 'pages', day_stamp)}/（git には入れません）")
     return 0

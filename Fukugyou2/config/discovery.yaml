@@ -14,6 +14,8 @@ scoring:
   ngram_max: 2             # 1=単語のみ 2=2語の連なりまで
   min_count: 4             # これ未満の出現数の語は候補にしない
   min_docs: 3              # これ未満の文書数にしか出ない語は候補にしない（固有名詞よけ）
+  min_g2: 10.828           # G^2 の下限。chi^2(1) の p=.001。有意性の足切り
+  min_log_ratio: 1.0       # 効果量の下限。相対頻度が2倍以上（G^2 は標本が大きいと機械的に増えるため必須）
   top_k: 30                # keyness 上位から何語を候補の素にするか
   pair_with_accepted: true # 採用済みの語と掛け合わせた AND query も試す（適合率が上がる）
   max_anchors: 3           # 掛け合わせに使う採用済み語の数
@@ -64,10 +66,13 @@ failure_definition:
 
 jp_expansion:
   items_per_term: 40       # 需要語1件あたりに読む Qiita 記事数（1 request で取れる上限は100）
-  background_tags: 30      # 比較用に取る人気 tag の数
-  background_items_per_tag: 10
+  background_pages: 3      # 比較 corpus に取る新着記事の page 数
+  background_per_page: 100
   min_count: 3
+  min_docs: 3              # これ未満の記事数にしか出ない tag は候補にしない
   min_terms: 2             # 2つ以上の需要語の結果に現れた tag だけを候補にする（単発の雑音よけ）
   top_k: 12
   min_total_hits: 20       # 提案語の Qiita 総件数の下限
   max_total_hits: 20000
+  validate_items: 20       # 提案語で引き直して適合率を測る記事数
+  min_precision: 0.30      # 引き直した記事が元の分類の tag を含む割合の下限

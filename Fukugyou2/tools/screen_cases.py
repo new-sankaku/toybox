@@ -26,25 +26,40 @@ def compile_conditions(screen: dict) -> list[dict]:
     for c in screen["conditions"]:
         if c["evidence"] not in ("text", "pricing"):
             raise SystemExit(f"条件 {c['id']} の evidence は text か pricing にしてください。")
-        out.append({**c, "patterns": [re.compile(p) for p in c["any_of"]]})
+        out.append({**c, "patterns": [re.compile(p) for p in c["any_of"]],
+                    "not_near_patterns": [re.compile(p) for p in c.get("not_near", [])]})
     return out
+
+
+def match_in_context(cond: dict, text: str, window: int):
+    """一致を探し、その前後に打ち消し語があるものは数えません。
+
+    `$7/month VPS` は継続課金の証拠ではなく、著者が払う原価です。文字列だけを見ると
+    売価と原価を区別できないため、周辺の語で打ち消します。
+    """
+    for p in cond["patterns"]:
+        for m in p.finditer(text):
+            ctx = text[max(0, m.start() - window):m.end() + window]
+            if any(n.search(ctx) for n in cond["not_near_patterns"]):
+                continue
+            return m, ctx.strip()
+    return None, None
 
 
 def case_text(case: dict) -> str:
     return " \n".join(x for x in (case.get("title"), case.get("tagline"), case.get("story_text")) if x)
 
 
-def evaluate(case: dict, conditions: list[dict], excludes: list[dict], pricing: dict | None) -> dict:
+def evaluate(case: dict, conditions: list[dict], excludes: list[dict], pricing: dict | None,
+             context_window: int = 70) -> dict:
     text = case_text(case)
     hits, evidence = [], {}
     for c in conditions:
         if c["evidence"] == "text":
-            for p in c["patterns"]:
-                m = p.search(text)
-                if m:
-                    hits.append(c)
-                    evidence[c["id"]] = text[max(0, m.start() - 30):m.end() + 30].strip()
-                    break
+            m, ctx = match_in_context(c, text, context_window)
+            if m:
+                hits.append(c)
+                evidence[c["id"]] = ctx
         else:
             if pricing is None:
                 continue
@@ -54,8 +69,11 @@ def evaluate(case: dict, conditions: list[dict], excludes: list[dict], pricing: 
                 evidence[c["id"]] = found["sample"]
 
     by_axis = Counter(c["axis"] for c in hits)
+    has_price_evidence = bool((pricing or {}).get("matches"))
     marks = []
     for e in excludes:
+        if e.get("unless_pricing_evidence") and has_price_evidence:
+            continue
         if any(p.search(text) for p in e["patterns"]):
             marks.append(e["id"])
     return {"matched": [c["id"] for c in hits], "by_axis": dict(by_axis),
@@ -93,7 +111,8 @@ def main(argv=None) -> int:
 
     items = []
     for c in cases:
-        r = evaluate(c, conditions, excludes, pricing.get(c["case_id"]))
+        r = evaluate(c, conditions, excludes, pricing.get(c["case_id"]),
+                     int(screen.get("context_window", 70)))
         axes_met = [a for a, spec in axes.items()
                     if r["by_axis"].get(a, 0) >= int(spec["conditions_required"])]
         assigned = [k["id"] for k in cats if any(p.search(case_text(c)) for p in k["patterns"])]
@@ -105,7 +124,7 @@ def main(argv=None) -> int:
             "axes_met": axes_met, "axes_met_count": len(axes_met),
             "matched": r["matched"], "by_axis": r["by_axis"],
             "evidence": r["evidence"], "exclude_marks": r["exclude_marks"],
-            "pricing_fetched": c["case_id"] in pricing,
+            "pricing_state": pricing.get(c["case_id"], {}).get("state", "not_attempted"),
         })
 
     dist = Counter(i["axes_met_count"] for i in items)
@@ -116,7 +135,7 @@ def main(argv=None) -> int:
         "cases_file": os.path.basename(cases_path),
         "pricing_file": os.path.basename(pricing_path) if pricing_path else None,
         "n_cases": len(items),
-        "n_pricing_fetched": sum(1 for i in items if i["pricing_fetched"]),
+        "pricing_states": dict(Counter(i["pricing_state"] for i in items)),
         "axes_met_histogram": {str(k): dist[k] for k in sorted(dist)},
         "condition_hits": dict(cond_count.most_common()),
         "category_hits": dict(cat_count.most_common()),
@@ -140,9 +159,11 @@ def main(argv=None) -> int:
     print(f"  {'未分類':<16} {summary['uncategorized']:>4}件")
     if summary["exclude_marked"]:
         print(f"\n対象外の印 {summary['exclude_marked']}件（削除はしていません。見直せる形で残します）")
-    if summary["n_pricing_fetched"] < len(items):
-        print(f"\n注意: 価格の証拠が未取得の事例が {len(items) - summary['n_pricing_fetched']}件あります。"
-              "Stock性の判定は、その分だけ弱い証拠に依っています。")
+    st = summary["pricing_states"]
+    print(f"\n[ 価格 page の状態 ] 取得 {st.get('fetched', 0)}件 / 取得失敗 {st.get('failed', 0)}件 / "
+          f"取りに行っていない {st.get('not_attempted', 0)}件")
+    if st.get("fetched", 0) < len(items):
+        print("  注意: 取得できていない事例の Stock性は、価格表ではなく本文の語に依っています。")
     print(f"\n書き出し: {out_path}")
     print("次: python tools/jp_market_check.py（日本側の実測）")
     return 0

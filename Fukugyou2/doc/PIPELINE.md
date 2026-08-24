@@ -10,7 +10,7 @@
 
 | 工程 | program | 入力 | 出力 | 機械 / 人 |
 |---|---|---|---|---|
-| **0 検索語の発見** | `discover_queries.py` | `config/discovery.yaml`（**検索語ではなく定義**） | `config/queries_auto-<種別>-YYYYMMDD.txt` | 機械 |
+| **0 検索語の発見** | `discover_queries.py` | `config/discovery.yaml`（**検索語ではなく定義**） | `config/queries_auto-<種別>-YYYYMMDD.txt` ＋ **`log/cases-*.jsonl` にも事例を追記**（`--dry-run` では書きません） | 機械 |
 | 0b 日本語の語の発見 | `discover_jp_terms.py` | `config/categories.yaml` | `config/jp_terms_auto-YYYYMMDD.yaml`（**提案。自動反映しません**） | 機械＋人の採否 |
 | 1 収集 | `collect_cases.py` | `config/queries_*.txt` | `log/cases-YYYYMMDD.jsonl` | 機械 |
 | 2 価格の証拠 | `fetch_pricing.py` | 工程1の出力 | `log/pricing-YYYYMMDD.jsonl` | 機械 |
@@ -36,6 +36,8 @@ python tools/discover_queries.py --kind product --dry-run   # 語を書き出さ
 - **出力の語には、採用理由の実測値が必ず付きます**（`log/discovery-<種別>-*.json`）。
 - 採用0語で落ちた場合、**閾値を緩める前に母集団（`config/discovery.yaml` の `corpus`）を広げてください。** 閾値から緩めると、後の工程すべてが弱い語に乗ります。
 - 1回の実行で使う request 数は `config/discovery.yaml` の `budget` で頭打ちにしています。
+- **候補の評価で取れた事例は、そのまま `log/cases-*.jsonl` に併合します**（request を捨てないため）。工程1 の件数にはこの分が含まれます。
+- 母集団 sampling の乱数 seed は `log/runs/*.json` に記録されます。`--seed` で固定できます。
 
 ## 0b. 日本語の語の発見
 
@@ -50,8 +52,9 @@ python tools/discover_jp_terms.py --only billing compliance --limit 2
 ## 1. 収集
 
 ```bash
-python tools/collect_cases.py --queries config/queries_auto-product-YYYYMMDD.txt --kind product
-python tools/collect_cases.py --queries config/queries_auto-failure-YYYYMMDD.txt --kind failure
+# YYYYMMDD は工程0 が出力した実際の日付に置き換えてください（run_pipeline.py なら自動です）
+python tools/collect_cases.py --queries config/queries_auto-product-20260824.txt --kind product
+python tools/collect_cases.py --queries config/queries_auto-failure-20260824.txt --kind failure
 ```
 
 - **失敗事例の収集を飛ばさないでください。** `build_report.py` は失敗事例が0件だと警告を出します。
@@ -61,12 +64,14 @@ python tools/collect_cases.py --queries config/queries_auto-failure-YYYYMMDD.txt
 ## 2. 価格の証拠
 
 ```bash
-python tools/fetch_pricing.py --limit 30 --min-points 100
+python tools/fetch_pricing.py --limit 30 --min-points 100 --kind product
 ```
 
-- robots.txt を見て、許可されている場合だけ取りに行きます。1事例あたり最大2 request です。
-- 価格 page への link を本文から探して、1回だけ追いかけます。
-- **JavaScript で描く site の価格は取れません。** 取れなかったものは「未取得」、取れて一致が無かったものは「証拠なし」として区別して残します。
+- robots.txt を見て、許可されている場合だけ取りに行きます。page 取得は1事例あたり最大2回です（robots.txt の取得は別途、origin ごとに1回）。
+- 価格 page への link を本文から探して、1回だけ追いかけます（`config/sources.yaml` の `pricing_paths`）。
+- **既定は製品化事例のみ**です。失敗事例に価格表はありません。
+- 状態は3値で残します。**「取得したが証拠なし」「取りに行って失敗」「そもそも取りに行っていない」は別物です。**
+- **JavaScript で描く site の価格は取れません。** その分は「取得したが証拠なし」に混ざります（限界）。
 
 ## 3. 条件照合
 

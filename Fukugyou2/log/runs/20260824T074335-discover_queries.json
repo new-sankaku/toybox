@@ -1,0 +1,79 @@
+{
+ "tool": "discover_queries",
+ "started_at": "2026-08-24T07:43:35+00:00",
+ "git_commit": "a4661b44c12199701b1db4db2a5263403ab85191",
+ "python": "3.11.15",
+ "platform": "Linux-6.18.44-fc-v21-x86_64-with-glibc2.39",
+ "params": {
+  "kind": "failure",
+  "discovery": "/home/user/toybox/Fukugyou2/config/discovery.yaml",
+  "sources": "/home/user/toybox/Fukugyou2/config/sources.yaml",
+  "screen": "/home/user/toybox/Fukugyou2/config/screen.yaml",
+  "max_rounds": 2,
+  "seed": null,
+  "dry_run": true,
+  "out": "/home/user/toybox/Fukugyou2/log"
+ },
+ "counts": {
+  "sampling_seed": 20260824,
+  "pool": 1025,
+  "positives": 119,
+  "negatives": 906,
+  "windows": [
+   {
+    "window": 0,
+    "nb_hits": 27618,
+    "pages_available": 16,
+    "sampled_page": 14
+   },
+   {
+    "window": 1,
+    "nb_hits": 26696,
+    "pages_available": 16,
+    "sampled_page": 10
+   },
+   {
+    "window": 2,
+    "nb_hits": 27057,
+    "pages_available": 16,
+    "sampled_page": 1
+   },
+   {
+    "window": 3,
+    "nb_hits": 127860,
+    "pages_available": 16,
+    "sampled_page": 12
+   },
+   {
+    "window": 4,
+    "nb_hits": 97935,
+    "pages_available": 16,
+    "sampled_page": 3
+   },
+   {
+    "window": 5,
+    "nb_hits": 79011,
+    "pages_available": 16,
+    "sampled_page": 14
+   },
+   {
+    "window": 6,
+    "nb_hits": 67514,
+    "pages_available": 16,
+    "sampled_page": 15
+   },
+   {
+    "window": 7,
+    "nb_hits": 28015,
+    "pages_available": 16,
+    "sampled_page": 0
+   }
+  ]
+ },
+ "failures": [],
+ "outputs": [],
+ "ended_at": "2026-08-24T07:44:00+00:00",
+ "requests": {
+  "hn.algolia.com": 23
+ }
+}

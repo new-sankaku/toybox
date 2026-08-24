@@ -3,28 +3,30 @@
   "screened_on": "2026-08-24",
   "cases_file": "cases-20260824.jsonl",
   "pricing_file": "pricing-20260824.jsonl",
-  "n_cases": 411,
-  "n_pricing_fetched": 41,
+  "n_cases": 419,
+  "pricing_states": {
+   "not_attempted": 408,
+   "fetched": 11
+  },
   "axes_met_histogram": {
-   "0": 189,
-   "1": 137,
-   "2": 70,
-   "3": 12,
-   "4": 3
+   "0": 196,
+   "1": 141,
+   "2": 71,
+   "3": 11
   },
   "condition_hits": {
-   "ai_machine_core": 139,
-   "stock_subscription_word": 61,
+   "ai_machine_core": 141,
+   "stock_subscription_word": 58,
    "b2b_workflow_word": 52,
    "b2b_business_object": 48,
    "ai_repetitive_target": 44,
-   "proof_money_number": 22,
+   "proof_money_number": 13,
    "stock_pricing_page": 3
   },
   "category_hits": {
-   "data_plumbing": 40,
+   "data_plumbing": 41,
    "doc_generation": 23,
-   "booking": 19,
+   "booking": 20,
    "compliance": 17,
    "billing": 14,
    "field_ops": 9,
@@ -33,8 +35,8 @@
    "contract": 4,
    "supply_chain": 4
   },
-  "uncategorized": 317,
-  "exclude_marked": 13
+  "uncategorized": 323,
+  "exclude_marked": 94
  },
  "axes": {
   "stock": {
@@ -56,161 +58,40 @@
  },
  "items": [
   {
-   "case_id": "hn:47536761",
+   "case_id": "hn:34610686",
    "kind": "product",
-   "title": "Show HN: I put an AI agent on a $7/month VPS with IRC as its transport layer",
-   "url": "https://georgelarson.me/writing/2026-03-23-nullclaw-doorman/",
-   "discussion_url": "https://news.ycombinator.com/item?id=47536761",
-   "points": 340,
-   "created_at": "2026-03-26T22:41:25Z",
+   "title": "Show HN: We built a developer-first open-source Zapier alternative",
+   "url": "https://trigger.dev",
+   "discussion_url": "https://news.ycombinator.com/item?id=34610686",
+   "points": 745,
+   "created_at": "2023-02-01T14:15:53Z",
    "categories": [
-    "billing",
-    "booking"
+    "booking",
+    "data_plumbing"
    ],
    "axes_met": [
     "stock",
     "ai",
-    "proof",
-    "b2b"
-   ],
-   "axes_met_count": 4,
-   "matched": [
-    "stock_subscription_word",
-    "ai_machine_core",
-    "ai_repetitive_target",
-    "proof_money_number",
-    "b2b_business_object"
-   ],
-   "by_axis": {
-    "stock": 1,
-    "ai": 2,
-    "proof": 1,
-    "b2b": 1
-   },
-   "evidence": {
-    "stock_subscription_word": "ow HN: I put an AI agent on a $7/month VPS with IRC as its transport",
-    "ai_machine_core": "(ironclaw) handles email and scheduling, reachable only over Tails",
-    "ai_repetitive_target": "rivate one (ironclaw) handles email and scheduling, reachable onl",
-    "proof_money_number": "ow HN: I put an AI agent on a $7/month VPS with IRC as its tra",
-    "b2b_business_object": "re&#x27;s one API key and one billing relationship regardless of wh"
-   },
-   "exclude_marks": [],
-   "pricing_fetched": false
-  },
-  {
-   "case_id": "hn:43988381",
-   "kind": "product",
-   "title": "Show HN: Muscle-Mem, a behavior cache for AI agents",
-   "url": "https://github.com/pig-dot-dev/muscle-mem",
-   "discussion_url": "https://news.ycombinator.com/item?id=43988381",
-   "points": 226,
-   "created_at": "2025-05-14T19:38:26Z",
-   "categories": [
-    "hr"
-   ],
-   "axes_met": [
-    "stock",
-    "ai",
-    "proof",
-    "b2b"
-   ],
-   "axes_met_count": 4,
-   "matched": [
-    "stock_subscription_word",
-    "ai_machine_core",
-    "proof_money_number",
-    "b2b_workflow_word"
-   ],
-   "by_axis": {
-    "stock": 1,
-    "ai": 1,
-    "proof": 1,
-    "b2b": 1
-   },
-   "evidence": {
-    "stock_subscription_word": "ing, manufacturing, etc).<p>A recurring theme we ran into was that bu",
-    "ai_machine_core": "agent mode if edge cases are detected. Like a JIT compiler, for b",
-    "proof_money_number": "agents, which can run around $40&#x2F;hr in token costs and ta",
-    "b2b_workflow_word": "ger than a human to perform a workflow. At this point, you&#x27;re b"
-   },
-   "exclude_marks": [],
-   "pricing_fetched": false
-  },
-  {
-   "case_id": "hn:46324665",
-   "kind": "product",
-   "title": "Show HN: I open-sourced my Go and Next B2B SaaS Starter (deploy anywhere, MIT)",
-   "url": "https://github.com/moasq/production-saas-starter",
-   "discussion_url": "https://news.ycombinator.com/item?id=46324665",
-   "points": 83,
-   "created_at": "2025-12-19T11:34:11Z",
-   "categories": [
-    "billing",
-    "data_plumbing",
-    "doc_generation"
-   ],
-   "axes_met": [
-    "stock",
-    "ai",
-    "proof",
-    "b2b"
-   ],
-   "axes_met_count": 4,
-   "matched": [
-    "stock_subscription_word",
-    "ai_machine_core",
-    "proof_money_number",
-    "b2b_business_object"
-   ],
-   "by_axis": {
-    "stock": 1,
-    "ai": 1,
-    "proof": 1,
-    "b2b": 1
-   },
-   "evidence": {
-    "stock_subscription_word": "en-sourced my Go and Next B2B SaaS Starter (deploy anywhere, MIT",
-    "ai_machine_core": "tral integration for document extraction.\nFile Storage: Cloudflare",
-    "proof_money_number": ". Deploy the whole thing on a $6 VPS, or split frontend and bac",
-    "b2b_business_object": "atabase. Serverless functions billing per invocation. Fine for prot"
-   },
-   "exclude_marks": [],
-   "pricing_fetched": false
-  },
-  {
-   "case_id": "hn:48192383",
-   "kind": "product",
-   "title": "Show HN: Forge – Guardrails take an 8B model from 53% to 99% on agentic tasks",
-   "url": "https://github.com/antoinezambelli/forge",
-   "discussion_url": "https://news.ycombinator.com/item?id=48192383",
-   "points": 687,
-   "created_at": "2026-05-19T12:23:07Z",
-   "categories": [],
-   "axes_met": [
-    "ai",
-    "proof",
     "b2b"
    ],
    "axes_met_count": 3,
    "matched": [
+    "stock_pricing_page",
     "ai_machine_core",
-    "ai_repetitive_target",
-    "proof_money_number",
     "b2b_workflow_word"
    ],
    "by_axis": {
-    "ai": 2,
-    "proof": 1,
+    "stock": 1,
+    "ai": 1,
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "ability layer for self-hosted LLM tool-calling.<p>What it does:",
-    "ai_repetitive_target": "docs&#x2F;forge_ieee_preprint.pdf\" rel=\"nofollow\">https:&#x2F;&",
-    "proof_money_number": "en a free local 8B model on a $600 GPU and a frontier API is less",
-    "b2b_workflow_word": "unds great, but with a 5-step workflow that&#x27;s a 40% failure rat"
+    "stock_pricing_page": "ur team, and scale without limits. Free $0 /month Get started $ 5 / month free credits 20",
+    "ai_machine_core": "ur web app.<p>Why we built this:<p>- We found current workflow &#x2F; automation tools like Zapier and n8n are good for simple tasks, but not for m",
+    "b2b_workflow_word": "ll the runs in our web app.<p>Why we built this:<p>- We found current workflow &#x2F; automation tools like Zapier and n8n are good for simple tasks"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "fetched"
   },
   {
    "case_id": "hn:32342334",
@@ -240,45 +121,52 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "s. Most customers expense the subscription through their learning &#x2F;",
-    "ai_repetitive_target": "ng your manager, feel free to email me — sarup@codecrafters.io.<p",
-    "b2b_workflow_word": "t in particular—our git-based workflow—is something customers repeat"
+    "stock_subscription_word": "er, we’d love for you to try CodeCrafters. Most customers expense the subscription through their learning &#x2F; professional development budgets. If yo",
+    "ai_repetitive_target": "pment budgets. If you need help convincing your manager, feel free to email me — sarup@codecrafters.io.<p>Paul and I are excited to continue help",
+    "b2b_workflow_word": "JetBrains, Emacs, etc).<p>This last point in particular—our git-based workflow—is something customers repeatedly tell us they enjoy. We run our own"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
-   "case_id": "hn:31210680",
+   "case_id": "hn:47536761",
    "kind": "product",
-   "title": "Show HN: Radiopaper – Troll-resistant public conversations",
-   "url": "https://radiopaper.com/explore",
-   "discussion_url": "https://news.ycombinator.com/item?id=31210680",
-   "points": 346,
-   "created_at": "2022-04-29T21:18:47Z",
-   "categories": [],
+   "title": "Show HN: I put an AI agent on a $7/month VPS with IRC as its transport layer",
+   "url": "https://georgelarson.me/writing/2026-03-23-nullclaw-doorman/",
+   "discussion_url": "https://news.ycombinator.com/item?id=47536761",
+   "points": 340,
+   "created_at": "2026-03-26T22:41:25Z",
+   "categories": [
+    "billing",
+    "booking"
+   ],
    "axes_met": [
-    "stock",
     "ai",
-    "proof"
+    "proof",
+    "b2b"
    ],
    "axes_met_count": 3,
    "matched": [
-    "stock_subscription_word",
+    "ai_machine_core",
     "ai_repetitive_target",
-    "proof_money_number"
+    "proof_money_number",
+    "b2b_business_object"
    ],
    "by_axis": {
-    "stock": 1,
-    "ai": 1,
-    "proof": 1
+    "ai": 2,
+    "proof": 1,
+    "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "from the smattering of other SaaS offerings we use: Sentry, Mix",
-    "ai_repetitive_target": "t with Radiopaper entirely by email, and never log-in interactive",
-    "proof_money_number": "r overall burn rate is around $40&#x2F;month, mostly from the s"
+    "ai_machine_core": "ent embedded in my site. The private one (ironclaw) handles email and scheduling, reachable only over Tailscale via Google&#x27;s A2A protocol.<p>T",
+    "ai_repetitive_target": "ja web client embedded in my site. The private one (ironclaw) handles email and scheduling, reachable only over Tailscale via Google&#x27;s A2A p",
+    "proof_money_number": "cond, cheap), Sonnet 4.6 for tool use (only when needed). Hard cap at $2&#x2F;day.<p>A2A passthrough: the private-side agent borrows the gatew",
+    "b2b_business_object": "ay&#x27;s own inference pipeline, so there&#x27;s one API key and one billing relationship regardless of who initiated the request.<p>You can talk"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39819458",
@@ -311,14 +199,16 @@
     "b2b": 2
    },
    "evidence": {
-    "ai_machine_core": "s; use REST API integrations; parse responses using JSONPath; con",
-    "ai_repetitive_target": "(e.g. investigating phishing email); better docs; more AI featur",
-    "proof_money_number": "ams currently pay Splunk SOAR $100,000&#x2F;year to help automate al",
-    "b2b_business_object": "a Zapier + log search + Jira ticketing system.<p>Log storage—that’s",
-    "b2b_workflow_word": "s, investigate security logs, report vulnerability.<p>The average"
+    "ai_machine_core": "gger event-driven workflows from webhooks; use REST API integrations; parse responses using JSONPath; control flow using conditional blocks; stor",
+    "ai_repetitive_target": "Microsoft defender); pre-built workflows (e.g. investigating phishing email); better docs; more AI features like auto-labeling tickets, extractin",
+    "proof_money_number": "s and costs are so high, top security teams currently pay Splunk SOAR $100,000&#x2F;year to help automate alert processing. It’s a click-and-drag wo",
+    "b2b_business_object": "d be half right. Splunk SOAR is actually a Zapier + log search + Jira ticketing system.<p>Log storage—that’s how Splunk turns a $99&#x2F;month workfl",
+    "b2b_workflow_word": "to a security alert: e.g. contact victims, investigate security logs, report vulnerability.<p>The average security analyst deals with 100 alerts p"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35764635",
@@ -346,12 +236,14 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "authentication, Lemon Squeezy subscription management (MoR removes a maj",
-    "ai_machine_core": "provide more opportunities to generate revenue and give value to cu",
-    "b2b_business_object": "nagement (MoR removes a major tax headache), Notion as a headle"
+    "stock_subscription_word": "functionality for secure Firebase user authentication, Lemon Squeezy subscription management (MoR removes a major tax headache), Notion as a headless b",
+    "ai_machine_core": "ing unique features, which will in turn provide more opportunities to generate revenue and give value to customers.<p>And easily do it in pure Pyth",
+    "b2b_business_object": "ntication, Lemon Squeezy subscription management (MoR removes a major tax headache), Notion as a headless blog CMS, and more.<p>Our mission is"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46094552",
@@ -383,12 +275,14 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "Show HN: ReadyKit – Superfast SaaS Starter with Multi-Tenant Wor",
-    "ai_machine_core": "5 minutes.<p>Features include automatic query scoping for workspace",
-    "b2b_business_object": "lti-tenant workspaces, Stripe billing, OAuth + MFA authentication,"
+    "stock_subscription_word": "Show HN: ReadyKit – Superfast SaaS Starter with Multi-Tenant Workspaces \nSuperfast SaaS Starter with Mul",
+    "ai_machine_core": "Stripe keys, and you&#x27;re running in 5 minutes.<p>Features include automatic query scoping for workspace isolation, audit logs, role-based acces",
+    "b2b_business_object": "late that handles all the hard parts: multi-tenant workspaces, Stripe billing, OAuth + MFA authentication, and a production-ready stack.<p>Built wi"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40236637",
@@ -419,13 +313,13 @@
     "proof": 1
    },
    "evidence": {
-    "stock_subscription_word": "lists to be done once or on a recurring basis, with email reminders.<",
-    "ai_machine_core": "or mobile browser.<p>Flexible Scheduling: Set up lists to be done o",
-    "ai_repetitive_target": "or on a recurring basis, with email reminders.<p>Simple Delegatio",
-    "proof_money_number": "epList is free to use, with a $5&#x2F;month premium plan for u"
+    "stock_subscription_word": "browser.<p>Flexible Scheduling: Set up lists to be done once or on a recurring basis, with email reminders.<p>Simple Delegation: Assign lists via em",
+    "ai_machine_core": "rm tasks swiftly, whether on a computer or mobile browser.<p>Flexible Scheduling: Set up lists to be done once or on a recurring basis, with email",
+    "ai_repetitive_target": "cheduling: Set up lists to be done once or on a recurring basis, with email reminders.<p>Simple Delegation: Assign lists via email, no StepList a",
+    "proof_money_number": ", I eschew it to keep things fast).<p>StepList is free to use, with a $5&#x2F;month premium plan for unlimited scheduled, delegated, and priva"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30332448",
@@ -456,13 +350,52 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "after which vendors pay only per user with write access to customer",
-    "ai_machine_core": "the painful task of trying to synchronize the two.<p>To sum that",
-    "ai_repetitive_target": "s from Segment Analytics with PDF attachments outlining how muc",
-    "b2b_business_object": "m. This gets painful when the vendor can’t answer a question becau"
+    "stock_subscription_word": "ur basic strategy is clear: a free tier, after which vendors pay only per user with write access to customer-facing rooms. Everyone at the vendor ge",
+    "ai_machine_core": "ither of which fully works, and now has the painful task of trying to synchronize the two.<p>To sum that up: support products don’t work with te",
+    "ai_repetitive_target": "s important when I started getting emails from Segment Analytics with PDF attachments outlining how much money we owed them in overage fees—tha",
+    "b2b_business_object": "mer support as individuals, not as a team. This gets painful when the vendor can’t answer a question because part of the answer is only known by s"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:46324665",
+   "kind": "product",
+   "title": "Show HN: I open-sourced my Go and Next B2B SaaS Starter (deploy anywhere, MIT)",
+   "url": "https://github.com/moasq/production-saas-starter",
+   "discussion_url": "https://news.ycombinator.com/item?id=46324665",
+   "points": 83,
+   "created_at": "2025-12-19T11:34:11Z",
+   "categories": [
+    "billing",
+    "data_plumbing",
+    "doc_generation"
+   ],
+   "axes_met": [
+    "stock",
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 3,
+   "matched": [
+    "stock_subscription_word",
+    "ai_machine_core",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "Show HN: I open-sourced my Go and Next B2B SaaS Starter (deploy anywhere, MIT) \nsourced my Go and Next B2B SaaS Start",
+    "ai_machine_core": "ies to minimize hallucinations.\nOCR: Mistral integration for document extraction.\nFile Storage: Cloudflare R2 integration.\nEach feature is a separa",
+    "b2b_business_object": "ercel for hosting. PlanetScale for the database. Serverless functions billing per invocation. Fine for prototypes, but costs become unpredictable a"
+   },
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41456371",
@@ -494,13 +427,13 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": ";&#x2F;celtra.com</a>), a B2B SaaS company, for over 10 years, f",
-    "ai_machine_core": "how HN: Assertly – scriptable monitoring for infosec, IT, complianc",
-    "ai_repetitive_target": "it is verified, it is done so manually and infrequently (e.g. quarte",
-    "b2b_business_object": "e monitoring for infosec, IT, compliance, DevOps \nscriptable monitorin"
+    "stock_subscription_word": "F;celtra.com\" rel=\"nofollow\">https:&#x2F;&#x2F;celtra.com</a>), a B2B SaaS company, for over 10 years, from “git init” to 250 people and the com",
+    "ai_machine_core": "Show HN: Assertly – scriptable monitoring for infosec, IT, compliance, DevOps \nscriptable monitoring for inf",
+    "ai_repetitive_target": "ce is hoped for but rarely verified. If it is verified, it is done so manually and infrequently (e.g. quarterly). More laborious, while giving less",
+    "b2b_business_object": "Show HN: Assertly – scriptable monitoring for infosec, IT, compliance, DevOps \nscriptable monitoring for infosec, IT, compliance, DevOps \nH"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46368379",
@@ -533,112 +466,15 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "ous free tier (2,000 messages per month).<p>We also open source sever",
-    "ai_machine_core": "observability: every webhook parsed, every message tracked, actu",
-    "ai_repetitive_target": "t:<p>- Working WhatsApp API + inbox in 2 minutes, not days\n- Full",
-    "b2b_workflow_word": "ts their Meta account, done\n- Workflow builder for deterministic aut"
+    "stock_subscription_word": "to 95% cheaper than Twilio, with a generous free tier (2,000 messages per month).<p>We also open source several tools: a TypeScript client for the Wh",
+    "ai_machine_core": "PI + inbox in 2 minutes, not days\n- Full observability: every webhook parsed, every message tracked, actual debugging tools\n- Multi-tenant platfo",
+    "ai_repetitive_target": "<p>That’s why I built Kapso. What you get:<p>- Working WhatsApp API + inbox in 2 minutes, not days\n- Full observability: every webhook parsed, ev",
+    "b2b_workflow_word": ": generate a setup link, customer connects their Meta account, done\n- Workflow builder for deterministic automations and AI Agents\n- WhatsApp Flows:"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
-  },
-  {
-   "case_id": "hn:44061414",
-   "kind": "product",
-   "title": "Show HN: Pi Co-pilot – Evaluation of AI apps made easy",
-   "url": "https://withpi.ai/",
-   "discussion_url": "https://news.ycombinator.com/item?id=44061414",
-   "points": 34,
-   "created_at": "2025-05-22T12:31:48Z",
-   "categories": [
-    "data_plumbing"
+   "exclude_marks": [
+    "oss_or_template"
    ],
-   "axes_met": [
-    "ai",
-    "proof",
-    "b2b"
-   ],
-   "axes_met_count": 3,
-   "matched": [
-    "ai_machine_core",
-    "proof_money_number",
-    "b2b_workflow_word"
-   ],
-   "by_axis": {
-    "ai": 1,
-    "proof": 1,
-    "b2b": 1
-   },
-   "evidence": {
-    "ai_machine_core": "M as a judge” pattern.<p>- or generates Python functions when that",
-    "proof_money_number": "more useful. We are offering $10 of free credits (about 25M inp",
-    "b2b_workflow_word": "scoring system into your own workflow: Python, TypeScript, Promptfo"
-   },
-   "exclude_marks": [],
-   "pricing_fetched": false
-  },
-  {
-   "case_id": "hn:26945153",
-   "kind": "product",
-   "title": "N8n raises $12m to build out fair-code workflow automation",
-   "url": "https://n8n.io/blog/series-a-announcement/",
-   "discussion_url": "https://news.ycombinator.com/item?id=26945153",
-   "points": 20,
-   "created_at": "2021-04-26T17:18:24Z",
-   "categories": [],
-   "axes_met": [
-    "ai",
-    "proof",
-    "b2b"
-   ],
-   "axes_met_count": 3,
-   "matched": [
-    "ai_machine_core",
-    "proof_money_number",
-    "b2b_workflow_word"
-   ],
-   "by_axis": {
-    "ai": 1,
-    "proof": 1,
-    "b2b": 1
-   },
-   "evidence": {
-    "ai_machine_core": "build out fair-code workflow automation",
-    "proof_money_number": "N8n raises $12m to build out fair-code workfl",
-    "b2b_workflow_word": "s $12m to build out fair-code workflow automation"
-   },
-   "exclude_marks": [],
-   "pricing_fetched": false
-  },
-  {
-   "case_id": "hn:47736555",
-   "kind": "product",
-   "title": "I run multiple $10K MRR companies on a $20/month tech stack",
-   "url": "https://stevehanov.ca/blog/how-i-run-multiple-10k-mrr-companies-on-a-20month-tech-stack",
-   "discussion_url": "https://news.ycombinator.com/item?id=47736555",
-   "points": 980,
-   "created_at": "2026-04-12T06:00:00Z",
-   "categories": [],
-   "axes_met": [
-    "stock",
-    "proof"
-   ],
-   "axes_met_count": 2,
-   "matched": [
-    "stock_subscription_word",
-    "stock_pricing_page",
-    "proof_money_number"
-   ],
-   "by_axis": {
-    "stock": 2,
-    "proof": 1
-   },
-   "evidence": {
-    "stock_subscription_word": "tiple $10K MRR companies on a $20/month tech stack",
-    "stock_pricing_page": "I run multiple $10K MRR companies on a $20/month tech stack | Steve Hanov&#39;s Blog I k",
-    "proof_money_number": "I run multiple $10K MRR companies on a $20/month"
-   },
-   "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41465735",
@@ -665,24 +501,23 @@
     "ai": 1
    },
    "evidence": {
-    "stock_subscription_word": "y own needs. Getting tired of SaaS app subscriptions and privacy",
-    "ai_repetitive_target": "ow, the activities are logged manually or imported from a CSV file."
+    "stock_subscription_word": "d Ubuntu.<p>- I developed this app for my own needs. Getting tired of SaaS app subscriptions and privacy concerns.<p>- For now, the activities a",
+    "ai_repetitive_target": "riptions and privacy concerns.<p>- For now, the activities are logged manually or imported from a CSV file. No integration with Plaid or other platf"
    },
-   "exclude_marks": [],
-   "pricing_fetched": true
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "fetched"
   },
   {
-   "case_id": "hn:34610686",
+   "case_id": "hn:48192383",
    "kind": "product",
-   "title": "Show HN: We built a developer-first open-source Zapier alternative",
-   "url": "https://trigger.dev",
-   "discussion_url": "https://news.ycombinator.com/item?id=34610686",
-   "points": 745,
-   "created_at": "2023-02-01T14:15:53Z",
-   "categories": [
-    "booking",
-    "data_plumbing"
-   ],
+   "title": "Show HN: Forge – Guardrails take an 8B model from 53% to 99% on agentic tasks",
+   "url": "https://github.com/antoinezambelli/forge",
+   "discussion_url": "https://news.ycombinator.com/item?id=48192383",
+   "points": 687,
+   "created_at": "2026-05-19T12:23:07Z",
+   "categories": [],
    "axes_met": [
     "ai",
     "b2b"
@@ -690,18 +525,22 @@
    "axes_met_count": 2,
    "matched": [
     "ai_machine_core",
+    "ai_repetitive_target",
     "b2b_workflow_word"
    ],
    "by_axis": {
-    "ai": 1,
+    "ai": 2,
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "found current workflow &#x2F; automation tools like Zapier and n8n",
-    "b2b_workflow_word": "lt this:<p>- We found current workflow &#x2F; automation tools like"
+    "ai_machine_core": "ts.<p>I built Forge, an open-source reliability layer for self-hosted LLM tool-calling.<p>What it does:<p>- Adds domain-and-tool-agnostic guard",
+    "ai_repetitive_target": "lli&#x2F;forge&#x2F;blob&#x2F;main&#x2F;docs&#x2F;forge_ieee_preprint.pdf\" rel=\"nofollow\">https:&#x2F;&#x2F;github.com&#x2F;antoinezambelli&#x2",
+    "b2b_workflow_word": "n local models. 90% per-step accuracy sounds great, but with a 5-step workflow that&#x27;s a 40% failure rate. No existing framework seemed to addre"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25929259",
@@ -732,7 +571,7 @@
     "proof_money_number": "My 2 Year Journey to $10K MRR"
    },
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "fetched"
   },
   {
    "case_id": "hn:18231097",
@@ -757,11 +596,11 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "aunches Actions, its workflow automation tool",
+    "ai_machine_core": "GitHub launches Actions, its workflow automation tool",
     "b2b_workflow_word": "GitHub launches Actions, its workflow automation tool"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "fetched"
   },
   {
    "case_id": "hn:36860898",
@@ -788,11 +627,13 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_repetitive_target": "An open source app to create PDF invoices \nAn open source app",
-    "b2b_business_object": "Show HN: Invoice Dragon – An open source app t"
+    "ai_repetitive_target": "Show HN: Invoice Dragon – An open source app to create PDF invoices \nAn open source app to create PDF invoices",
+    "b2b_business_object": "Show HN: Invoice Dragon – An open source app to create PDF invoices \nAn open source ap"
    },
-   "exclude_marks": [],
-   "pricing_fetched": true
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39980222",
@@ -819,11 +660,11 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "nd out what companies pay for SaaS \nHey HN! Christine and Steven",
-    "b2b_business_object": "actually paying for SaaS and enterprise software. Buyers contribute p"
+    "stock_subscription_word": "Show HN: We built PriceLevel to find out what companies pay for SaaS \nHey HN! Christine and Steven here. As a PM and engineer, we’ve both",
+    "b2b_business_object": "ere you can see what other companies are actually paying for SaaS and enterprise software. Buyers contribute prices via quotes, pricing proposals, and"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43094006",
@@ -852,7 +693,7 @@
     "b2b_workflow_word": "My LLM codegen workflow"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31857069",
@@ -880,8 +721,10 @@
     "stock_subscription_word": "How We built a $1M ARR open source SaaS",
     "proof_money_number": "How We built a $1M ARR open source SaaS"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46888441",
@@ -910,7 +753,7 @@
     "b2b_business_object": "AI is killing B2B SaaS"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46454693",
@@ -937,13 +780,14 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "es bindings, S3&#x2F;R2, cron scheduling, crypto.subtle.<p>Self-hos",
-    "b2b_business_object": "DX as Cloudflare Workers, no vendor lock-in.<p>What works today:"
+    "ai_machine_core": "n.<p>What works today: fetch, KV, Postgres bindings, S3&#x2F;R2, cron scheduling, crypto.subtle.<p>Self-hosting is a single docker-compose file + P",
+    "b2b_business_object": "solates on your own infrastructure. Same DX as Cloudflare Workers, no vendor lock-in.<p>What works today: fetch, KV, Postgres bindings, S3&#x2F;R2"
    },
    "exclude_marks": [
-    "crypto"
+    "crypto",
+    "oss_or_template"
    ],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:33132951",
@@ -972,7 +816,7 @@
     "b2b_business_object": "I Listened to 1000 B2B SaaS Sales Calls"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39706004",
@@ -1006,13 +850,15 @@
     "b2b": 2
    },
    "evidence": {
-    "ai_machine_core": ". For example: if you&#x27;re generating a quote from Geico, they c",
-    "ai_repetitive_target": "ge API to automate repetitive manual workflows that happen within",
-    "b2b_business_object": "day: (1) Automating materials procurement by searching for, adding to c",
-    "b2b_workflow_word": "ys or even weeks to get a new workflow automated, and then would req"
+    "ai_machine_core": "to map that to information on the screen. For example: if you&#x27;re generating a quote from Geico, they commonly ask “Were you eligible to drive",
+    "ai_repetitive_target": "t locally.<p>We provide a natural-language API to automate repetitive manual workflows that happen within the companies&#x27; backoffices. You can",
+    "b2b_business_object": "hat Skyvern is helping companies with today: (1) Automating materials procurement by searching for, adding to cart, and transacting products through ve",
+    "b2b_workflow_word": "had a different problem: it can take days or even weeks to get a new workflow automated, and then would require ongoing maintenance any time the un"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:34897645",
@@ -1039,11 +885,13 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "), a session replay and error monitoring tool. Highlight.io gives y",
-    "b2b_business_object": "ployment, similar to gitlab’s billing model, and thoughts from the"
+    "ai_machine_core": "ub.com&#x2F;highlight&#x2F;highlight</a>), a session replay and error monitoring tool. Highlight.io gives you a high-precision video-like replay of",
+    "b2b_business_object": "e idea of an “enterprise” self-hosted deployment, similar to gitlab’s billing model, and thoughts from the community on this front would be appreci"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:24689339",
@@ -1072,7 +920,36 @@
     "proof_money_number": "How we built a $1M ARR SaaS startup"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:31210680",
+   "kind": "product",
+   "title": "Show HN: Radiopaper – Troll-resistant public conversations",
+   "url": "https://radiopaper.com/explore",
+   "discussion_url": "https://news.ycombinator.com/item?id=31210680",
+   "points": 346,
+   "created_at": "2022-04-29T21:18:47Z",
+   "categories": [],
+   "axes_met": [
+    "stock",
+    "ai"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_subscription_word",
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "rn rate is around $40&#x2F;month, mostly from the smattering of other SaaS offerings we use: Sentry, Mixpanel, Github &amp; SendGrid.<p>Dave &am",
+    "ai_repetitive_target": "re</a><p>* It&#x27;s possible to interact with Radiopaper entirely by email, and never log-in interactively. The notification emails contain cont"
+   },
+   "exclude_marks": [],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42635942",
@@ -1097,11 +974,13 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "hree simple AI methods — act, extract, and observe. We’d love for y",
-    "b2b_workflow_word": "</code></pre>\nHere’s a sample workflow:<p><pre><code>    const stage"
+    "ai_machine_core": "t project that extends Playwright with three simple AI methods — act, extract, and observe. We’d love for you to try it out using the command below",
+    "b2b_workflow_word": "create-browser-app --example quickstart\n</code></pre>\nHere’s a sample workflow:<p><pre><code>    const stagehand = new Stagehand();\n    await stageh"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:34519639",
@@ -1129,11 +1008,13 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Automatisch – Open source workflow au",
-    "b2b_workflow_word": "HN: Automatisch – Open source workflow automation, an alternative to"
+    "ai_machine_core": "Show HN: Automatisch – Open source workflow automation, an alternative to Zapier \nOpen",
+    "b2b_workflow_word": "Show HN: Automatisch – Open source workflow automation, an alternative to Zapier \nOpen source workflow automation"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:22306996",
@@ -1158,11 +1039,11 @@
     "ai": 1
    },
    "evidence": {
-    "stock_subscription_word": "tically generate API code for SaaS apps \nAutomatically generate",
-    "ai_machine_core": "HN: Autocode – Automatically generate API code for SaaS apps \nAuto"
+    "stock_subscription_word": "Show HN: Autocode – Automatically generate API code for SaaS apps \nAutomatically generate API code for SaaS apps",
+    "ai_machine_core": "Show HN: Autocode – Automatically generate API code for SaaS apps \nAutomatically generate API code for SaaS app"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40432213",
@@ -1189,11 +1070,13 @@
     "b2b": 1
    },
    "evidence": {
-    "proof_money_number": "pps, but the last invoice was $300, which was way over my budget.",
-    "b2b_business_object": "act Native apps, but the last invoice was $300, which was way over"
+    "proof_money_number": "extensively for one of my React Native apps, but the last invoice was $300, which was way over my budget. I think I was paying for MTU (monthly tr",
+    "b2b_business_object": "ed Mixpanel extensively for one of my React Native apps, but the last invoice was $300, which was way over my budget. I think I was paying for MTU"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46955712",
@@ -1218,11 +1101,11 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "but for discovery and ongoing monitoring, I kept bouncing between t",
-    "b2b_business_object": "vice on your subnet (IP, MAC, vendor, open ports).\n* Fast scans us"
+    "ai_machine_core": "wireless networks.<p>I live in the CLI, but for discovery and ongoing monitoring, I kept bouncing between tools, terminals, and mental context swit",
+    "b2b_business_object": "and DNS discovery to enumerate every device on your subnet (IP, MAC, vendor, open ports).\n* Fast scans using ARP tables first, then ICMP, to avoi"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:37274052",
@@ -1251,7 +1134,7 @@
     "b2b_workflow_word": "n8n.io - A powerful workflow automation tool"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30981592",
@@ -1276,11 +1159,44 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_repetitive_target": "flow: LaTeX notes and instant pdf referencing",
-    "b2b_workflow_word": "My Mathematics PhD research workflow: LaTeX notes and instant pdf"
+    "ai_repetitive_target": "My Mathematics PhD research workflow: LaTeX notes and instant pdf referencing",
+    "b2b_workflow_word": "My Mathematics PhD research workflow: LaTeX notes and instant pdf referencing"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:43988381",
+   "kind": "product",
+   "title": "Show HN: Muscle-Mem, a behavior cache for AI agents",
+   "url": "https://github.com/pig-dot-dev/muscle-mem",
+   "discussion_url": "https://news.ycombinator.com/item?id=43988381",
+   "points": 226,
+   "created_at": "2025-05-14T19:38:26Z",
+   "categories": [
+    "hr"
+   ],
+   "axes_met": [
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "ai_machine_core",
+    "b2b_workflow_word"
+   ],
+   "by_axis": {
+    "ai": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "ai_machine_core": "sk is encountered again, falling back to agent mode if edge cases are detected. Like a JIT compiler, for behaviors.<p>At Pig, we built computer-us",
+    "b2b_workflow_word": "0&#x2F;hr in token costs and take 5x longer than a human to perform a workflow. At this point, you&#x27;re better off hiring a human.<p>The goal of"
+   },
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:37240363",
@@ -1307,11 +1223,13 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "a follow up. However, an LLM translates this to:<p>select price fro",
-    "b2b_business_object": "more about the challenges of enterprise-level text-to-SQL in this blo"
+    "ai_machine_core": "irm the state with the question asker in a follow up. However, an LLM translates this to:<p>select price from rent_prices where city=”Los Angeles” A",
+    "b2b_business_object": "ferentiate between the two. You can read more about the challenges of enterprise-level text-to-SQL in this blog post I wrote on the topic: <a href=\"ht"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42441258",
@@ -1340,40 +1258,13 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "cing and Workflows to Improve LLM Apps \nOSS Tracing and Workflo",
-    "b2b_business_object": "an deploy freely on any cloud vendor.<p>The v3 release adds powerf"
+    "ai_machine_core": "Launch HN: Langfuse (YC W23) – OSS Tracing and Workflows to Improve LLM Apps \nOSS Tracing and Workflows to Improve LLM Apps \nHey HN, we are M",
+    "b2b_business_object": "structure components that self-hosters can deploy freely on any cloud vendor.<p>The v3 release adds powerful infrastructure with a Clickhouse data"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
-  },
-  {
-   "case_id": "hn:32540478",
-   "kind": "failure",
-   "title": "I Reached $4k/Mo. But How Many Great Startup Ideas Have Died?",
-   "url": "https://microfounder.com/blog/no",
-   "discussion_url": "https://news.ycombinator.com/item?id=32540478",
-   "points": 205,
-   "created_at": "2022-08-21T14:22:48Z",
-   "categories": [],
-   "axes_met": [
-    "stock",
-    "proof"
+   "exclude_marks": [
+    "oss_or_template"
    ],
-   "axes_met_count": 2,
-   "matched": [
-    "stock_pricing_page",
-    "proof_money_number"
-   ],
-   "by_axis": {
-    "stock": 1,
-    "proof": 1
-   },
-   "evidence": {
-    "stock_pricing_page": "Startup Ideas Have Died? I just reached $4,000/month with my internet startup as a solo deve",
-    "proof_money_number": "I Reached $4k/Mo. But How Many Great Startu"
-   },
-   "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43823096",
@@ -1405,13 +1296,15 @@
     "b2b": 2
    },
    "evidence": {
-    "ai_machine_core": "built deep research agents to detect application fraud, chatbots t",
-    "ai_repetitive_target": "You can trigger the workflows manually, deploy as an API and interac",
-    "b2b_business_object": "o building agents&#x27;, they claim that the non-declarative appr",
-    "b2b_workflow_word": "im Studio – Open-Source Agent Workflow GUI \nOpen-Source Agent Workfl"
+    "ai_machine_core": "faster iteration.<p>So far, users have built deep research agents to detect application fraud, chatbots to interface with their internal HR docum",
+    "ai_repetitive_target": "overall performance of the workflow.<p>You can trigger the workflows manually, deploy as an API and interact via HTTP, or schedule the workflows to",
+    "b2b_business_object": "In OpenAI&#x27;s &#x27;practical guide to building agents&#x27;, they claim that the non-declarative approach and single multi-step agents are th",
+    "b2b_workflow_word": "Show HN: Sim Studio – Open-Source Agent Workflow GUI \nOpen-Source Agent Workflow GUI \nHi HN! We&#x27;re Emir and Walee"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:37381268",
@@ -1438,11 +1331,13 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "companies use many tools that generate alerts - from Cloudwatch, Pr",
-    "b2b_workflow_word": "Keep, Datadog released their workflow automation tool (<a href=\"htt"
+    "ai_machine_core": "pers and devops, we found that a lot of companies use many tools that generate alerts - from Cloudwatch, Prometheus, Grafana, and Datadog to tools",
+    "b2b_workflow_word": "lding Keep.<p>During the time we rebuilt Keep, Datadog released their workflow automation tool (<a href=\"https:&#x2F;&#x2F;docs.datadoghq.com&#x2F;s"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42052432",
@@ -1471,12 +1366,14 @@
     "ai": 2
    },
    "evidence": {
-    "stock_subscription_word": "?\nGood question, as a general SaaS tool yes, but I think a lot o",
-    "ai_machine_core": "bsite interaction for LLMs by extracting xPaths and interactive ele",
-    "ai_repetitive_target": "nd scraping functions without manual inspection through DevTools.<"
+    "stock_subscription_word": "asn&#x27;t this been done a lot of times?\nGood question, as a general SaaS tool yes, but I think a lot of people are going to try to make their",
+    "ai_machine_core": "s. We created a layer that simplifies website interaction for LLMs by extracting xPaths and interactive elements like buttons and input fields (and",
+    "ai_repetitive_target": "es you to design custom web automation and scraping functions without manual inspection through DevTools.<p>Hasn&#x27;t this been done a lot of ti"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46130260",
@@ -1503,11 +1400,13 @@
     "b2b": 1
    },
    "evidence": {
-    "proof_money_number": "p built by 17 y/o, processing $6M/month \nfinancial app built by",
-    "b2b_business_object": "est case recordings, and also compliance checks.<p>Even after securing"
+    "proof_money_number": "Show HN: HCB Mobile – financial app built by 17 y/o, processing $6M/month \nfinancial app built by 17 y/o, processing $6M/month \nHey every",
+    "b2b_business_object": "t was months of back-and-forth emails, test case recordings, and also compliance checks.<p>Even after securing Apple&#x2F;Google’s permission, any min"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30767084",
@@ -1534,11 +1433,13 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "te enterprise features in any SaaS app with just a few lines of",
-    "b2b_business_object": "de SAML Single Sign-On (SSO), Audit logs, with more to come :)<p>"
+    "stock_subscription_word": "y we built BoxyHQ, a platform to integrate enterprise features in any SaaS app with just a few lines of code.<p>The main difference with Auth0 a",
+    "b2b_business_object": "to their software solutions. These include SAML Single Sign-On (SSO), Audit logs, with more to come :)<p>Every B2B startup faces a common challen"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43773563",
@@ -1565,11 +1466,13 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "sion 360 with a CAD Copilot; -Extract data from legacy ERP apps wit",
-    "b2b_workflow_word": "ork without interrupting your workflow or risking the integrity of y"
+    "ai_machine_core": "ting by prompt; - Modify 3D models in Fusion 360 with a CAD Copilot; -Extract data from legacy ERP apps without brittle screen‑scraping scripts.<p>",
+    "b2b_workflow_word": "nvironment, agents can carry out their work without interrupting your workflow or risking the integrity of your system.<p>While exploring this idea,"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:45427482",
@@ -1599,11 +1502,13 @@
     "ai": 1
    },
    "evidence": {
-    "stock_subscription_word": "ny and user data lives across SaaS and databases; it’s sparse, m",
-    "ai_machine_core": "es via their APIs, crawls and normalizes content, chunks it, extract"
+    "stock_subscription_word": "fell into a rabbithole of issues. Company and user data lives across SaaS and databases; it’s sparse, messy, and constantly changing. Agents ne",
+    "ai_machine_core": "e resource.<p>Airweave connects to sources via their APIs, crawls and normalizes content, chunks it, extracts entity relationships, and indexes the"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25870899",
@@ -1628,40 +1533,11 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "B2B SaaS marketplaces with opportuniti",
-    "b2b_business_object": "B2B SaaS marketplaces with opport"
+    "stock_subscription_word": "B2B SaaS marketplaces with opportunities for indie hackers",
+    "b2b_business_object": "B2B SaaS marketplaces with opportunities for indie hackers"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
-  },
-  {
-   "case_id": "hn:32376672",
-   "kind": "product",
-   "title": "Micro-SaaS Alternatives to BigTech/VC",
-   "url": "https://microfounder.com/alternatives",
-   "discussion_url": "https://news.ycombinator.com/item?id=32376672",
-   "points": 151,
-   "created_at": "2022-08-07T14:19:41Z",
-   "categories": [],
-   "axes_met": [
-    "stock",
-    "proof"
-   ],
-   "axes_met_count": 2,
-   "matched": [
-    "stock_subscription_word",
-    "proof_money_number"
-   ],
-   "by_axis": {
-    "stock": 1,
-    "proof": 1
-   },
-   "evidence": {
-    "stock_subscription_word": "use Tally (by two devs, $14K MRR) instead of Typeform ($190M f",
-    "proof_money_number": "u can use Tally (by two devs, $14K MRR) instead of Typeform ($19"
-   },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:45980760",
@@ -1686,11 +1562,11 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "sk chat to help with AI asset generation, enhancements, searching t",
-    "b2b_workflow_word": "s own editing sequence &#x2F; workflow without needing a canvas, do"
+    "ai_machine_core": "ful. In natural language, we could now ask chat to help with AI asset generation, enhancements, searching through assets, and automatically applyin",
+    "b2b_workflow_word": "using existing video content, define its own editing sequence &#x2F; workflow without needing a canvas, do research and pull assets from web refere"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42704160",
@@ -1717,11 +1593,11 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Simplex: Automate browser workflows using code",
-    "b2b_workflow_word": "f it failed at step 20 of our workflow.<p>So we built a vision-based"
+    "ai_machine_core": "Show HN: Simplex: Automate browser workflows using code and natural language \nAutomate browser",
+    "b2b_workflow_word": "here was no way to correct its actions if it failed at step 20 of our workflow.<p>So we built a vision-based solution using vision language models t"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47309953",
@@ -1751,13 +1627,15 @@
     "b2b": 2
    },
    "evidence": {
-    "ai_machine_core": "usly worked with sales floors automating niche enterprise tasks suc",
-    "ai_repetitive_target": "se. It did not give me joy to manually add AI tools to a cloud harne",
-    "b2b_business_object": "sales floors automating niche enterprise tasks such as outbound callin",
-    "b2b_workflow_word": "re part of YC S24, an agentic workflow company that previously worke"
+    "ai_machine_core": "an agentic workflow company that previously worked with sales floors automating niche enterprise tasks such as outbound calling, legal intake, etc",
+    "ai_repetitive_target": "me more joy than FDEing into an enterprise. It did not give me joy to manually add AI tools to a cloud harness for every small new thing, at least n",
+    "b2b_business_object": "low company that previously worked with sales floors automating niche enterprise tasks such as outbound calling, legal intake, etc.<p>Building consume",
+    "b2b_workflow_word": "ps:&#x2F;&#x2F;denchclaw.com</a>). We were part of YC S24, an agentic workflow company that previously worked with sales floors automating niche ent"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39309093",
@@ -1782,11 +1660,11 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "Building a Bootstrapped, B2B SaaS in 2024",
-    "b2b_business_object": "for Building a Bootstrapped, B2B SaaS in 2024"
+    "stock_subscription_word": "Why Elixir Is the Best Language for Building a Bootstrapped, B2B SaaS in 2024",
+    "b2b_business_object": "Why Elixir Is the Best Language for Building a Bootstrapped, B2B SaaS in 2024"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35404852",
@@ -1813,11 +1691,11 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "blogs. Basically, I wanted to automatically create a chatbot for ea",
-    "b2b_workflow_word": "be used on any website.<p>The workflow works like this. People login"
+    "ai_machine_core": "a chatbot functionality to my customer blogs. Basically, I wanted to automatically create a chatbot for each of my customer blogs. That chatbot wi",
+    "b2b_workflow_word": "roduct called SiteGPT.ai so that it can be used on any website.<p>The workflow works like this. People login the platform, they enter their website"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31098065",
@@ -1845,12 +1723,12 @@
     "ai": 2
    },
    "evidence": {
-    "stock_subscription_word": "x2F; Salesforce &#x2F; insert SaaS app}.<p>When we followed this",
-    "ai_machine_core": "Show HN: Two-way Jira sync in a collaborative spreadshee",
-    "ai_repetitive_target": "Jira sync in a collaborative spreadsheet and Gantt \nway Jira sync in a"
+    "stock_subscription_word": "they have to stay in sync with {Jira &#x2F; Salesforce &#x2F; insert SaaS app}.<p>When we followed this thread, we discovered how broken the in",
+    "ai_machine_core": "Show HN: Two-way Jira sync in a collaborative spreadsheet and Gantt \nway Jira sync in a collabor",
+    "ai_repetitive_target": "Show HN: Two-way Jira sync in a collaborative spreadsheet and Gantt \nway Jira sync in a collaborative spreadsheet and Gantt \nHe"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41082041",
@@ -1879,12 +1757,14 @@
     "b2b": 2
    },
    "evidence": {
-    "ai_machine_core": "patchflows like PR Review and Generate Docstring, but lower for mor",
-    "b2b_business_object": "lf-host, ensuring privacy and compliance for large teams.<p>As devs, w",
-    "b2b_workflow_word": "efined prompts with effective workflow orchestration to automate as"
+    "ai_machine_core": "Success rates are higher for text-based patchflows like PR Review and Generate Docstring, but lower for more complex tasks like Dependency Upgrades",
+    "b2b_business_object": "ur preferred LLM endpoints, and fully self-host, ensuring privacy and compliance for large teams.<p>As devs, we prefer to build our own ‘AI-enabled au",
+    "b2b_workflow_word": "ain.<p>Patchwork lets you combine well-defined prompts with effective workflow orchestration to automate as much as 80% of these gruntwork tasks usi"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:34692177",
@@ -1913,12 +1793,14 @@
     "b2b": 2
    },
    "evidence": {
-    "stock_subscription_word": "/a>) - feature management for SaaS companies. It makes it easy f",
-    "b2b_business_object": "by charging a license fee for enterprise features like Salesforce&#x2F",
-    "b2b_workflow_word": "for everyone. \nWe now have a backoffice UI, a backend and SDKs for ma"
+    "stock_subscription_word": "2F;github.com&#x2F;enrolla&#x2F;enrolla</a>) - feature management for SaaS companies. It makes it easy for developers to control how their produ",
+    "b2b_business_object": "ge individual developers. We make money by charging a license fee for enterprise features like Salesforce&#x2F;Hubspot and SSO integrations.<p>Give it",
+    "b2b_workflow_word": "and feature-rich that will be available for everyone. \nWe now have a backoffice UI, a backend and SDKs for managing customer features and a way to ma"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47794514",
@@ -1948,13 +1830,13 @@
     "b2b": 2
    },
    "evidence": {
-    "ai_machine_core": "hboards and on-prem solutions reconciling data across platforms. Cur",
-    "ai_repetitive_target": "ctions to make, or our MCP by manually doing a  workflow once, and a",
-    "b2b_business_object": "lol), automated 2-3 hours of billing information entry in Yardi. A",
-    "b2b_workflow_word": "our MCP by manually doing a  workflow once, and asking your preferr"
+    "ai_machine_core": "people spend hours per day in legacy dashboards and on-prem solutions reconciling data across platforms. Current attempts at automation use browser",
+    "ai_repetitive_target": "s&#x2F;apis by prompting you with what actions to make, or our MCP by manually doing a  workflow once, and asking your preferred coding agent to use",
+    "b2b_business_object": "ger mom, who (with a lot of help from me lol), automated 2-3 hours of billing information entry in Yardi. At that point we realized that this wasn’",
+    "b2b_workflow_word": "mpting you with what actions to make, or our MCP by manually doing a  workflow once, and asking your preferred coding agent to use Kampala to make a"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47982708",
@@ -1982,11 +1864,11 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "mands with JSON output, so an LLM can inspect and operate nativ",
-    "b2b_workflow_word": "ithout shelling out\n  - Batch operations in a single call\n  - Support"
+    "ai_machine_core": "runtime dependencies. It exposes 53 commands with JSON output, so an LLM can inspect and operate native apps without screenshots or vision mod",
+    "b2b_workflow_word": "om Python, Swift, Go, Node, Ruby, or C without shelling out\n  - Batch operations in a single call\n  - Support for windows, menus, sheets, popovers, al"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43139138",
@@ -2014,11 +1896,11 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "HN: I Built a Visual Workflow Automation Platform – FlowRipple \nFlo",
-    "b2b_workflow_word": "Show HN: I Built a Visual Workflow Automation Platform – FlowRip"
+    "ai_machine_core": "Show HN: I Built a Visual Workflow Automation Platform – FlowRipple \nFlowRipple \nFlowRipple is designed to strea",
+    "b2b_workflow_word": "Show HN: I Built a Visual Workflow Automation Platform – FlowRipple \nFlowRipple \nFlowRipple is designed"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:32325547",
@@ -2043,11 +1925,11 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "software, new data management SaaS",
-    "b2b_business_object": "Capital One enters enterprise B2B software, new data manage"
+    "stock_subscription_word": "Capital One enters enterprise B2B software, new data management SaaS",
+    "b2b_business_object": "Capital One enters enterprise B2B software, new data management SaaS"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36013586",
@@ -2072,11 +1954,11 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "e solution to costly workflow automation: Embed Workflow \nEmbed Wor",
-    "b2b_workflow_word": "affordable solution to costly workflow automation: Embed Workflow \nE"
+    "ai_machine_core": "Show HN: My affordable solution to costly workflow automation: Embed Workflow \nEmbed Workflow",
+    "b2b_workflow_word": "Show HN: My affordable solution to costly workflow automation: Embed Workflow \nEmbed Workflow"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46974515",
@@ -2105,12 +1987,12 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "g coderlm, claude was able to generate a plan in about 3 minutes. T",
-    "ai_repetitive_target": ".claude yet so there are some manual steps to just getting to a po",
-    "b2b_workflow_word": "scanning for it.<p>The agent workflow looks like:<p>1. `init` — reg"
+    "ai_machine_core": "ify the existing structure&quot;.<p>Using coderlm, claude was able to generate a plan in about 3 minutes. The coderlm enabled instance found a genu",
+    "ai_repetitive_target": "he skill isn&#x27;t being added to your .claude yet so there are some manual steps to just getting to a point where claude could use it.<p>Claude",
+    "b2b_workflow_word": "ack exactly the code it needs instead of scanning for it.<p>The agent workflow looks like:<p>1. `init` — register the project, get the top-level str"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44424256",
@@ -2135,11 +2017,11 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "Auth for B2B SaaS: it's not like auth for consu",
-    "b2b_business_object": "Auth for B2B SaaS: it's not like auth for"
+    "stock_subscription_word": "Auth for B2B SaaS: it's not like auth for consumer software",
+    "b2b_business_object": "Auth for B2B SaaS: it's not like auth for consumer software"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:45466865",
@@ -2168,14 +2050,15 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "gressing from simple resource extraction (~30 units&#x2F;min) to so",
-    "ai_repetitive_target": "ost models still rely on semi-manual strategies rather than true a",
-    "b2b_business_object": "ing, constraint satisfaction, logistics optimization - transfer direc"
+    "ai_machine_core": "n code to build automated factories, progressing from simple resource extraction (~30 units&#x2F;min) to sophisticated production chains (millions",
+    "ai_repetitive_target": ".<p>Even the best models struggle:<p>- Most models still rely on semi-manual strategies rather than true automation<p>- Agents rarely define helpe",
+    "b2b_business_object": "iling. The skills needed - system debugging, constraint satisfaction, logistics optimization - transfer directly to real challenges.<p>== Try it your"
    },
    "exclude_marks": [
-    "consumer_only"
+    "consumer_only",
+    "oss_or_template"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46557823",
@@ -2203,12 +2086,14 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "EU AI Act\nrequirements can be translated into concrete, inspectable",
-    "ai_repetitive_target": "– automatic Annex IV–oriented PDF reports\n– no cloud services o",
-    "b2b_business_object": "orm – Offline-first EU AI Act compliance tool (open source) \nOffline-f"
+    "ai_machine_core": "onal open-source project to explore how EU AI Act\nrequirements can be translated into concrete, inspectable technical checks.<p>The core idea is loc",
+    "ai_repetitive_target": "es)\n– bias evaluation using CrowS-Pairs\n– automatic Annex IV–oriented PDF reports\n– no cloud services or external APIs (browser-based + Ollama)",
+    "b2b_business_object": "Show HN: EuConform – Offline-first EU AI Act compliance tool (open source) \nOffline-first EU AI Act compliance tool (open sou"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48595882",
@@ -2233,13 +2118,14 @@
     "ai": 1
    },
    "evidence": {
-    "stock_subscription_word": "Show HN: Write SaaS apps where users control wher",
-    "ai_machine_core": "n (no captions on figures, no automatic heading numbering, slow whe"
+    "stock_subscription_word": "Show HN: Write SaaS apps where users control where their data is stored \nHello HN,<p>I wo",
+    "ai_machine_core": "the limitations of Google Docs back then (no captions on figures, no automatic heading numbering, slow when docs are bigger,...) I was still fasci"
    },
    "exclude_marks": [
-    "crypto"
+    "crypto",
+    "oss_or_template"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26674781",
@@ -2268,7 +2154,7 @@
     "b2b_workflow_word": "RepoKitteh: Github workflow automation using Starlark"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39540445",
@@ -2295,11 +2181,13 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "en source workflow editor and automation tool that uses Kalosm to p",
-    "b2b_workflow_word": "2F;</a>): A local open source workflow editor and automation tool th"
+    "ai_machine_core": "&#x2F;floneum.com&#x2F;</a>): A local open source workflow editor and automation tool that uses Kalosm to provide natural language processing and o",
+    "b2b_workflow_word": "follow\">https:&#x2F;&#x2F;floneum.com&#x2F;</a>): A local open source workflow editor and automation tool that uses Kalosm to provide natural langua"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:45264867",
@@ -2328,12 +2216,14 @@
     "proof": 1
    },
    "evidence": {
-    "ai_machine_core": "on agents (e.g. automatically summarizing emails) and more agentic s",
-    "ai_repetitive_target": "ling multiple domains such as email, Slack, and LinkedIn is bette",
-    "proof_money_number": "r launch, we&#x27;re offering $10 free usage with Gemini models"
+    "ai_machine_core": "ou can build both deterministic automation agents (e.g. automatically summarizing emails) and more agentic systems (e.g. a meeting prep assistant or",
+    "ai_repetitive_target": "ke coding suits a single agent, but juggling multiple domains such as email, Slack, and LinkedIn is better split across agents. Multi-agent syste",
+    "proof_money_number": "instantly with no setup or API keys. For launch, we&#x27;re offering $10 free usage with Gemini models so you can start building right away for"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43182241",
@@ -2361,11 +2251,13 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "-limiting for OpenAI or other LLM APIs. Langfuse manages LLM tr",
-    "b2b_business_object": "rompt Management in-house for compliance; (3) Track cost and usage via"
+    "ai_machine_core": "agement, virtual keys, caching, and rate-limiting for OpenAI or other LLM APIs. Langfuse manages LLM tracing, evaluation, prompt management, an",
+    "b2b_business_object": "ion; (2) Keep LLM Tracing, Evaluation, Prompt Management in-house for compliance; (3) Track cost and usage via a single interface, create virtual API"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:29101316",
@@ -2394,7 +2286,7 @@
     "b2b_business_object": "Dystopian B2B Bullshit Generator"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26025254",
@@ -2421,11 +2313,11 @@
     "ai": 1
    },
    "evidence": {
-    "stock_subscription_word": "ternal scheduling tool into a SaaS",
-    "ai_machine_core": "I turned an Algolia internal scheduling tool into a SaaS"
+    "stock_subscription_word": "ow HN: TurnShift, I turned an Algolia internal scheduling tool into a SaaS",
+    "ai_machine_core": "Show HN: TurnShift, I turned an Algolia internal scheduling tool into a SaaS"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42879713",
@@ -2455,13 +2347,13 @@
     "b2b": 2
    },
    "evidence": {
-    "ai_machine_core": "ant, the AI works to pull and extract information and details from",
-    "ai_repetitive_target": "w is built, edits can be done manually or by asking the AI to adjust",
-    "b2b_business_object": "include building:\n- automated compliance checks for new CRM leads\n- cu",
-    "b2b_workflow_word": "as a standalone process&#x2F;workflow automation tool, or as a work"
+    "ai_machine_core": "ke. Like a business analyst&#x2F;consultant, the AI works to pull and extract information and details from the user by asking the right questions r",
+    "ai_repetitive_target": "dentials when required.<p>Once a workflow is built, edits can be done manually or by asking the AI to adjust the workflow at any time (e.g., “Add a",
+    "b2b_business_object": "ome use cases we’ve seen from customers include building:\n- automated compliance checks for new CRM leads\n- custom international contractor onboarding",
+    "b2b_workflow_word": "uests, running custom code etc. It works as a standalone process&#x2F;workflow automation tool, or as a workflow customization layer on top of exist"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:22569074",
@@ -2486,11 +2378,11 @@
     "proof": 1
    },
    "evidence": {
-    "stock_subscription_word": "I started $10K MRR business – Print My City stor",
-    "proof_money_number": "I started $10K MRR business – Print My City"
+    "stock_subscription_word": "I started $10K MRR business – Print My City story",
+    "proof_money_number": "I started $10K MRR business – Print My City story"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48922706",
@@ -2521,13 +2413,13 @@
     "b2b": 2
    },
    "evidence": {
-    "ai_machine_core": "se includes the final status, extracted outputs, a replay URL, and",
-    "ai_repetitive_target": "files=[&quot;authorization.pdf&quot;],\n      approval_requir",
-    "b2b_business_object": "ations through payer portals, accounting teams enter data into desktop",
-    "b2b_workflow_word": "demo of an agent completing a workflow in a legacy application(It’s"
+    "ai_machine_core": "sion&quot;]\n  )\n</code></pre>\nThe response includes the final status, extracted outputs, a replay URL, and a timestamped event log:<p><pre><code>",
+    "ai_repetitive_target": "on number.\n      &quot;&quot;&quot;,\n      files=[&quot;authorization.pdf&quot;],\n      approval_required=[&quot;final_submission&quot;]\n  )\n</",
+    "b2b_business_object": ". Healthcare teams submit prior authorizations through payer portals, accounting teams enter data into desktop applications, and operations teams move",
+    "b2b_workflow_word": "s, outputs, and errors.<p>Here is a raw demo of an agent completing a workflow in a legacy application(It’s a mockup): <a href=\"https:&#x2F;&#x2F;dr"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:45890394",
@@ -2553,12 +2445,12 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "concept&quot; behind the code generated by AI agents alongside code",
-    "ai_repetitive_target": "a web table, an unnormalized excel table, table in a chunk of te",
-    "b2b_workflow_word": "data. Plus, you can compose a report easily based on your visualiz"
+    "ai_machine_core": "ble. Data Formulator now presents &quot;concept&quot; behind the code generated by AI agents alongside code&#x2F;explanation&#x2F;data. Plus, you c",
+    "ai_repetitive_target": "ation — either it&#x27;s a screenshot of a web table, an unnormalized excel table, table in a chunk of text, a csv file, or a table in database,",
+    "b2b_workflow_word": "ts alongside code&#x2F;explanation&#x2F;data. Plus, you can compose a report easily based on your visualizations to share insights.<p>We are shari"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:49280184",
@@ -2585,11 +2477,42 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Ballet – Workflow automation that writes integrations a",
-    "b2b_workflow_word": "Show HN: Ballet – Workflow automation that writes integr"
+    "ai_machine_core": "Show HN: Ballet – Workflow automation that writes integrations against any API \nWorkflow automation that",
+    "b2b_workflow_word": "Show HN: Ballet – Workflow automation that writes integrations against any API \nWorkflow automat"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:44061414",
+   "kind": "product",
+   "title": "Show HN: Pi Co-pilot – Evaluation of AI apps made easy",
+   "url": "https://withpi.ai/",
+   "discussion_url": "https://news.ycombinator.com/item?id=44061414",
+   "points": 34,
+   "created_at": "2025-05-22T12:31:48Z",
+   "categories": [
+    "data_plumbing"
+   ],
+   "axes_met": [
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "ai_machine_core",
+    "b2b_workflow_word"
+   ],
+   "by_axis": {
+    "ai": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "ai_machine_core": "good fit for scoring compared to the “LLM as a judge” pattern.<p>- or generates Python functions when that makes more sense (word count, regex etc.",
+    "b2b_workflow_word": "the-shelf metrics. Then you can plug the scoring system into your own workflow: Python, TypeScript, Promptfoo, Langfuse, Spreadsheets, whatever. We"
+   },
+   "exclude_marks": [],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48907615",
@@ -2614,11 +2537,11 @@
     "proof": 1
    },
    "evidence": {
-    "ai_machine_core": "deterministic techniques. We detect tool failures, retries, loops",
-    "proof_money_number": "Show HN: Oodle.ai – $10 per million agent traces \n$10"
+    "ai_machine_core": "als on each, we first analyze them using deterministic techniques. We detect tool failures, retries, loops, abnormal token usage, latency regressi",
+    "proof_money_number": "Show HN: Oodle.ai – $10 per million agent traces \n$10 per million agent traces \nHi HN, we&#x27"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48649137",
@@ -2643,11 +2566,13 @@
     "b2b": 1
    },
    "evidence": {
-    "stock_subscription_word": "subproblems in order to find recurring patterns across large amounts",
-    "b2b_workflow_word": "d the traces to HALO, get the report, apply the fixes, then re-run"
+    "stock_subscription_word": "iently break trace analysis into smaller subproblems in order to find recurring patterns across large amounts of data and fix systemic issues that re",
+    "b2b_workflow_word": "aces.<p>It’s a loop. Run your agent, feed the traces to HALO, get the report, apply the fixes, then re-run your agent.<p>HALO takes in OTEL compli"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:49084371",
@@ -2672,11 +2597,11 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "describe what you want, your LLM writes the implementation, wi",
-    "b2b_workflow_word": "Show HN: Tines 3B – safe workflow automation for when everyone"
+    "ai_machine_core": "see and control.<p>It&#x27;s code-first, describe what you want, your LLM writes the implementation, with isolated executions and credentials h",
+    "b2b_workflow_word": "Show HN: Tines 3B – safe workflow automation for when everyone builds software \nsafe workflow automatio"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40855069",
@@ -2702,12 +2627,14 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "Smarter Summaries: Uses AI to generate concise summaries of issue a",
-    "ai_repetitive_target": "e credentials:<p><pre><code>  Email: elon@xyz.com\n\n  Password: Xf",
-    "b2b_workflow_word": "sting adjustments for optimal workflow. [Coming soon]<p>Key Sources<"
+    "ai_machine_core": "e issues while you create new ones.<p>- Smarter Summaries: Uses AI to generate concise summaries of issue activity, keeping you focused.<p>- Natura",
+    "ai_repetitive_target": ":&#x2F;&#x2F;demo.tegon.ai</a> with these credentials:<p><pre><code>  Email: elon@xyz.com\n\n  Password: XfFNw6GwVJVQv6PA\n</code></pre>\nTraditional",
+    "b2b_workflow_word": "ities, and bandwidth in real-time, suggesting adjustments for optimal workflow. [Coming soon]<p>Key Sources<p>Website - <a href=\"https:&#x2F;&#x2F;t"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:29267759",
@@ -2732,11 +2659,11 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "Advanced workflow automation features with GitHub Actio",
-    "b2b_workflow_word": "Advanced workflow automation features with GitH"
+    "ai_machine_core": "Advanced workflow automation features with GitHub Actions",
+    "b2b_workflow_word": "Advanced workflow automation features with GitHub Actions"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48762589",
@@ -2761,11 +2688,13 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "hipify – Open-source workflow automation for analog IC design",
-    "b2b_workflow_word": "Chipify – Open-source workflow automation for analog IC desi"
+    "ai_machine_core": "Chipify – Open-source workflow automation for analog IC design",
+    "b2b_workflow_word": "Chipify – Open-source workflow automation for analog IC design"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39760090",
@@ -2794,12 +2723,43 @@
     "b2b": 1
    },
    "evidence": {
-    "ai_machine_core": "or?<p>You can use Pipeable to automate web interactions in your mob",
-    "ai_repetitive_target": "pipeable.com</a>), send us an email (hello@pipeable.com) or DM us",
-    "b2b_workflow_word": "eferred mobile authentication workflow (leveraging FaceID, TouchID,"
+    "ai_machine_core": "eractions.<p>What can you use Pipeable for?<p>You can use Pipeable to automate web interactions in your mobile app. This can be anything from scrap",
+    "ai_repetitive_target": "e.com\" rel=\"nofollow\">https:&#x2F;&#x2F;pipeable.com</a>), send us an email (hello@pipeable.com) or DM us on Twitter (@PipeableHQ).",
+    "b2b_workflow_word": "ers can log into websites using their preferred mobile authentication workflow (leveraging FaceID, TouchID, etc.) without the need to explicitly sha"
+   },
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:26945153",
+   "kind": "product",
+   "title": "N8n raises $12m to build out fair-code workflow automation",
+   "url": "https://n8n.io/blog/series-a-announcement/",
+   "discussion_url": "https://news.ycombinator.com/item?id=26945153",
+   "points": 20,
+   "created_at": "2021-04-26T17:18:24Z",
+   "categories": [],
+   "axes_met": [
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "ai_machine_core",
+    "b2b_workflow_word"
+   ],
+   "by_axis": {
+    "ai": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "ai_machine_core": "N8n raises $12m to build out fair-code workflow automation",
+    "b2b_workflow_word": "N8n raises $12m to build out fair-code workflow automation"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:49023016",
@@ -2821,10 +2781,35 @@
     "ai": 1
    },
    "evidence": {
-    "ai_repetitive_target": "open-weight-ai-letter-7-22-26.pdf\" rel=\"nofollow\">https:&#x2F;&"
+    "ai_repetitive_target": "F;9c4021d8404386b0a311dcccf0e5&#x2F;lta-open-weight-ai-letter-7-22-26.pdf\" rel=\"nofollow\">https:&#x2F;&#x2F;static.politico.com&#x2F;4a&#x2F;bf"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:47736555",
+   "kind": "product",
+   "title": "I run multiple $10K MRR companies on a $20/month tech stack",
+   "url": "https://stevehanov.ca/blog/how-i-run-multiple-10k-mrr-companies-on-a-20month-tech-stack",
+   "discussion_url": "https://news.ycombinator.com/item?id=47736555",
+   "points": 980,
+   "created_at": "2026-04-12T06:00:00Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_pricing_page"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_pricing_page": "I run multiple $10K MRR companies on a $20/month tech stack | Steve Hanov&#39;s Blog I k"
+   },
+   "exclude_marks": [],
+   "pricing_state": "fetched"
   },
   {
    "case_id": "hn:34246564",
@@ -2849,7 +2834,7 @@
     "stock_subscription_word": "Going full time on my SaaS after 13 years"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "fetched"
   },
   {
    "case_id": "hn:41104293",
@@ -2874,7 +2859,7 @@
     "stock_subscription_word": "One-man SaaS, 9 Years In"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "fetched"
   },
   {
    "case_id": "hn:37326870",
@@ -2896,10 +2881,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "this for about a year now - I parsed 6 months of my messages on s"
+    "ai_machine_core": "half of my typing \nI&#x27;ve been using this for about a year now - I parsed 6 months of my messages on slack and found the most common phrases I"
    },
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:29083367",
@@ -2921,10 +2906,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "scripting: the key to gradual automation (2019)"
+    "ai_machine_core": "Do-nothing scripting: the key to gradual automation (2019)"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "fetched"
   },
   {
    "case_id": "hn:28601031",
@@ -2946,10 +2931,10 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "I started SaaS companies in 2013 and 2021 –"
+    "stock_subscription_word": "I started SaaS companies in 2013 and 2021 – how things have changed"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44426726",
@@ -2971,10 +2956,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "WiFi signals in your house to detect motion"
+    "ai_machine_core": "Xfinity using WiFi signals in your house to detect motion"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "fetched"
   },
   {
    "case_id": "hn:27605052",
@@ -2996,10 +2981,10 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "ter software architecture for SaaS startups"
+    "stock_subscription_word": "Django for Startup Founders: A better software architecture for SaaS startups"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40837610",
@@ -3023,10 +3008,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "lls and whistles - searching, scheduling into the future, observabi"
+    "ai_machine_core": "because I wanted a queue with all the bells and whistles - searching, scheduling into the future, observability, and rate limiting - all the things"
    },
-   "exclude_marks": [],
-   "pricing_fetched": true
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39120647",
@@ -3048,10 +3035,37 @@
     "ai": 1
    },
    "evidence": {
-    "ai_repetitive_target": "process looks simple. Just an excel sheet will do! But then the m"
+    "ai_repetitive_target": "for a company, and at first glance the process looks simple. Just an excel sheet will do! But then the more we dug into it and tried different s"
+   },
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:33344142",
+   "kind": "product",
+   "title": "Show HN: SadServers – Test your Linux troubleshooting skills",
+   "url": "https://sadservers.com/",
+   "discussion_url": "https://news.ycombinator.com/item?id=33344142",
+   "points": 597,
+   "created_at": "2022-10-26T14:22:17Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "ux troubleshooting skills \nHello, I&#x27;m building SadServers.com, a SaaS where users can test their Linux troubleshooting skills on real Linux"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:19136075",
@@ -3073,10 +3087,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "gle Docs gets an API for task automation"
+    "ai_machine_core": "Google Docs gets an API for task automation"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47224295",
@@ -3100,10 +3114,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "you need semantic end-of-turn detection.<p>The system reduces to o"
+    "ai_machine_core": "transcription problem. VAD alone fails; you need semantic end-of-turn detection.<p>The system reduces to one loop: speaking vs listening. The two"
    },
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:38732542",
@@ -3128,9 +3142,10 @@
     "ai_machine_core": "Mindustry: Open-source automation tower defense game"
    },
    "exclude_marks": [
-    "consumer_only"
+    "consumer_only",
+    "oss_or_template"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:28544835",
@@ -3152,10 +3167,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Assistant – open-source home automation"
+    "ai_machine_core": "Home Assistant – open-source home automation"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42585009",
@@ -3177,10 +3194,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "aily, and it has surprisingly generated a few thousand dollars for"
+    "ai_machine_core": "e capabilities of FFmpeg. I use my app daily, and it has surprisingly generated a few thousand dollars for me."
    },
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36365511",
@@ -3202,10 +3219,10 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "Show HN: 77 Year old launches SaaS platform today. Seeks feedbac"
+    "stock_subscription_word": "Show HN: 77 Year old launches SaaS platform today. Seeks feedback \nRichard Montgomery (rm@propbox.co). I"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31516108",
@@ -3227,13 +3244,13 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "inference engine, with object detection and face recognition for s"
+    "ai_machine_core": "ystems, based on our own lightweight AI inference engine, with object detection and face recognition for smart city and smart retail &amp; food se"
    },
    "exclude_marks": [
     "consumer_only",
     "hardware"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44526015",
@@ -3258,36 +3275,13 @@
     "ai": 2
    },
    "evidence": {
-    "ai_machine_core": "oT and edge devices for field monitoring\n\n  - Bring localhost onlin",
-    "ai_repetitive_target": "pecific pin codes, passwords, email OTP\n\n  - Self-destructing sha"
+    "ai_machine_core": "remises\n\n  - Easily expose services on IoT and edge devices for field monitoring\n\n  - Bring localhost online for easy access\n</code></pre>\nA few ke",
+    "ai_repetitive_target": "Raw TCP and UDP support\n\n  - Resource-specific pin codes, passwords, email OTP\n\n  - Self-destructing shareable links\n\n  - API for automation"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
-  },
-  {
-   "case_id": "hn:25186342",
-   "kind": "product",
-   "title": "The Tech Stack of a One-Man SaaS",
-   "url": "https://panelbear.com/blog/tech-stack/",
-   "discussion_url": "https://news.ycombinator.com/item?id=25186342",
-   "points": 475,
-   "created_at": "2020-11-23T13:06:53Z",
-   "categories": [],
-   "axes_met": [
-    "stock"
+   "exclude_marks": [
+    "oss_or_template"
    ],
-   "axes_met_count": 1,
-   "matched": [
-    "stock_subscription_word"
-   ],
-   "by_axis": {
-    "stock": 1
-   },
-   "evidence": {
-    "stock_subscription_word": "The Tech Stack of a One-Man SaaS"
-   },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:38316936",
@@ -3311,10 +3305,12 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "this is going to be great for onboarding and internal training.<p>- Ed"
+    "b2b_business_object": "their own white-label Duolingo. I think this is going to be great for onboarding and internal training.<p>- Educasso: Focused on schools. It will allo"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:27915370",
@@ -3336,10 +3332,12 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "ource alternatives to popular B2B tools"
+    "b2b_business_object": "Open-source alternatives to popular B2B tools"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25552342",
@@ -3364,7 +3362,7 @@
     "stock_subscription_word": "SaaS We Happily Pay For"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47509571",
@@ -3386,10 +3384,10 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "I wanted to build vertical SaaS for pest control, so I took a"
+    "stock_subscription_word": "I wanted to build vertical SaaS for pest control, so I took a technician job"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46377597",
@@ -3411,10 +3409,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Vibium – Browser automation for AI and humans, by Sele"
+    "ai_machine_core": "Show HN: Vibium – Browser automation for AI and humans, by Selenium's creator \nBrowser automation for A"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39052196",
@@ -3441,7 +3439,7 @@
     "ai_machine_core": "Winding down Google Sync and Less Secure Apps support"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35687157",
@@ -3466,7 +3464,7 @@
     "stock_subscription_word": "Bullet Train – Rails-based SaaS framework"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46268452",
@@ -3491,7 +3489,7 @@
     "stock_subscription_word": "AI agents are starting to eat SaaS"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:33537772",
@@ -3513,10 +3511,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Web automation: Don't use Selenium, use P"
+    "ai_machine_core": "Web automation: Don't use Selenium, use Playwright"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:38507446",
@@ -3540,10 +3538,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_workflow_word": "Report Phone Spam – Shut down roboca"
+    "b2b_workflow_word": "Report Phone Spam – Shut down robocallers and text spammers \nDo you receive"
    },
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:27416736",
@@ -3568,7 +3566,7 @@
     "stock_subscription_word": "The SaaS CTO Security Checklist Redux"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:24621132",
@@ -3590,10 +3588,10 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "The SaaS website content you need to c"
+    "stock_subscription_word": "The SaaS website content you need to close sales"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:27950412",
@@ -3618,7 +3616,7 @@
     "stock_subscription_word": "The SaaS Org Chart"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:24979167",
@@ -3643,7 +3641,7 @@
     "stock_subscription_word": "We made our SaaS home page cookie-free"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:38383138",
@@ -3665,10 +3663,12 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_workflow_word": "ast self-hostable open-source workflow engine"
+    "b2b_workflow_word": "Fast self-hostable open-source workflow engine"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:37943931",
@@ -3693,11 +3693,11 @@
     "ai": 2
    },
    "evidence": {
-    "ai_machine_core": "igate in the browser, autotab generates the Selenium code to reprod",
-    "ai_repetitive_target": "s easy to inspect and enables manual tweaking of the model’s sugge"
+    "ai_machine_core": "b runs as a Chrome extension. As you navigate in the browser, autotab generates the Selenium code to reproduce your actions. You can copy that code",
+    "ai_repetitive_target": "2. Code is the best output: Code is easy to inspect and enables manual tweaking of the model’s suggested actions. On top of that, code outpu"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26794040",
@@ -3722,7 +3722,7 @@
     "ai_machine_core": "1Password Secrets Automation"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31702922",
@@ -3744,10 +3744,10 @@
     "proof": 1
    },
    "evidence": {
-    "proof_money_number": "I turned down $500k, pissed off my investors, and"
+    "proof_money_number": "I turned down $500k, pissed off my investors, and shut down my startup (2016)"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35344354",
@@ -3769,10 +3769,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "ource browser automation with GPT-4"
+    "ai_machine_core": "TaxyAI: Open-source browser automation with GPT-4"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44515403",
@@ -3794,10 +3796,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "-B: A Protocol for AI Browser Automation"
+    "ai_machine_core": "MCP-B: A Protocol for AI Browser Automation"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36248234",
@@ -3824,7 +3826,7 @@
     "ai_machine_core": "Sync will shut down on June 30"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:34343122",
@@ -3850,11 +3852,11 @@
     "ai": 2
    },
    "evidence": {
-    "ai_machine_core": "run it, get its API endpoint, schedule it - all from the browser, i",
-    "ai_repetitive_target": "ing tool.<p>We added `console.email` to the runtime to make it in"
+    "ai_machine_core": "to running code in seconds: type code, run it, get its API endpoint, schedule it - all from the browser, in a couple keystrokes.<p>We&#x27;re a st",
+    "ai_repetitive_target": "sy, but is first-and-foremost a programming tool.<p>We added `console.email` to the runtime to make it incredibly easy to email yourself. We don&"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42603585",
@@ -3879,7 +3881,7 @@
     "b2b_workflow_word": "Akamai to shut down its CDN operations in China"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30904845",
@@ -3904,7 +3906,7 @@
     "b2b_workflow_word": "My free-software photography workflow"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47337607",
@@ -3929,11 +3931,11 @@
     "ai": 2
    },
    "evidence": {
-    "ai_machine_core": "nd interesting is that it can monitor a specific element on a page,",
-    "ai_repetitive_target": "r AI agents<p>- Browser push, Email, and Telegram notifications<p"
+    "ai_machine_core": "ike a diff. The part I think HN might find interesting is that it can monitor a specific element on a page, not just the whole page, and it can exp",
+    "ai_repetitive_target": "MCP server for Claude, Cursor, and other AI agents<p>- Browser push, Email, and Telegram notifications<p>Chrome: <a href=\"https:&#x2F;&#x2F;chro"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44754492",
@@ -3958,7 +3960,7 @@
     "b2b_workflow_word": "Replacing tmux in my dev workflow"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41037745",
@@ -3983,7 +3985,7 @@
     "b2b_workflow_word": "Maestro: Netflix's Workflow Orchestrator"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41389176",
@@ -4005,10 +4007,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Homemade automated solar concentrator \nHi HN!<"
+    "ai_machine_core": "Show HN: Homemade automated solar concentrator \nHi HN!<p>I quit my job two years ago to have mo"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26899066",
@@ -4033,7 +4037,7 @@
     "ai_machine_core": "Show HN: I built a tool to generate triangulated art from images"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:22483436",
@@ -4055,10 +4059,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Monitoror – Unified monitoring wallbo"
+    "ai_machine_core": "Show HN: Monitoror – Unified monitoring wallboard \nUnified monitoring wallboard"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30743371",
@@ -4080,10 +4084,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "Vimeo: “We are a B2B solution, not the indie versi"
+    "b2b_business_object": "Vimeo: “We are a B2B solution, not the indie version of YouTube.”"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:32561127",
@@ -4107,10 +4111,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Crawlee – Web scraping and browser"
+    "ai_machine_core": "Show HN: Crawlee – Web scraping and browser automation library for Node.js \nWeb scra"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25297268",
@@ -4132,10 +4136,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_workflow_word": "A terminal-based workflow for research, writing, and pr"
+    "b2b_workflow_word": "A terminal-based workflow for research, writing, and programming"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41764635",
@@ -4159,10 +4163,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "pened to work on our app WCAG compliance for a few months at the time"
+    "b2b_business_object": "thing to get busy to not go crazy. I happened to work on our app WCAG compliance for a few months at the time and was frustrated by the state of of ac"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:29533495",
@@ -4184,10 +4188,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "oon – Lua-based powerful tool automation of macOS"
+    "ai_machine_core": "Hammerspoon – Lua-based powerful tool automation of macOS"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42145419",
@@ -4211,10 +4215,10 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "ivation behind it: One of our SaaS products was struggling to gr"
+    "stock_subscription_word": "OnAir is about immediate meetings.<p>Motivation behind it: One of our SaaS products was struggling to grow. We believed that if we provide more"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36013571",
@@ -4239,7 +4243,7 @@
     "ai_machine_core": "Using ChatGPT for home automation"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46262816",
@@ -4264,7 +4268,7 @@
     "ai_machine_core": "AI and the ironies of automation – Part 2"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40913736",
@@ -4288,10 +4292,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Crawlee for Python – a web scraping"
+    "ai_machine_core": "Show HN: Crawlee for Python – a web scraping and browser automation library \na web s"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46316968",
@@ -4316,11 +4320,11 @@
     "ai": 2
    },
    "evidence": {
-    "ai_machine_core": "ller than jsPDF) \nI needed to generate invoices in a Node.js app. j",
-    "ai_repetitive_target": "Show HN: TinyPDF – 3kb pdf library (70x smaller than jsP"
+    "ai_machine_core": "er than jsPDF) \n3kb pdf library (70x smaller than jsPDF) \nI needed to generate invoices in a Node.js app. jsPDF is 229KB. I only needed text, recta",
+    "ai_repetitive_target": "Show HN: TinyPDF – 3kb pdf library (70x smaller than jsPDF) \n3kb pdf library (70x smaller than j"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:24261192",
@@ -4342,10 +4346,39 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "money building Shopify micro-SaaS apps"
+    "stock_subscription_word": "Making money building Shopify micro-SaaS apps"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:45715055",
+   "kind": "product",
+   "title": "Show HN: MyraOS – My 32-bit operating system in C and ASM (Hack Club project)",
+   "url": "https://github.com/dvir-biton/MyraOS",
+   "discussion_url": "https://news.ycombinator.com/item?id=45715055",
+   "points": 247,
+   "created_at": "2025-10-26T20:43:40Z",
+   "categories": [
+    "booking"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "9) Syscall support.\n  10) Libc implementation.\n  11) Processing and scheduling for multiprocessing.\n  12) Here I also made a shell to test it all"
+   },
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46220794",
@@ -4367,10 +4400,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "based on a Rust codebase that parses the latest ALPR reports from"
+    "ai_machine_core": "USA \nBuilt this over the last few days, based on a Rust codebase that parses the latest ALPR reports from OpenStreetMaps, calculates navigation s"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42200099",
@@ -4393,13 +4428,14 @@
     "ai": 2
    },
    "evidence": {
-    "ai_machine_core": ": We open-sourced our compost monitoring tech \nsourced our compost",
-    "ai_repetitive_target": "p>All data can be exported as CSV files for analysis. While it’"
+    "ai_machine_core": "Show HN: We open-sourced our compost monitoring tech \nsourced our compost monitoring tech \nI&#x27;m from a compost",
+    "ai_repetitive_target": "rature\n* Moisture levels\n* Air pressure<p>All data can be exported as CSV files for analysis. While it’s originally built for monitoring compos"
    },
    "exclude_marks": [
+    "oss_or_template",
     "hardware"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35154025",
@@ -4421,10 +4457,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_repetitive_target": "ting Free Team organizations [pdf]"
+    "ai_repetitive_target": "Docker is sunsetting Free Team organizations [pdf]"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:28917184",
@@ -4446,10 +4482,10 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "How to Create a SaaS and Compete with the Big Play"
+    "stock_subscription_word": "How to Create a SaaS and Compete with the Big Players as a Solo Founder"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:18004270",
@@ -4471,10 +4507,12 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "Show HN: My new SaaS side-project, after years of"
+    "stock_subscription_word": "Show HN: My new SaaS side-project, after years of open source \nproject, after years of ope"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41048196",
@@ -4498,12 +4536,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_repetitive_target": "hanced the system to focus on email introductions. Here’s how it"
+    "ai_repetitive_target": "outcomes. Inspired by this success, I enhanced the system to focus on email introductions. Here’s how it works:\n- It analyzes backgrounds and int"
    },
    "exclude_marks": [
     "consumer_only"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39027543",
@@ -4528,11 +4566,13 @@
     "ai": 2
    },
    "evidence": {
-    "ai_machine_core": "ow HN: Htmldocs – Typeset and generate pdfs with HTML/CSS \nTypeset",
-    "ai_repetitive_target": "he rendered HTML document and PDF.<p>Will also consider open so"
+    "ai_machine_core": "Show HN: Htmldocs – Typeset and generate pdfs with HTML/CSS \nTypeset and generate pdfs with HTML/CSS \nhtmldoc",
+    "ai_repetitive_target": "and there&#x27;s minimal drift between the rendered HTML document and PDF.<p>Will also consider open sourcing if there&#x27;s enough interest i"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:29288618",
@@ -4554,10 +4594,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Cleanvoice – Automated Podcast Editing \nAutomated"
+    "ai_machine_core": "Show HN: Cleanvoice – Automated Podcast Editing \nAutomated Podcast Editing"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41585468",
@@ -4581,10 +4621,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "Show HN: I've Built an Accounting System \nIt can create invoice"
+    "b2b_business_object": "Show HN: I've Built an Accounting System \nIt can create invoices and receive payments.<p>Not quite prod"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46693959",
@@ -4606,10 +4646,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "ocessors for prompt injection detection, PII redaction, and conten"
+    "ai_machine_core": "rdrails: Low-latency input and output processors for prompt injection detection, PII redaction, and content moderation. The tricky thing here was"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39357068",
@@ -4631,10 +4673,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_workflow_word": "nches on top of your existing workflow"
+    "b2b_workflow_word": "A Git client for simultaneous branches on top of your existing workflow"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:37341670",
@@ -4656,10 +4698,35 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Fine-tuning GPT-3.5-turbo for natural languag"
+    "ai_machine_core": "Fine-tuning GPT-3.5-turbo for natural language to SQL"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:32540478",
+   "kind": "failure",
+   "title": "I Reached $4k/Mo. But How Many Great Startup Ideas Have Died?",
+   "url": "https://microfounder.com/blog/no",
+   "discussion_url": "https://news.ycombinator.com/item?id=32540478",
+   "points": 205,
+   "created_at": "2022-08-21T14:22:48Z",
+   "categories": [],
+   "axes_met": [
+    "proof"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "proof_money_number"
+   ],
+   "by_axis": {
+    "proof": 1
+   },
+   "evidence": {
+    "proof_money_number": "I Reached $4k/Mo. But How Many Great Startup Ideas Have Died?"
+   },
+   "exclude_marks": [],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:22607402",
@@ -4681,10 +4748,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "Show HN: WorkOS – APIs for enterprise features like SSO/SAML \nAPIs"
+    "b2b_business_object": "Show HN: WorkOS – APIs for enterprise features like SSO/SAML \nAPIs for enterprise features like SSO/SAML"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:28473496",
@@ -4706,10 +4773,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "OCR: Lightweight, 80 Langauge OCR"
+    "ai_machine_core": "PaddleOCR: Lightweight, 80 Langauge OCR"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:32894429",
@@ -4733,10 +4800,12 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "and JMAP over WebSocket full compliance.\n- IMAP4 rev2&#x2F;1 support"
+    "b2b_business_object": "y features are:<p>- JMAP Core, JMAP Mail and JMAP over WebSocket full compliance.\n- IMAP4 rev2&#x2F;1 support via Stalwart IMAP, an imap-to-jmap proxy"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31975730",
@@ -4761,7 +4830,7 @@
     "stock_subscription_word": "The New American Micro-SaaS Dream"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40522244",
@@ -4783,10 +4852,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "h as Group, Bookmark, Search, Automatically feeds sniffing, Import&"
+    "ai_machine_core": "d SQLite. It contains basic features such as Group, Bookmark, Search, Automatically feeds sniffing, Import&#x2F;Export OPML file, etc. It uses abou"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40051818",
@@ -4808,10 +4879,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "A framework to help B2B founders find product-market"
+    "b2b_business_object": "A framework to help B2B founders find product-market fit"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31364983",
@@ -4836,10 +4907,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "r you, and this is completely automated.<p>What do you think? We ar"
+    "ai_machine_core": "such as invoicing and VAT collection for you, and this is completely automated.<p>What do you think? We are looking forward to your feedback!"
    },
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:34837111",
@@ -4861,10 +4932,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "B2B startups stop innovating the"
+    "b2b_business_object": "B2B startups stop innovating the day you give power to product managers"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:32352291",
@@ -4886,10 +4957,37 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: I created a browser automation tool \nI created this tool"
+    "ai_machine_core": "Show HN: I created a browser automation tool \nI created this tool a few months ago to automate some of my"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:37740870",
+   "kind": "product",
+   "title": "Show HN: OpenStatus – Open-source monitoring with incident managements",
+   "url": "https://www.openstatus.dev",
+   "discussion_url": "https://news.ycombinator.com/item?id=37740870",
+   "points": 171,
+   "created_at": "2023-10-02T16:52:26Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: OpenStatus – Open-source monitoring with incident managements \nOpen-source monitoring with incident ma"
+   },
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:32935506",
@@ -4913,10 +5011,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "N: Rocketry – Statement-based scheduling framework for Python \nStat"
+    "ai_machine_core": "Show HN: Rocketry – Statement-based scheduling framework for Python \nStatement-based scheduling framework for Pyt"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39192304",
@@ -4938,10 +5036,12 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "Show HN: Open SaaS – An open-source alternative"
+    "stock_subscription_word": "Show HN: Open SaaS – An open-source alternative to paid boilerplate starters \nAn open-so"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36225239",
@@ -4966,7 +5066,7 @@
     "ai_machine_core": "Show HN: Homelab Monitoring Setup with Grafana"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41202064",
@@ -4988,10 +5088,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "nt function calling with auto-generated function schemas.<p>And as"
+    "ai_machine_core": "d an autonomous agent with LLM-independent function calling with auto-generated function schemas.<p>And as testing via the CLI became unwieldy soon"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43445720",
@@ -5013,10 +5115,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: FastOpenAPI – automated docs for many Python framew"
+    "ai_machine_core": "Show HN: FastOpenAPI – automated docs for many Python frameworks \nautomated docs for many Python fra"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39973150",
@@ -5040,10 +5142,37 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "custom interpreter (for store compliance).  But it works!  Our beta ha"
+    "b2b_business_object": "to build a new toolchain for Dart and a custom interpreter (for store compliance).  But it works!  Our beta has already been used by thousands of apps"
+   },
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:32376672",
+   "kind": "product",
+   "title": "Micro-SaaS Alternatives to BigTech/VC",
+   "url": "https://microfounder.com/alternatives",
+   "discussion_url": "https://news.ycombinator.com/item?id=32376672",
+   "points": 151,
+   "created_at": "2022-08-07T14:19:41Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "&#x2F;VC-funded startups.<p>E.g. you can use Tally (by two devs, $14K MRR) instead of Typeform ($190M funding, 600+ employees)<p>or Plausible ("
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47376584",
@@ -5067,10 +5196,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "uman reviews before merge)\n4. Audit trail via git blame and git d"
+    "b2b_business_object": "gent learns a skill → opens a branch → human reviews before merge)\n4. Audit trail via git blame and git diff\n5. Agent forking and remixing (fork"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41863398",
@@ -5092,10 +5221,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Automated smooth Nth order derivative"
+    "ai_machine_core": "Show HN: Automated smooth Nth order derivatives of noisy data \nThis little project cam"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41567387",
@@ -5119,10 +5248,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "and previously working on bot detection at Robinhood.<p>If you hav"
+    "ai_machine_core": "ng built scraping features into Psychic and previously working on bot detection at Robinhood.<p>If you haven’t built a web scraper or browser auto"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:20797828",
@@ -5144,10 +5275,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_repetitive_target": "ase – API for authentication, email sending, images and more \nAPI"
+    "ai_repetitive_target": "Show HN: Base – API for authentication, email sending, images and more \nAPI for authentication, email sending, imag"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:23734539",
@@ -5172,7 +5303,7 @@
     "stock_subscription_word": "How I grew my Shopify micro-SaaS"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:49119274",
@@ -5196,10 +5327,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_repetitive_target": "thing directly usable, like a spreadsheet, PowerPoint, or other file, r"
+    "ai_repetitive_target": "heir head. And the result should be something directly usable, like a spreadsheet, PowerPoint, or other file, rather than something buried in a transcr"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:24952234",
@@ -5224,7 +5355,7 @@
     "b2b_business_object": "Product-market fit for a B2B company"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25517226",
@@ -5248,8 +5379,10 @@
    "evidence": {
     "stock_subscription_word": "Show HN: Django and React SaaS boilerplate tutorial"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47780971",
@@ -5275,11 +5408,11 @@
     "ai": 2
    },
    "evidence": {
-    "ai_machine_core": "easy for your coding agent to generate deterministic browser automa",
-    "ai_repetitive_target": "tection evasion.<p>It records manual user actions to help agents g"
+    "ai_machine_core": "to.sh</a>) is a Skill+CLI that makes it easy for your coding agent to generate deterministic browser automations and debug existing ones. Key shift",
+    "ai_repetitive_target": "ession for better reliability and bot detection evasion.<p>It records manual user actions to help agents generate and update scripts, supports ste"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46069556",
@@ -5301,10 +5434,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "se it to automate things like extracting structured data from unstr"
+    "ai_machine_core": "models through one API key).<p>You can use it to automate things like extracting structured data from unstructured text, generating reports from lo"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46616481",
@@ -5326,10 +5459,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "e-only | head -n 20 means the LLM only sees exactly what I want"
+    "ai_machine_core": "dard tools. webctl snapshot --interactive-only | head -n 20 means the LLM only sees exactly what I want it to see.<p>- Daemon Architecture: It"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43538164",
@@ -5351,10 +5484,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "LLM Workflows then Agents: Gettin"
+    "ai_machine_core": "LLM Workflows then Agents: Getting Started with Apache Airflow"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39160998",
@@ -5378,10 +5511,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: WAYF – A Simple Scheduling App \nA Simple Scheduling A"
+    "ai_machine_core": "Show HN: WAYF – A Simple Scheduling App \nA Simple Scheduling App \nA dead-simple web app to find the be"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39508626",
@@ -5406,7 +5539,7 @@
     "ai_machine_core": "Show HN: Free Certificate Monitoring via RSS"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48445171",
@@ -5432,10 +5565,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "quirements, inspect the site, generate code, then try to patch what"
+    "ai_machine_core": "ttempts were rigid pipelines: collect requirements, inspect the site, generate code, then try to patch whatever broke. It looked reasonable on pape"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:21818323",
@@ -5459,8 +5592,10 @@
    "evidence": {
     "stock_subscription_word": "Show HN: SaaS application boilerplate"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44734471",
@@ -5482,10 +5617,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "nteractions that browser-only automation tools can&#x27;t.<p>* Exte"
+    "ai_machine_core": "tem dialogues, file uploads, and other interactions that browser-only automation tools can&#x27;t.<p>* Extensible by design: We&#x27;ve made it eas"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39917364",
@@ -5510,10 +5647,12 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_workflow_word": "ur development&#x2F;debugging workflow. You can see your application"
+    "b2b_workflow_word": "ally, with the intent to connect with your development&#x2F;debugging workflow. You can see your application as it progresses and inspect its state"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46840558",
@@ -5538,7 +5677,7 @@
     "stock_subscription_word": "Brazilian Micro-SaaS Map"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:38864774",
@@ -5563,7 +5702,7 @@
     "ai_machine_core": "Turtles, a Shelly/Zigbee home automation tool in Elixir"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:37499479",
@@ -5585,10 +5724,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_business_object": "Hackers claim it only took a 10-minute phon"
+    "b2b_business_object": "Hackers claim it only took a 10-minute phone call to shut down MGM Resorts"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46487580",
@@ -5610,10 +5749,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "its background daemon took to syncing the wrong things at the wr"
+    "ai_machine_core": "ted battling it several times a week as its background daemon took to syncing the wrong things at the wrong times.<p>Over the holidays I finally"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40609907",
@@ -5635,10 +5774,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "eaper, and more accurate than GPT-4o.<p>We’d love for you to tr"
+    "ai_machine_core": "g models are 4 times faster, 10 times cheaper, and more accurate than GPT-4o.<p>We’d love for you to try out our model APIs and see the differe"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40457631",
@@ -5663,11 +5802,13 @@
     "ai": 2
    },
    "evidence": {
-    "ai_machine_core": "Excel file<p>2. We statically parse the Excel file and build a de",
-    "ai_repetitive_target": "Show HN: Excel to Python Compiler \nWe (me an"
+    "ai_machine_core": "<i>How it works:</i><p>1. You upload an Excel file<p>2. We statically parse the Excel file and build a dependency graph of all the cells, tables,",
+    "ai_repetitive_target": "Show HN: Excel to Python Compiler \nWe (me and @aarondia) built a tool to help you tu"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39358072",
@@ -5689,10 +5830,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Statusduck – Website monitoring tool where the data is pub"
+    "ai_machine_core": "Show HN: Statusduck – Website monitoring tool where the data is public \nWebsite monitoring tool where the d"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41124112",
@@ -5714,10 +5855,10 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "Show HN: Non SaaS – Directory of Non SaaS Apps"
+    "stock_subscription_word": "Show HN: Non SaaS – Directory of Non SaaS Apps \nDirectory of Non SaaS Apps"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44827216",
@@ -5739,10 +5880,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "HA solving, proxies, and anti-detection<p>- Hybrid workflows - Com"
+    "ai_machine_core": "tealth browser sessions - built-in CAPTCHA solving, proxies, and anti-detection<p>- Hybrid workflows - Combine scripting and AI agents to reduce c"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:19898568",
@@ -5764,10 +5905,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Cloudmarker – Cloud monitoring tool and framework \nCloud"
+    "ai_machine_core": "Show HN: Cloudmarker – Cloud monitoring tool and framework \nCloud monitoring tool and framework"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47983873",
@@ -5789,10 +5930,10 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_workflow_word": "Airlines Is Winding Down All Operations"
+    "b2b_workflow_word": "Spirit Airlines Is Winding Down All Operations"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31098205",
@@ -5817,11 +5958,11 @@
     "ai": 2
    },
    "evidence": {
-    "ai_machine_core": "useful to me I felt I had to extract it and make it usable to ever",
-    "ai_repetitive_target": "you to slice, dice and remap csv, yaml, json or even plaintext"
+    "ai_machine_core": "27;t survive, the language I made was so useful to me I felt I had to extract it and make it usable to everyone. DTL is the result. Though the npm",
+    "ai_repetitive_target": "(dtl) is like jq on sterooids, allowing you to slice, dice and remap csv, yaml, json or even plaintext data doing anything you can describe in"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43425767",
@@ -5845,10 +5986,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "sing:<p>1. `scrape_webpage` - Extract formatted (markdown, screensh"
+    "ai_machine_core": "seven tools for data collection and browsing:<p>1. `scrape_webpage` - Extract formatted (markdown, screenshot etc) content from any webpage<p>2. `c"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39373744",
@@ -5872,10 +6013,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "onfidence scores with each AI-generated query, stay in control.<p>("
+    "ai_machine_core": "ng latency<p>(3) Trust the Answer: See confidence scores with each AI-generated query, stay in control.<p>(4) Conduct complex SQL queries<p>Problem"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46966209",
@@ -5899,10 +6042,12 @@
     "b2b": 1
    },
    "evidence": {
-    "b2b_workflow_word": "omething failed, or whether a workflow was actually progressing.<p>W"
+    "b2b_workflow_word": "rd to tell what agents were doing, why something failed, or whether a workflow was actually progressing.<p>We thought it would be more interesting t"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:49037971",
@@ -5924,10 +6069,10 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "Micro-SaaS Is Dead. Service With A Softw"
+    "stock_subscription_word": "Micro-SaaS Is Dead. Service With A Software Replaces It"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46410153",
@@ -5949,10 +6094,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "s Agentforce to deterministic automation"
+    "ai_machine_core": "Salesforce pulls back from LLMs, pivots Agentforce to deterministic automation"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30310990",
@@ -5974,35 +6119,10 @@
     "stock": 1
    },
    "evidence": {
-    "stock_subscription_word": "flaming wreckage of my micro-SaaS"
+    "stock_subscription_word": "Friends, come warm yourselves by the flaming wreckage of my micro-SaaS"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
-  },
-  {
-   "case_id": "hn:25164655",
-   "kind": "failure",
-   "title": "Job Site Hired, Once Valued at $500M, Discusses Winding Down",
-   "url": "https://www.theinformation.com/articles/job-site-hired-once-valued-at-500-million-discusses-winding-down",
-   "discussion_url": "https://news.ycombinator.com/item?id=25164655",
-   "points": 50,
-   "created_at": "2020-11-20T20:36:07Z",
-   "categories": [],
-   "axes_met": [
-    "proof"
-   ],
-   "axes_met_count": 1,
-   "matched": [
-    "proof_money_number"
-   ],
-   "by_axis": {
-    "proof": 1
-   },
-   "evidence": {
-    "proof_money_number": "ob Site Hired, Once Valued at $500M, Discusses Winding Down"
-   },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:32296783",
@@ -6026,10 +6146,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: DevRaven – Monitoring for Developers \nMonitoring"
+    "ai_machine_core": "Show HN: DevRaven – Monitoring for Developers \nMonitoring for Developers \nHi HN! I am Krishna Tho"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31855732",
@@ -6053,10 +6173,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "Show HN: Nerd Crawler – monitoring original comic"
+    "ai_machine_core": "Show HN: Nerd Crawler – monitoring original comic art sites so you don't have to \nmonitor"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42194248",
@@ -6080,10 +6200,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "iz – open-source social media scheduling tool \nopen-source social m"
+    "ai_machine_core": "Show HN: Postiz – open-source social media scheduling tool \nopen-source social media scheduling tool"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44767304",
@@ -6108,10 +6230,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "NaturalCron – Human-Readable Scheduling for .NET (With Fluent Buil"
+    "ai_machine_core": "Show HN: NaturalCron – Human-Readable Scheduling for .NET (With Fluent Builder) \nHuman-Readable Scheduling for .NET"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48630515",
@@ -6133,10 +6255,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "ge – browser extension for AI-generated resilient selectors \nbrowse"
+    "ai_machine_core": "Show HN: Selector Forge – browser extension for AI-generated resilient selectors \nbrowser extension for AI-generated resilient s"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42348716",
@@ -6158,10 +6282,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "ow HN: KeyTik: The All-in-One Automation Tool \nThe All-in-One Autom"
+    "ai_machine_core": "Show HN: KeyTik: The All-in-One Automation Tool \nThe All-in-One Automation Tool"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:38672575",
@@ -6183,10 +6307,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "website allows for free image generation, and in the workflows, the"
+    "ai_machine_core": "upports SDXL Turbo \nThe homepage of the website allows for free image generation, and in the workflows, there are introductions to nodes related to"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46457912",
@@ -6211,11 +6335,13 @@
     "ai": 2
    },
    "evidence": {
-    "ai_machine_core": "her has been\nusing it to help generate estimates for his HVAC busin",
-    "ai_repetitive_target": "t’s\nalready replaced a lot of manual work for us in browser.<p>One"
+    "ai_machine_core": "–3 weeks for sales workflows, and my father has been\nusing it to help generate estimates for his HVAC business. It’s still early (still needs to ex",
+    "ai_repetitive_target": "ll needs to expand to general OS), but it’s\nalready replaced a lot of manual work for us in browser.<p>One thing that’s become very clear: a cloud"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43888290",
@@ -6237,10 +6363,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "ut-of-the-box. It&#x27;s also LLM agnostic and supports multi-a"
+    "ai_machine_core": "memory management, and state handling out-of-the-box. It&#x27;s also LLM agnostic and supports multi-agent setups.<p>- Visual Debugging Consol"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26211705",
@@ -6265,7 +6393,7 @@
     "ai_machine_core": "Arara: the cool TeX automation tool"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:45442177",
@@ -6287,10 +6415,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "ble API proxy that caches LLM generations and serves them determini"
+    "ai_machine_core": "oday we launch Butter, an OpenAI-compatible API proxy that caches LLM generations and serves them deterministically on revisit.<p>Since April, we’v"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48939710",
@@ -6315,10 +6443,12 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "owser agent.<p>That helped us generate Playwright and network-reque"
+    "ai_machine_core": "cheaper than repeatedly calling an AI browser agent.<p>That helped us generate Playwright and network-request-based scripts, but websites can often"
    },
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39507908",
@@ -6340,10 +6470,10 @@
     "ai": 1
    },
    "evidence": {
-    "ai_machine_core": "tomation tool that integrates LLM and RPA \nLow-Code automation"
+    "ai_machine_core": "Show HN: Iauto – Low-Code automation tool that integrates LLM and RPA \nLow-Code automation tool that integrates LLM and RPA \nWill t"
    },
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:33022768",
@@ -6360,7 +6490,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:18169243",
@@ -6377,7 +6507,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:45973709",
@@ -6394,7 +6524,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31668426",
@@ -6411,7 +6541,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44063662",
@@ -6428,7 +6558,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:49241679",
@@ -6445,7 +6575,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "fetched"
   },
   {
    "case_id": "hn:23285466",
@@ -6462,7 +6592,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48100706",
@@ -6479,7 +6609,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42259278",
@@ -6496,7 +6626,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47307055",
@@ -6513,7 +6643,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:27058178",
@@ -6530,7 +6660,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:29407636",
@@ -6547,7 +6677,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25952659",
@@ -6564,7 +6694,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43384069",
@@ -6581,7 +6711,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39476074",
@@ -6598,7 +6728,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44264958",
@@ -6615,7 +6745,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42433044",
@@ -6632,7 +6762,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40267639",
@@ -6649,7 +6779,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30582986",
@@ -6666,7 +6796,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35639370",
@@ -6685,7 +6815,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40968922",
@@ -6702,7 +6832,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25472455",
@@ -6719,7 +6849,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48326802",
@@ -6736,7 +6866,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "fetched"
   },
   {
    "case_id": "hn:29579994",
@@ -6753,7 +6883,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36128082",
@@ -6769,8 +6899,10 @@
    "matched": [],
    "by_axis": {},
    "evidence": {},
-   "exclude_marks": [],
-   "pricing_fetched": true
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47363584",
@@ -6787,7 +6919,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30013919",
@@ -6804,7 +6936,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30092673",
@@ -6821,7 +6953,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42710339",
@@ -6838,7 +6970,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:29654460",
@@ -6857,7 +6989,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25992664",
@@ -6874,7 +7006,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43711957",
@@ -6891,7 +7023,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:18654998",
@@ -6908,7 +7040,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44118023",
@@ -6928,7 +7060,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26701045",
@@ -6945,7 +7077,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:33139827",
@@ -6962,7 +7094,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:38250459",
@@ -6978,8 +7110,10 @@
    "matched": [],
    "by_axis": {},
    "evidence": {},
-   "exclude_marks": [],
-   "pricing_fetched": true
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35255864",
@@ -6996,7 +7130,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36888954",
@@ -7013,7 +7147,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42771676",
@@ -7030,7 +7164,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44201872",
@@ -7047,7 +7181,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35130764",
@@ -7064,7 +7198,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:29664742",
@@ -7081,7 +7215,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42391203",
@@ -7098,7 +7232,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42699099",
@@ -7115,7 +7249,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36246398",
@@ -7132,7 +7266,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:24244329",
@@ -7149,7 +7283,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:38138640",
@@ -7166,7 +7300,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:24850298",
@@ -7183,7 +7317,24 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:25186342",
+   "kind": "product",
+   "title": "The Tech Stack of a One-Man SaaS",
+   "url": "https://panelbear.com/blog/tech-stack/",
+   "discussion_url": "https://news.ycombinator.com/item?id=25186342",
+   "points": 475,
+   "created_at": "2020-11-23T13:06:53Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26860609",
@@ -7200,7 +7351,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35641448",
@@ -7217,7 +7368,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:28499910",
@@ -7234,7 +7385,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:28160869",
@@ -7251,7 +7402,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:28082371",
@@ -7268,7 +7419,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:34936127",
@@ -7285,7 +7436,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35920082",
@@ -7301,8 +7452,10 @@
    "matched": [],
    "by_axis": {},
    "evidence": {},
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:24621152",
@@ -7319,7 +7472,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:32276188",
@@ -7336,7 +7489,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:32637996",
@@ -7353,7 +7506,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44784743",
@@ -7370,7 +7523,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30432321",
@@ -7387,7 +7540,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36249958",
@@ -7404,7 +7557,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:45281139",
@@ -7421,7 +7574,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36013783",
@@ -7438,7 +7591,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35295807",
@@ -7455,7 +7608,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46779645",
@@ -7472,7 +7625,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26590862",
@@ -7489,7 +7642,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25501466",
@@ -7506,7 +7659,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26443406",
@@ -7523,7 +7676,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48313530",
@@ -7540,7 +7693,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26076050",
@@ -7557,7 +7710,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25514930",
@@ -7574,7 +7727,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39019119",
@@ -7591,7 +7744,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:45766253",
@@ -7608,7 +7761,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:21417965",
@@ -7625,7 +7778,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:27711096",
@@ -7642,7 +7795,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30788475",
@@ -7659,7 +7812,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:27493994",
@@ -7676,7 +7829,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39883328",
@@ -7693,7 +7846,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:34457130",
@@ -7710,7 +7863,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42169998",
@@ -7727,7 +7880,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46584173",
@@ -7744,7 +7897,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42639563",
@@ -7761,7 +7914,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46934107",
@@ -7778,7 +7931,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31111276",
@@ -7795,7 +7948,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47652007",
@@ -7812,7 +7965,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47130860",
@@ -7829,7 +7982,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:33999812",
@@ -7846,7 +7999,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47621792",
@@ -7863,7 +8016,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39056902",
@@ -7880,7 +8033,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:27328404",
@@ -7897,7 +8050,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41758693",
@@ -7914,7 +8067,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46262021",
@@ -7931,7 +8084,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41240556",
@@ -7948,9 +8101,27 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [
-    "consumer_only"
+    "consumer_only",
+    "oss_or_template"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:21795335",
+   "kind": "failure",
+   "title": "SF wants startups to behave, so why did it reject the ‘nice guy’ of e-scooters?",
+   "url": "https://www.sfchronicle.com/bayarea/heatherknight/article/SF-wants-startups-to-behave-so-why-did-it-reject-14903323.php",
+   "discussion_url": "https://news.ycombinator.com/item?id=21795335",
+   "points": 242,
+   "created_at": "2019-12-15T09:39:30Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26634419",
@@ -7967,7 +8138,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:37506654",
@@ -7984,7 +8155,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:42417330",
@@ -8000,8 +8171,10 @@
    "matched": [],
    "by_axis": {},
    "evidence": {},
-   "exclude_marks": [],
-   "pricing_fetched": true
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:24148113",
@@ -8018,7 +8191,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46656552",
@@ -8035,7 +8208,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46747119",
@@ -8052,7 +8225,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31717023",
@@ -8069,7 +8242,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:38698343",
@@ -8086,7 +8259,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44837783",
@@ -8103,7 +8276,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47509234",
@@ -8120,7 +8293,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:18033802",
@@ -8137,7 +8310,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41278907",
@@ -8154,7 +8327,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46103097",
@@ -8171,7 +8344,24 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:42264344",
+   "kind": "product",
+   "title": "Show HN: Myphotos.site – Make a gallery website from Google Photos",
+   "url": "https://www.myphotos.site",
+   "discussion_url": "https://news.ycombinator.com/item?id=42264344",
+   "points": 195,
+   "created_at": "2024-11-28T11:02:17Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43306435",
@@ -8188,7 +8378,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39200239",
@@ -8205,7 +8395,24 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:47749674",
+   "kind": "product",
+   "title": "Show HN: I built a social media management tool in 3 weeks with Claude and Codex",
+   "url": "https://github.com/brightbeanxyz/brightbean-studio",
+   "discussion_url": "https://news.ycombinator.com/item?id=47749674",
+   "points": 190,
+   "created_at": "2026-04-13T09:26:56Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:38047743",
@@ -8222,7 +8429,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43940865",
@@ -8239,7 +8446,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25170312",
@@ -8256,7 +8463,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43015585",
@@ -8273,7 +8480,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36146062",
@@ -8290,7 +8497,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:29054675",
@@ -8307,7 +8514,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43703682",
@@ -8324,7 +8531,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40905295",
@@ -8340,8 +8547,31 @@
    "matched": [],
    "by_axis": {},
    "evidence": {},
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:37995761",
+   "kind": "product",
+   "title": "Show HN: Revert – Open-source unified API for product integrations",
+   "url": "https://github.com/revertinc/revert",
+   "discussion_url": "https://news.ycombinator.com/item?id=37995761",
+   "points": 168,
+   "created_at": "2023-10-24T07:22:59Z",
+   "categories": [
+    "data_plumbing"
+   ],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:24813121",
@@ -8358,7 +8588,24 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:43719447",
+   "kind": "product",
+   "title": "Show HN: AgentAPI – HTTP API for Claude Code, Goose, Aider, and Codex",
+   "url": "https://github.com/coder/agentapi",
+   "discussion_url": "https://news.ycombinator.com/item?id=43719447",
+   "points": 163,
+   "created_at": "2025-04-17T16:54:58Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44102988",
@@ -8377,7 +8624,7 @@
    "exclude_marks": [
     "consumer_only"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:30023343",
@@ -8394,7 +8641,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47379067",
@@ -8411,7 +8658,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:21894150",
@@ -8428,7 +8675,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": true
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39683889",
@@ -8445,7 +8692,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26698074",
@@ -8461,8 +8708,10 @@
    "matched": [],
    "by_axis": {},
    "evidence": {},
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:27875356",
@@ -8479,7 +8728,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41315068",
@@ -8496,7 +8745,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:37765313",
@@ -8513,7 +8762,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44180954",
@@ -8529,8 +8778,10 @@
    "matched": [],
    "by_axis": {},
    "evidence": {},
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43414742",
@@ -8547,7 +8798,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:23093990",
@@ -8564,7 +8815,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43051961",
@@ -8581,7 +8832,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41625402",
@@ -8598,7 +8849,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:29685209",
@@ -8615,7 +8866,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:45291024",
@@ -8631,8 +8882,10 @@
    "matched": [],
    "by_axis": {},
    "evidence": {},
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43805457",
@@ -8648,8 +8901,10 @@
    "matched": [],
    "by_axis": {},
    "evidence": {},
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26499862",
@@ -8666,7 +8921,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:27454418",
@@ -8683,7 +8938,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:45797934",
@@ -8700,7 +8955,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43712070",
@@ -8717,7 +8972,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35501074",
@@ -8734,7 +8989,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:27323517",
@@ -8751,7 +9006,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48100192",
@@ -8769,8 +9024,10 @@
    "matched": [],
    "by_axis": {},
    "evidence": {},
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:28245049",
@@ -8787,7 +9044,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:24956983",
@@ -8804,7 +9061,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36549299",
@@ -8821,7 +9078,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:33623697",
@@ -8838,7 +9095,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:33551066",
@@ -8855,7 +9112,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39974162",
@@ -8872,7 +9129,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:37310314",
@@ -8889,7 +9146,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48047826",
@@ -8906,7 +9163,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43811824",
@@ -8923,7 +9180,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:21108220",
@@ -8940,7 +9197,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35295837",
@@ -8957,7 +9214,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47497763",
@@ -8974,7 +9231,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25992909",
@@ -8991,7 +9248,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39526707",
@@ -9008,7 +9265,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36672447",
@@ -9027,7 +9284,7 @@
    "exclude_marks": [
     "crypto"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:21228549",
@@ -9044,7 +9301,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:33015431",
@@ -9061,7 +9318,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:31548251",
@@ -9078,7 +9335,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:22686383",
@@ -9095,7 +9352,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:26433425",
@@ -9112,7 +9369,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:23917210",
@@ -9131,7 +9388,7 @@
    "exclude_marks": [
     "crypto"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44444987",
@@ -9148,7 +9405,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:49049992",
@@ -9165,7 +9422,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:34051088",
@@ -9184,7 +9441,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:25583612",
@@ -9201,7 +9458,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:37897751",
@@ -9218,7 +9475,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46028033",
@@ -9235,7 +9492,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41998083",
@@ -9252,7 +9509,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47133716",
@@ -9269,7 +9526,24 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
+  },
+  {
+   "case_id": "hn:25164655",
+   "kind": "failure",
+   "title": "Job Site Hired, Once Valued at $500M, Discusses Winding Down",
+   "url": "https://www.theinformation.com/articles/job-site-hired-once-valued-at-500-million-discusses-winding-down",
+   "discussion_url": "https://news.ycombinator.com/item?id=25164655",
+   "points": 50,
+   "created_at": "2020-11-20T20:36:07Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39145901",
@@ -9286,7 +9560,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:35643535",
@@ -9303,7 +9577,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:36601612",
@@ -9320,7 +9594,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:40422023",
@@ -9337,7 +9611,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43298989",
@@ -9354,7 +9628,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:48611857",
@@ -9371,7 +9645,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:32740824",
@@ -9388,7 +9662,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41850573",
@@ -9405,7 +9679,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:39780581",
@@ -9422,7 +9696,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:20332704",
@@ -9439,7 +9713,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:44054019",
@@ -9455,8 +9729,10 @@
    "matched": [],
    "by_axis": {},
    "evidence": {},
-   "exclude_marks": [],
-   "pricing_fetched": false
+   "exclude_marks": [
+    "oss_or_template"
+   ],
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:41490865",
@@ -9473,7 +9749,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:46610025",
@@ -9492,7 +9768,7 @@
    "exclude_marks": [
     "consumer_only"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:34614216",
@@ -9509,7 +9785,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:29555081",
@@ -9526,7 +9802,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:38812488",
@@ -9545,7 +9821,7 @@
    "exclude_marks": [
     "consumer_only"
    ],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:47589900",
@@ -9562,7 +9838,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   },
   {
    "case_id": "hn:43660863",
@@ -9579,7 +9855,7 @@
    "by_axis": {},
    "evidence": {},
    "exclude_marks": [],
-   "pricing_fetched": false
+   "pricing_state": "not_attempted"
   }
  ]
 }

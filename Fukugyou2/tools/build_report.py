@@ -16,11 +16,24 @@ import glob
 import json
 import os
 import sys
+from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import casebase as cb
 
-AXIS_MARK = {"stock": "S", "ai": "A", "proof": "P", "b2b": "B"}
+PRICE_CELL = {"fetched": "×", "failed": "取得失敗", "not_attempted": "未取得"}
+
+
+def axis_marks(axes: dict) -> dict:
+    """記号は軸 id の頭文字です。軸を足しても report が追随します（code に固定しません）。"""
+    marks, used = {}, set()
+    for key in axes:
+        m = key[0].upper()
+        while m in used:
+            m += key[len(m)].upper() if len(key) > len(m) else "_"
+        used.add(m)
+        marks[key] = m
+    return marks
 
 
 def optional_json(out_dir: str, pattern: str):
@@ -31,16 +44,17 @@ def optional_json(out_dir: str, pattern: str):
         return json.load(f), os.path.basename(found[-1])
 
 
-def axis_cell(item: dict) -> str:
-    return "".join(AXIS_MARK[a] for a in ("stock", "ai", "proof", "b2b") if a in item["axes_met"]) or "—"
+def axis_cell(item: dict, marks: dict) -> str:
+    return "".join(marks[a] for a in marks if a in item["axes_met"]) or "-"
 
 
-def case_rows(items: list[dict], pricing: dict, limit: int) -> list[str]:
+def case_rows(items: list[dict], pricing: dict, limit: int, marks: dict) -> list[str]:
     rows = []
     for i in items[:limit]:
-        price = "○" if pricing.get(i["case_id"], {}).get("matches") else ("×" if i["pricing_fetched"] else "未取得")
+        price = "○" if pricing.get(i["case_id"], {}).get("matches") \
+            else PRICE_CELL.get(i.get("pricing_state", "not_attempted"), "未取得")
         title = i["title"].replace("|", "/")[:70]
-        rows.append(f"| [{title}]({i['url']}) | {i['axes_met_count']}/4 {axis_cell(i)} | "
+        rows.append(f"| [{title}]({i['url']}) | {i['axes_met_count']}/{len(marks)} {axis_cell(i, marks)} | "
                     f"{', '.join(i['categories']) or '—'} | {i['points'] or '—'} | "
                     f"{(i['created_at'] or '')[:10]} | {price} | [HN]({i['discussion_url']}) |")
     return rows
@@ -61,19 +75,23 @@ def main(argv=None) -> int:
 
     s = screen["summary"]
     items = screen["items"]
+    marks = axis_marks(screen["axes"])
+    st = s.get("pricing_states", {})
     products = [i for i in items if i["kind"] == "product"]
     failures = [i for i in items if i["kind"] == "failure"]
     head = "| 事例 | 該当軸 | 分類 | HN点数 | 投稿日 | 価格の証拠 | 議論 |"
     sep = "|---|---|---|---|---|---|---|"
 
+    axis_legend = " ".join(f"{m}={screen['axes'][k]['label']}" for k, m in marks.items())
     L = [f"# 事例 一覧（{cb.today()}）", "",
          f"入力: `{s['cases_file']}` / `{s.get('pricing_file') or '価格 未取得'}`"
          + (f" / `{jp_name}`" if jp_name else ""), "",
-         "軸の記号は S=Stock性 A=AI自動化性 P=証拠性 B=法人が払うか です。",
+         f"軸の記号は {axis_legend} です。",
          "**この一覧は採否を書きません。** 条件に何件該当したかと、その出所だけを載せます。", "",
          "---", "", "## 1. 数え上げ", "",
          f"- 事例 {s['n_cases']}件（製品化 {len(products)}件 / 失敗・撤退 {len(failures)}件）",
-         f"- 価格 page を実際に見に行った事例 {s['n_pricing_fetched']}件",
+         f"- 価格 page: 取得 {st.get('fetched', 0)}件 / 取得失敗 {st.get('failed', 0)}件 / "
+         f"取りに行っていない {st.get('not_attempted', 0)}件",
          f"- 対象外の印がついた事例 {s['exclude_marked']}件（削除していません）",
          f"- 未分類 {s['uncategorized']}件", "",
          "### 該当軸数の分布", "", "| 該当軸数 | 件数 |", "|---|---|"]
@@ -81,13 +99,15 @@ def main(argv=None) -> int:
     L += ["", "### 条件ごとの該当数", "", "| 条件 | 件数 |", "|---|---|"]
     L += [f"| {k} | {v}件 |" for k, v in s["condition_hits"].items()]
 
-    L += ["", "---", "", f"## 2. 製品化された事例（該当軸数の順・上位{min(ns.top, len(products))}件）", "", head, sep]
-    L += case_rows(products, pricing, ns.top)
+    L += ["", "---", "", f"## 2. 製品化された事例（該当軸数の順・上位{min(ns.top, len(products))}件）", "",
+          "価格の欄: ○=価格表に継続課金の表示あり / ×=取得したが表示なし / "
+          "取得失敗=取りに行って取れなかった / 未取得=取りに行っていない", "", head, sep]
+    L += case_rows(products, pricing, ns.top, marks)
 
     L += ["", "---", "", "## 3. 失敗・撤退の事例", "",
           "生き残りだけを見る偏りを消すための節です。**ここが空なら収集をやり直してください。**", ""]
     if failures:
-        L += [head, sep] + case_rows(failures, pricing, ns.top)
+        L += [head, sep] + case_rows(failures, pricing, ns.top, marks)
     else:
         L += ["**0件です。** `python tools/collect_cases.py --queries config/queries_failure.txt --kind failure` "
               "を実行してください。"]
@@ -107,8 +127,13 @@ def main(argv=None) -> int:
         L += ["未測定です。`python tools/jp_market_check.py --only <分類id>` を実行してください。"]
 
     L += ["", "---", "", "## 5. 欠損の記録", ""]
-    missing = s["n_cases"] - s["n_pricing_fetched"]
-    L += [f"- 価格の証拠が未取得: {missing}件（Stock性の判定はその分だけ弱い証拠に依っています）"]
+    prod_states = Counter(i.get("pricing_state", "not_attempted") for i in products)
+    L += [f"- 製品化事例 {len(products)}件のうち、価格 page を取得できたのは "
+          f"{prod_states.get('fetched', 0)}件です",
+          f"- 取りに行って取れなかった: {prod_states.get('failed', 0)}件"
+          "（robots 拒否・HTTP 失敗。**「証拠なし」とは別物です**）",
+          f"- まだ取りに行っていない: {prod_states.get('not_attempted', 0)}件",
+          "- 失敗・撤退事例は価格 page の対象外のため、上の数には含めていません"]
     if jp and jp.get("failures"):
         L += [f"- 日本側の測定失敗: {len(jp['failures'])}件"]
     fail_files = sorted(glob.glob(os.path.join(ns.out, "cases-*-failures.json")))

@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """工程1 収集。Hacker News から 製品化済み事例・失敗事例を集めて一覧にします。
 
-集めるだけです。要約も採点も分類もしません（doc/METHOD.md §5 規律1）。
-検索語は人が config/queries_*.txt に書きます。program は語を生成しません。
+集めるだけです。要約も採点も分類もしません。
+**検索語は工程0（tools/discover_queries.py）が作ります。** この program は与えられた
+語で集めるだけで、語の良し悪しは判断しません。人が書いた語で回すこともできます。
 
 使い方:
   python tools/collect_cases.py --queries config/queries_product.txt --kind product
@@ -100,7 +101,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=cb.path("log"))
     ns = ap.parse_args(argv)
 
-    source = cb.load_yaml(ns.sources)["hn_algolia"]
+    src = cb.load_yaml(ns.sources)
+    source = src["hn_algolia"]
     queries = cb.load_terms(ns.queries, ns.limit, "検索語")
     day = cb.today()
     day_stamp = cb.stamp(day)
@@ -108,7 +110,7 @@ def main(argv=None) -> int:
 
     out_path = os.path.join(ns.out, f"cases-{day_stamp}.jsonl")
     manifest = cb.Manifest("collect_cases", vars(ns))
-    budget = cb.Budget()
+    budget = cb.Budget(src.get("budget", {}))
     rows = cb.read_jsonl(out_path) if os.path.exists(out_path) else []
 
     print(f"取得日 {day} / {source['label']} / 検索語 {len(queries)}語 × 最大{ns.hits}件 / {ns.min_points}点以上")
@@ -122,7 +124,11 @@ def main(argv=None) -> int:
             continue
         cb.save_raw("hn", f"{ns.kind}-{q}", json.dumps({"query": q, "pages": pages}, ensure_ascii=False),
                     day_stamp, ns.out)
-        cases = [to_case(h, q, ns.kind, source["item_url_template"], day.isoformat()) for h in hits]
+        cases = [to_case(h, q, ns.kind, source["item_url_template"], day.isoformat())
+                 for h in hits if h.get("objectID") and (h.get("title") or h.get("story_title"))]
+        if len(cases) < len(hits):
+            failures.append({"query": q, "error": f"objectID か title の無い hit を {len(hits) - len(cases)}件"
+                                                  "落としました（代替値を作りません）"})
         new_here, dup_here, rows = cb.merge_cases(out_path, cases)
         added += new_here
         dup += dup_here

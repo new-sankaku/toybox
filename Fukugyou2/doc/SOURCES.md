@@ -13,7 +13,7 @@
 | **Hacker News / Algolia Search API** | 工程0 母集団、工程1 事例の収集、工程4 英語圏の言及量 | 不要 | 公表は 10,000 request/時 | `tags=story`、`numericFilters` で点数と期間を絞ります。**`search_by_date` に `tags=show_hn` を渡すと query 無しで母集団が取れます**（工程0 が人の語を必要としない理由） |
 | **Qiita API v2** | 工程0b 語の発見、工程4 日本語圏の言及量 | 不要（token 可） | **認証なし 60 request/時** / token あり 1,000 request/時 | 総件数は `total-count` header。残数は `rate-remaining` header |
 | **Zenn 記事検索** | 工程4 日本語圏の補助 | 不要 | 公表なし | **総件数を返しません。** 上限 page までの実数と、打ち切りの有無を出します |
-| **事例 site（直接取得）** | 工程2 価格の証拠 | 不要 | — | robots.txt を尊重。1事例あたり最大2 request |
+| **事例 site（直接取得）** | 工程2 価格の証拠 | 不要 | — | robots.txt を尊重。page 取得は1事例あたり最大2回（robots.txt は origin ごとに1回、別途） |
 
 ## 2. 既知の癖
 
@@ -40,7 +40,7 @@
 ## 4. 規約と礼儀
 
 - request の間隔は `config/sources.yaml` の `sleep_seconds` で空けています。**短くしないでください。**
-- 1回の実行で送る request 数は `config/discovery.yaml` の `budget` で host ごとに頭打ちにしています。超えると止まります。
+- 1回の実行で送る request 数は host ごとに頭打ちにしています（`config/sources.yaml` の `budget`、工程0 は `config/discovery.yaml` の `budget`）。超えるとその場で止まります。**再送は1 request として数えます。**
 - 一時的な失敗（429・5xx・通信断）だけ指数 backoff で再送します（`Retry-After` を尊重）。**同じ request のやり直しであり、代替値での穴埋めではありません。**
 - User-Agent に用途と参照先を入れています（`tools/casebase.py` の `UA`）。
 - **取得した生 response は再配布しません。** `log/raw/` は再解析のための手元の控えです。page の生 HTML は `.gitignore` で git に入れません。

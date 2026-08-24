@@ -1,6 +1,9 @@
 # 選別条件。program はこの file の条件に何件該当したかを出すだけで、採否は決めません
 # （doc/METHOD.md §5 規律8）。閾値を code に埋めないための file です。
 
+# 一致した語の前後この文字数を「文脈」として見ます（not_near の判定に使います）
+context_window: 70
+
 axes:
   stock:
     label: Stock性（継続課金の型か）
@@ -18,8 +21,14 @@ axes:
 conditions:
   - id: stock_subscription_word
     axis: stock
-    label: 継続課金の語が本文にある
+    label: 継続課金の語が本文にある（自分が払う費用の話は除く）
     evidence: text
+    # 近くにこれらがある一致は数えません。$7/month VPS は売価ではなく原価です
+    not_near:
+      - "(?i)\\b(?:VPS|server|hosting|host|AWS|GCP|Azure|Cloudflare|Vercel|Heroku|GPU|domain)\\b"
+      - "(?i)\\b(?:token|API) costs?\\b"
+      - "(?i)\\b(?:we|I) pay\\b|\\bcosts? me\\b|\\bburn rate\\b|\\btech stack\\b"
+      - "(?i)\\brecurring (?:theme|topic|question|pattern)\\b"
     any_of:
       - "(?i)\\bsubscription\\b"
       - "(?i)\\bper (?:month|seat|user)\\b"
@@ -59,8 +68,13 @@ conditions:
 
   - id: proof_money_number
     axis: proof
-    label: 金額の数字がある
+    label: 金額の数字がある（自分の費用・他社の調達額は除く）
     evidence: text
+    not_near:
+      - "(?i)\\b(?:VPS|server|hosting|AWS|GCP|Azure|GPU|domain|tech stack)\\b"
+      - "(?i)\\b(?:token|API|infra(?:structure)?) costs?\\b"
+      - "(?i)\\b(?:rais(?:e|es|ed|ing)|funding|valued at|acquisition|acquired for|seed round|Series [A-D])\\b"
+      - "(?i)\\b(?:we|I) (?:pay|spend|spent)\\b|\\bcosts? me\\b|\\bfree credits?\\b"
     any_of:
       - "(?i)\\$\\s?\\d[\\d,.]*\\s*(?:k|m|million)?\\b"
       - "(?i)\\b\\d+\\s*(?:k|万)?\\s*(?:MRR|ARR)\\b"
@@ -99,6 +113,14 @@ exclude:
     label: 暗号資産
     any_of:
       - "(?i)\\b(?:crypto|blockchain|NFT|web3|token sale)\\b"
+  - id: oss_or_template
+    label: OSS・雛形・自作の道具（継続課金の対象外の可能性）
+    # 価格表に継続課金の表示があれば、この印は付けません（OSS + 有償 cloud の型があるため）
+    unless_pricing_evidence: true
+    any_of:
+      - "(?i)\\b(?:open[- ]?sourc\\w*|self[- ]?host\\w*|boilerplate|starter kit|MIT licen[cs]e|Apache licen[cs]e)\\b"
+      - "(?i)\\bI (?:built|made) (?:this )?for (?:myself|fun)\\b"
+
   - id: hardware
     label: 物理 hardware が必要
     any_of:

@@ -20,12 +20,13 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import casebase as cb
 
-REQUIRED = ("provider", "endpoint", "model", "api_key_env", "max_tokens", "timeout_seconds")
+REQUIRED = ("provider", "endpoint", "model", "api_key_env", "max_tokens", "timeout_seconds",
+            "temperature")
 
 
 def load_config(config_path: str) -> dict:
     conf = cb.load_yaml(config_path)
-    missing = [k for k in REQUIRED if not conf.get(k)]
+    missing = [k for k in REQUIRED if conf.get(k) in (None, "")]
     if missing:
         raise SystemExit(f"{config_path} の設定が空です: {missing}。"
                          "provider と model を書いてから実行してください。")
@@ -54,7 +55,7 @@ def _request(conf: dict, headers: dict, payload: dict) -> dict:
 def complete(conf: dict, system: str, user: str) -> str:
     provider = conf["provider"]
     body = {"model": conf["model"], "max_tokens": int(conf["max_tokens"]),
-            "temperature": float(conf.get("temperature", 0.3))}
+            "temperature": float(conf["temperature"])}
     if provider == "anthropic":
         version = conf.get("api_version")
         if not version:

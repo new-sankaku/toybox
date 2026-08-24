@@ -49,7 +49,7 @@ USER = """次の事例を、日本の別業界に転用できるかを検討し�
 すべての行は仮説です。断定形で書かないでください。"""
 
 
-def worksheet(case: dict, industries: list[str]) -> str:
+def worksheet(industries: list[str]) -> str:
     head = "| 業界 | " + " | ".join(QUESTIONS) + " |"
     sep = "|---" * (len(QUESTIONS) + 1) + "|"
     rows = [f"| {n} |" + " |" * len(QUESTIONS) for n in industries]
@@ -61,7 +61,7 @@ def main(argv=None) -> int:
     ap.add_argument("--screen", help="既定は log/ の最新 screen-*.json")
     ap.add_argument("--industries", default=cb.path("config", "industries_jp.txt"))
     ap.add_argument("--top", type=int, default=5, help="worksheet にする事例数（該当軸数の順）")
-    ap.add_argument("--industries-limit", type=int, default=15)
+    ap.add_argument("--industries-limit", type=int, default=30)
     ap.add_argument("--min-axes", type=int, default=2, help="この軸数未満の事例は worksheet にしない")
     ap.add_argument("--hypothesis", action="store_true", help="LLM に下書きを書かせる（別 file に出力）")
     ap.add_argument("--llm-config", default=cb.path("config", "llm.yaml"))
@@ -89,7 +89,7 @@ def main(argv=None) -> int:
                   f"- 議論: {case['discussion_url']}",
                   f"- 分類: {', '.join(case['categories']) or '未分類'}",
                   f"- 該当軸: {', '.join(case['axes_met']) or 'なし'}（{case['axes_met_count']}/4）", "",
-                  worksheet(case, industries), ""]
+                  worksheet(industries), ""]
     out_path = os.path.join(ns.out, f"transfer-{cb.stamp(day)}.md")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

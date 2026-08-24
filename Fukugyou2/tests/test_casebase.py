@@ -14,9 +14,63 @@ def test_log_likelihood_sign():
 def test_keyness_min_docs_drops_single_document_terms():
     target = [["invoice", "ocr", "brandname", "brandname", "brandname"], ["invoice", "billing"]]
     background = [["game"], ["game", "fun"]]
-    terms = {r["term"] for r in cb.keyness(target, background, min_count=2, top_k=10, min_docs=2)}
+    terms = {r["term"] for r in cb.keyness(target, background, min_count=2, top_k=10, min_docs=2,
+                                           min_g2=0.0, min_log_ratio=0.0)}
     assert "invoice" in terms
     assert "brandname" not in terms
+
+
+def test_keyness_cuts_by_significance_and_effect_size():
+    target = [["invoice"] for _ in range(3)]
+    background = [["invoice"] for _ in range(3)]
+    assert cb.keyness(target, background, min_count=2, min_g2=10.828, min_log_ratio=1.0) == []
+    strong_t = [["invoice", "ocr"] for _ in range(40)]
+    strong_b = [["game", "photo"] for _ in range(40)]
+    rows = cb.keyness(strong_t, strong_b, min_count=3, min_g2=10.828, min_log_ratio=1.0)
+    assert {r["term"] for r in rows} == {"invoice", "ocr"}
+    assert all(r["g2"] >= 10.828 and r["log_ratio"] >= 1.0 for r in rows)
+
+
+def test_keyness_refuses_empty_corpora():
+    with pytest.raises(ValueError):
+        cb.keyness([], [["a"]], min_count=1)
+
+
+def test_log_likelihood_uses_the_full_2x2_form():
+    assert cb.log_likelihood(500, 100, 10000, 10000) == pytest.approx(299.3512, abs=1e-3)
+    with pytest.raises(ValueError):
+        cb.log_likelihood(1, 1, 0, 10)
+
+
+def test_wilson_lower_bound_rejects_small_samples():
+    assert cb.wilson_lower(4, 20) == pytest.approx(0.081, abs=0.002)
+    assert cb.wilson_lower(20, 20) == pytest.approx(0.839, abs=0.002)
+    with pytest.raises(ValueError):
+        cb.wilson_lower(0, 0)
+
+
+def test_retry_wait_rejects_negative_and_nan_retry_after():
+    assert cb._retry_wait(0, 1.0, "-5") == 0.0
+    assert cb._retry_wait(0, 1.0, "nan") == 1.0
+    assert cb._retry_wait(0, 1.0, "120") == 60.0
+    assert cb._retry_wait(0, 1.0, "Wed, 21 Oct 2015 07:28:00 GMT") == 0.0
+
+
+def test_atomic_write_keeps_the_old_file_when_serialisation_fails(tmp_path):
+    path = str(tmp_path / "cases.jsonl")
+    cb.write_jsonl(path, [{"case_id": "hn:1"}])
+    class Unserialisable:
+        pass
+    with pytest.raises(TypeError):
+        cb.write_jsonl(path, [{"case_id": "hn:2", "x": Unserialisable()}])
+    assert cb.read_jsonl(path) == [{"case_id": "hn:1"}]
+    assert not [f for f in os.listdir(str(tmp_path)) if f.endswith(".tmp")]
+
+
+def test_budget_counts_one_request_per_call_not_per_retry(monkeypatch):
+    b = cb.Budget({"example.test": 2})
+    b.spend("https://example.test/a")
+    assert b.report()["example.test"] == 1
 
 
 def test_tokenize_strips_urls_entities_and_percent_encoding():

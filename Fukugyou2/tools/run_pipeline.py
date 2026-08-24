@@ -42,10 +42,15 @@ def main(argv=None) -> int:
     ap.add_argument("--min-points", type=int, default=30)
     ap.add_argument("--pricing-limit", type=int, default=30, help="価格 page を見に行く事例数")
     ap.add_argument("--pricing-min-points", type=int, default=100)
-    ap.add_argument("--categories", nargs="*", default=["billing", "field_ops", "compliance", "doc_generation"],
-                    help="日本側を測る分類 id（Qiita は認証なし 60 req/h）")
+    ap.add_argument("--categories", nargs="*",
+                    help="日本側を測る分類 id。既定は config/categories.yaml の先頭から "
+                         "--category-count 件です（Qiita は認証なし 60 req/h）")
+    ap.add_argument("--category-count", type=int, default=4)
     ap.add_argument("--top", type=int, default=5, help="転用 worksheet にする事例数")
     ns = ap.parse_args(argv)
+    if not ns.categories:
+        all_ids = [c["id"] for c in cb.load_yaml(cb.path("config", "categories.yaml"))["categories"]]
+        ns.categories = all_ids[:ns.category_count]
 
     queries = {}
     for kind in ("product", "failure"):
@@ -61,7 +66,8 @@ def main(argv=None) -> int:
     for kind in ("product", "failure"):
         run("collect_cases.py", ["--queries", queries[kind], "--kind", kind,
                                  "--hits", str(ns.hits), "--min-points", str(ns.min_points)])
-    run("fetch_pricing.py", ["--limit", str(ns.pricing_limit), "--min-points", str(ns.pricing_min_points)])
+    run("fetch_pricing.py", ["--limit", str(ns.pricing_limit), "--min-points", str(ns.pricing_min_points),
+                             "--kind", "product"])
     run("screen_cases.py", [])
     if ns.jp_discover:
         run("discover_jp_terms.py", ["--only", *ns.categories[:2], "--limit", "2"])

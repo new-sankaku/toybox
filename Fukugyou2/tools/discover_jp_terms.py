@@ -9,7 +9,8 @@ tag は投稿者が付けた既存の語彙なので、切り出しが不要で�
   1. 対象 corpus  分類の既存の需要語で記事を引き、その tag を集めます
   2. 比較 corpus  query 無しの新着記事を取り、その tag を集めます（一般的な話題の分布）
   3. keyness      対象に偏る tag を G^2 で選びます
-  4. 検証         提案 tag の総件数が帯に入るかを実測します
+  4. 検証         提案 tag で引き直し、総件数が帯に入るかと、**元の分類の tag を含む記事の割合**
+                  （適合率）を実測します。帯に入るだけでは「Qiita で人気の tag」に過ぎません
   5. 出力         config/jp_terms_auto-YYYYMMDD.yaml（分類ごとの提案語と実測値）
 
 **限界:** Qiita の tag は技術名に偏ります。非 IT 業界の語は出ません。
@@ -59,9 +60,10 @@ def main(argv=None) -> int:
     qiita = cb.load_yaml(ns.sources)["qiita"]
     cats = cb.load_yaml(ns.categories)["categories"]
     if ns.only:
+        unknown = set(ns.only) - {c["id"] for c in cats}
+        if unknown:
+            raise SystemExit(f"分類 id が config/categories.yaml にありません: {sorted(unknown)}")
         cats = [c for c in cats if c["id"] in ns.only]
-    if not cats:
-        raise SystemExit(f"分類 id が見つかりません: {ns.only}")
     if len(cats) > ns.limit:
         raise SystemExit(f"分類が {len(cats)} 件あり、--limit {ns.limit} を超えました。"
                          "Qiita は認証なし 60 request/時です。--only で絞ってください。")
@@ -73,10 +75,14 @@ def main(argv=None) -> int:
     print(f"取得日 {cb.today()} / 分類 {len(cats)}件 / Qiita token {'あり' if token else 'なし（60 req/h）'}")
 
     print("[1] 比較 corpus（query 無しの新着記事）")
-    background = []
-    for page in range(1, 4):
-        items, _ = qiita_items(qiita, {"per_page": 100, "page": page}, token, budget)
-        background.extend(items)
+    background, seen_bg = [], set()
+    for page in range(1, int(jp["background_pages"]) + 1):
+        items, _ = qiita_items(qiita, {"per_page": int(jp["background_per_page"]), "page": page},
+                               token, budget)
+        for it in items:
+            if it.get("id") not in seen_bg:
+                seen_bg.add(it.get("id"))
+                background.append(it)
         time.sleep(sleep)
     bg_docs = tags_of(background)
     print(f"    {len(background)}件 / tag {sum(len(d) for d in bg_docs)}個")
@@ -93,6 +99,7 @@ def main(argv=None) -> int:
                 failures.append({"category": c["id"], "term": term, "error": str(e)})
                 cb.eprint(f"    失敗: {term} — {e}")
                 continue
+            items = [it for it in items if it.get("id") not in {x.get("id") for x in target}]
             target.extend(items)
             for doc in tags_of(items):
                 for tag in doc:
@@ -103,8 +110,11 @@ def main(argv=None) -> int:
             cb.eprint("    対象記事が0件のため、この分類は飛ばします（代替値では埋めません）。")
             continue
 
+        target_tags = {t for doc in tags_of(target) for t in doc}
         ranked = cb.keyness(tags_of(target), bg_docs, min_count=int(jp["min_count"]),
-                            top_k=int(jp["top_k"]), min_docs=int(jp["min_count"]))
+                            top_k=int(jp["top_k"]), min_docs=int(jp["min_docs"]),
+                            min_g2=float(conf["scoring"]["min_g2"]),
+                            min_log_ratio=float(conf["scoring"]["min_log_ratio"]))
         proposals = []
         for r in ranked:
             if r["term"] in known_terms:
@@ -112,21 +122,36 @@ def main(argv=None) -> int:
             if len(tag_seeds.get(r["term"], ())) < int(jp["min_terms"]):
                 continue
             try:
-                _, total = qiita_items(qiita, {"query": r["term"], "per_page": 1}, token, budget)
+                sample, total = qiita_items(qiita, {"query": r["term"],
+                                                    "per_page": int(jp["validate_items"])}, token, budget)
             except cb.SourceError as e:
                 failures.append({"category": c["id"], "term": r["term"], "error": str(e)})
                 continue
             time.sleep(sleep)
-            ok = total is not None and int(jp["min_total_hits"]) <= total <= int(jp["max_total_hits"])
-            row = {"term": r["term"], "g2": r["g2"], "target_docs": r["target_docs"],
-                   "seed_terms": sorted(tag_seeds.get(r["term"], ())),
-                   "qiita_total": total, "accepted": ok}
-            if not ok:
-                row["rejected_for"] = f"総件数 {total} が帯 {jp['min_total_hits']}〜{jp['max_total_hits']} の外です"
+            related = sum(1 for doc in tags_of(sample)
+                          if (set(doc) - {r["term"]}) & (target_tags - {r["term"]}))
+            precision = round(related / len(sample), 3) if sample else None
+            lower = round(cb.wilson_lower(related, len(sample)), 3) if sample else None
+            reasons = []
+            if total is None:
+                reasons.append("総件数が取れませんでした")
+            elif not (int(jp["min_total_hits"]) <= total <= int(jp["max_total_hits"])):
+                reasons.append(f"総件数 {total} が帯 {jp['min_total_hits']}〜{jp['max_total_hits']} の外です")
+            if lower is None:
+                reasons.append("測定不能（記事0件）")
+            elif lower < float(jp["min_precision"]):
+                reasons.append(f"適合率の下限 {lower} < {jp['min_precision']}")
+            ok = not reasons
+            row = {"term": r["term"], "g2": r["g2"], "log_ratio": r["log_ratio"],
+                   "target_docs": r["target_docs"], "seed_terms": sorted(tag_seeds.get(r["term"], ())),
+                   "qiita_total": total, "precision": precision, "precision_lower": lower,
+                   "accepted": ok}
+            if reasons:
+                row["rejected_for"] = reasons
             proposals.append(row)
             mark = "採用" if ok else "却下"
-            print(f"    {mark} {r['term'][:24]:<24} G^2 {r['g2']:>7} 記事{r['target_docs']:>3}件 "
-                  f"語{len(row['seed_terms'])}種 総件数 {total}")
+            print(f"    {mark} {r['term'][:22]:<22} G^2 {r['g2']:>7} 記事{r['target_docs']:>3}件 "
+                  f"語{len(row['seed_terms'])}種 総件数 {total} 適合率下限 {lower}")
 
         results.append({"id": c["id"], "label": c["label"], "target_items": len(target),
                         "proposals": proposals,

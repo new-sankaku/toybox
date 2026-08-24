@@ -29,28 +29,37 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import casebase as cb
 
 
-def hn_count(source: dict, term: str) -> int:
+def hn_count(source: dict, term: str, budget: cb.Budget) -> int:
     params = urllib.parse.urlencode({"query": term, "tags": "story", "hitsPerPage": 1})
-    data, _, _ = cb.http_json(f"{source['search_endpoint']}?{params}", timeout=int(source["timeout_seconds"]))
-    return int(data.get("nbHits", 0))
+    data, _, _ = cb.http_json(f"{source['search_endpoint']}?{params}",
+                              timeout=int(source["timeout_seconds"]), budget=budget)
+    if "nbHits" not in data:
+        raise cb.SourceError(f"nbHits がありません（{term}）。0件では埋めません。")
+    return int(data["nbHits"])
 
 
-def qiita_count(source: dict, term: str, token: str | None) -> tuple[int, int | None]:
+def qiita_count(source: dict, term: str, token: str | None, budget: cb.Budget) -> tuple[int, int | None]:
     params = urllib.parse.urlencode({"query": term, "per_page": 1})
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     _, _, head = cb.http_json(f"{source['search_endpoint']}?{params}", headers=headers,
-                              timeout=int(source["timeout_seconds"]))
-    total = int(head.get(source["total_count_header"], 0))
-    remaining = int(head["rate-remaining"]) if "rate-remaining" in head else None
+                              timeout=int(source["timeout_seconds"]), budget=budget)
+    name = source["total_count_header"]
+    if name not in head:
+        raise cb.SourceError(f"{name} header がありません（{term}）。"
+                             "「取れなかった」を「0件」にはしません。")
+    total = int(head[name])
+    remaining = int(head[source["rate_remaining_header"]]) \
+        if source["rate_remaining_header"] in head else None
     return total, remaining
 
 
-def zenn_count(source: dict, term: str) -> tuple[int, bool]:
+def zenn_count(source: dict, term: str, budget: cb.Budget) -> tuple[int, bool]:
     """総件数を返さない API のため、上限 page までの実数と 打ち切りの有無 を返します。"""
     total, page, truncated = 0, 1, False
     for _ in range(int(source["max_pages"])):
         params = urllib.parse.urlencode({"q": term, "source": "articles", "order": "daily", "page": page})
-        data, _, _ = cb.http_json(f"{source['search_endpoint']}?{params}", timeout=int(source["timeout_seconds"]))
+        data, _, _ = cb.http_json(f"{source['search_endpoint']}?{params}",
+                                  timeout=int(source["timeout_seconds"]), budget=budget)
         total += len(data.get("articles", []))
         nxt = data.get("next_page")
         if not nxt:
@@ -84,13 +93,16 @@ def main(argv=None) -> int:
     hn, qiita, zenn = src["hn_algolia"], src["qiita"], src["zenn"]
     cats = cb.load_yaml(ns.categories)["categories"]
     if ns.only:
+        unknown = set(ns.only) - {c["id"] for c in cats}
+        if unknown:
+            raise SystemExit(f"分類 id が config/categories.yaml にありません: {sorted(unknown)}")
         cats = [c for c in cats if c["id"] in ns.only]
-        if not cats:
-            raise SystemExit(f"分類 id が見つかりません: {ns.only}")
     if len(cats) > ns.limit:
         raise SystemExit(f"分類が {len(cats)} 件あり、--limit {ns.limit} を超えました。"
                          f"Qiita は認証なし 60 req/h です。--only で絞るか --limit を明示的に上げてください。")
 
+    budget = cb.Budget(src.get("budget", {}))
+    manifest = cb.Manifest("jp_market_check", vars(ns))
     token = os.environ.get(qiita["token_env"])
     print(f"取得日 {cb.today()} / 分類 {len(cats)}件 / Qiita token {'あり' if token else 'なし（60 req/h）'}")
 
@@ -99,7 +111,7 @@ def main(argv=None) -> int:
         print(f"\n[{c['id']}] {c['label']}")
         row = {"id": c["id"], "label": c["label"], "measured_on": cb.today().isoformat()}
 
-        row["en_hn"] = measure(c["en_terms"], lambda t: hn_count(hn, t), failures, "hn")
+        row["en_hn"] = measure(c["en_terms"], lambda t: hn_count(hn, t, budget), failures, "hn")
         time.sleep(float(hn["sleep_seconds"]))
 
         q_demand, q_supply, remaining = {}, {}, None
@@ -109,7 +121,7 @@ def main(argv=None) -> int:
                     stopped = f"Qiita の残り request が {remaining} 件になったため中断しました"
                     break
                 try:
-                    total, remaining = qiita_count(qiita, t, token)
+                    total, remaining = qiita_count(qiita, t, token, budget)
                     (q_demand if bucket == "demand" else q_supply)[t] = total
                 except cb.SourceError as e:
                     failures.append({"where": "qiita", "term": t, "error": str(e)})
@@ -120,7 +132,8 @@ def main(argv=None) -> int:
         row["jp_qiita_demand"], row["jp_qiita_supply"] = q_demand, q_supply
         row["qiita_rate_remaining"] = remaining
 
-        row["jp_zenn_demand"] = measure(c["jp_demand_terms"], lambda t: zenn_count(zenn, t), failures, "zenn")
+        row["jp_zenn_demand"] = measure(c["jp_demand_terms"], lambda t: zenn_count(zenn, t, budget),
+                                        failures, "zenn")
         time.sleep(float(zenn["sleep_seconds"]))
 
         en_total = sum(row["en_hn"].values())
@@ -148,10 +161,21 @@ def main(argv=None) -> int:
 
     n_this_run = len(results)
     out_path = os.path.join(ns.out, f"jp-market-{cb.stamp()}.json")
+    prev_failures, prev_stopped = [], []
     if os.path.exists(out_path):
-        with open(out_path, encoding="utf-8") as f:
-            kept = [c for c in json.load(f)["categories"] if c["id"] not in {r["id"] for r in results}]
-        results = kept + results
+        try:
+            with open(out_path, encoding="utf-8") as f:
+                prev = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            raise SystemExit(f"{out_path} を読めません（{e}）。壊れた file を上書きしません。")
+        if "categories" not in prev:
+            raise SystemExit(f"{out_path} の形式が違います。別 file にするか、退避してください。")
+        results = [c for c in prev["categories"] if c["id"] not in {r["id"] for r in results}] + results
+        prev_failures = prev.get("failures", [])
+        prev_stopped = prev.get("stopped_history", [])
+        if prev.get("stopped"):
+            prev_stopped = prev_stopped + [prev["stopped"]]
+    failures = prev_failures + failures
     cb.write_json(out_path, {
         "measured_on": cb.today().isoformat(),
         "sources": {"hn": hn["search_endpoint"], "qiita": qiita["search_endpoint"], "zenn": zenn["search_endpoint"]},
@@ -160,13 +184,20 @@ def main(argv=None) -> int:
                    "Zenn は総件数を返さないため、上限 page までの実数です",
                    f"この file には {len(results)} 分類が入っています（分類ごとの測定日は measured_on を見てください）"],
         "stopped": stopped,
+        "stopped_history": prev_stopped + ([stopped] if stopped else []),
         "failures": failures,
         "categories": results,
     })
     print(f"\n今回の測定 {n_this_run}/{len(cats)}分類 / file 内 合計 {len(results)}分類 / 失敗 {len(failures)}件")
     if stopped:
         print(f"中断: {stopped}（未測定は未測定のまま残しています）")
+    manifest.count(categories=n_this_run, total_in_file=len(results), failures=len(failures))
+    for f_ in failures:
+        manifest.fail(**f_)
+    manifest.output(out_path)
+    manifest.write(ns.out, budget)
     print(f"書き出し: {out_path}")
+    print(f"request: {budget.report()}")
     print("次: python tools/transfer_matrix.py（他業界への転用）")
     return 0
 
