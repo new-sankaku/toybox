@@ -1,0 +1,11 @@
+# 参考画像とその切り出し・比較画像は版権物なので git に入れない。
+# file は手元に残す。crops/ と compare/ は tests/repro/crop.py と sheet.py で
+# 参考画像から作り直せる。
+doc/reference/**/*.png
+doc/reference/**/*.jpg
+doc/reference/**/*.jpeg
+doc/reference/**/*.webp
+doc/reference/**/*.avif
+doc/reference/**/*.gif
+tests/repro/crops/
+tests/repro/compare/
