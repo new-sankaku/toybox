@@ -10,8 +10,8 @@
 
 | 情報源 | 用途 | 認証 | 上限 | 備考 |
 |---|---|---|---|---|
-| **Hacker News / Algolia Search API** | 工程1 事例の収集、工程4 英語圏の言及量 | 不要 | 公表は 10,000 request/時 | `tags=story`、`numericFilters` で点数と期間を絞ります |
-| **Qiita API v2** | 工程4 日本語圏の言及量 | 不要（token 可） | **認証なし 60 request/時** / token あり 1,000 request/時 | 総件数は `total-count` header。残数は `rate-remaining` header |
+| **Hacker News / Algolia Search API** | 工程0 母集団、工程1 事例の収集、工程4 英語圏の言及量 | 不要 | 公表は 10,000 request/時 | `tags=story`、`numericFilters` で点数と期間を絞ります。**`search_by_date` に `tags=show_hn` を渡すと query 無しで母集団が取れます**（工程0 が人の語を必要としない理由） |
+| **Qiita API v2** | 工程0b 語の発見、工程4 日本語圏の言及量 | 不要（token 可） | **認証なし 60 request/時** / token あり 1,000 request/時 | 総件数は `total-count` header。残数は `rate-remaining` header |
 | **Zenn 記事検索** | 工程4 日本語圏の補助 | 不要 | 公表なし | **総件数を返しません。** 上限 page までの実数と、打ち切りの有無を出します |
 | **事例 site（直接取得）** | 工程2 価格の証拠 | 不要 | — | robots.txt を尊重。1事例あたり最大2 request |
 
@@ -20,6 +20,7 @@
 - **Hacker News の点数は人気であり、金ではありません。** 高得点の事例が儲かっている事例ではありません。
 - **Algolia の `query` は AND 検索です。** 語を増やすほど該当件数が急に減ります。config に語を足すときは、必ず該当件数を見てください（0件の語を残さないこと）。
 - **Qiita の `query` も AND です。** `請求書 自動化` は両方を含む記事だけを数えます。
+- **Qiita の tag を日本語の語の単位に使っています。** 日本語には分かち書きが無く、形態素解析を持ち込まずに語を切り出すためです。**tag は技術名に偏ります。**
 - **Zenn は `next_page` で続きを示します。** 上限 page で切ったかどうかを出力に残しています。
 - **robots.txt が 401 / 403 を返す site は「全面禁止」として扱います。** 404 など「存在しない」場合は許可（RFC 9309）です。取得できなかった場合は「不明」とし、**取りに行きません**。
 - **画面を JavaScript で描く site の価格は取れません。** 「未取得」と「証拠なし」は別物として記録しています。
@@ -39,6 +40,8 @@
 ## 4. 規約と礼儀
 
 - request の間隔は `config/sources.yaml` の `sleep_seconds` で空けています。**短くしないでください。**
+- 1回の実行で送る request 数は `config/discovery.yaml` の `budget` で host ごとに頭打ちにしています。超えると止まります。
+- 一時的な失敗（429・5xx・通信断）だけ指数 backoff で再送します（`Retry-After` を尊重）。**同じ request のやり直しであり、代替値での穴埋めではありません。**
 - User-Agent に用途と参照先を入れています（`tools/casebase.py` の `UA`）。
 - **取得した生 response は再配布しません。** `log/raw/` は再解析のための手元の控えです。page の生 HTML は `.gitignore` で git に入れません。
 - 個人が特定できる情報（投稿者名以外）は収集しません。

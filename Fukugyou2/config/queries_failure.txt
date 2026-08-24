@@ -1,6 +1,6 @@
-# 失敗事例・撤退事例を拾うための検索語。
-# 生き残りだけを見る偏りを消すために必須です（doc/METHOD.md §3）。
-# 語は Hacker News の該当件数を見ながら人が選びます（0件の語を置かないこと）。
+# 失敗事例の検索語（人が書いた語）。
+# 既定の経路では使いません。検索語は tools/discover_queries.py が data から作ります。
+# この file は `run_pipeline.py --no-discover` で自動発見と比較するときの対照用です。
 
 "shutting down"
 startup died

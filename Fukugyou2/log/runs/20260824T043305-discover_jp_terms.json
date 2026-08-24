@@ -1,0 +1,31 @@
+{
+ "tool": "discover_jp_terms",
+ "started_at": "2026-08-24T04:33:05+00:00",
+ "git_commit": "8b2febd8df0d7992906eed1298c3158044900f62",
+ "python": "3.11.15",
+ "platform": "Linux-6.18.44-fc-v21-x86_64-with-glibc2.39",
+ "params": {
+  "categories": "/home/user/toybox/Fukugyou2/config/categories.yaml",
+  "discovery": "/home/user/toybox/Fukugyou2/config/discovery.yaml",
+  "sources": "/home/user/toybox/Fukugyou2/config/sources.yaml",
+  "only": [
+   "billing"
+  ],
+  "limit": 1,
+  "out": "/home/user/toybox/Fukugyou2/log"
+ },
+ "counts": {
+  "categories": 1,
+  "proposals": 8,
+  "accepted": 6
+ },
+ "failures": [],
+ "outputs": [
+  "/home/user/toybox/Fukugyou2/log/discovery-jp-20260824.json",
+  "/home/user/toybox/Fukugyou2/config/jp_terms_auto-20260824.yaml"
+ ],
+ "ended_at": "2026-08-24T04:33:39+00:00",
+ "requests": {
+  "qiita.com": 14
+ }
+}

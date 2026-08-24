@@ -1,0 +1,73 @@
+# 検索語の自動発見の設定。語そのものは人が書きません。
+# 手順は doc/METHOD.md §5A（発見 algorithm）を見てください。
+
+corpus:
+  tags: show_hn            # 母集団。query なしで取れる（seed 不要）
+  background_tags: story   # 比較対象
+  windows: 8               # 期間を等分して層化 sampling する数
+  per_window: 60           # 1期間あたりの取得件数
+  since_years: 6
+  min_points: 20
+
+scoring:
+  positive_min_axes: 2     # screen.yaml の何軸該当を positive とするか
+  ngram_max: 2             # 1=単語のみ 2=2語の連なりまで
+  min_count: 4             # これ未満の出現数の語は候補にしない
+  min_docs: 3              # これ未満の文書数にしか出ない語は候補にしない（固有名詞よけ）
+  top_k: 30                # keyness 上位から何語を候補の素にするか
+  pair_with_accepted: true # 採用済みの語と掛け合わせた AND query も試す（適合率が上がる）
+  max_anchors: 3           # 掛け合わせに使う採用済み語の数
+  max_pair_terms: 6        # 掛け合わせる相手の語数
+  stopwords_file: config/stopwords_en.txt
+  # 標識づけに使った語そのものを候補から外します。外さないと「条件に書いた語が
+  # 条件に合う事例を連れてくる」という循環になり、適合率が自分で自分を証明します。
+  exclude_condition_terms: true
+
+validation:
+  hits_per_query: 20       # 候補1件あたりの試し取得数
+  min_total_hits: 5        # 該当が少なすぎる語は雑音（適合率で測る場合のみ適用）
+  max_total_hits: 20000    # 該当が多すぎる語は一般語
+  min_precision: 0.20      # 適合率で採否を決める場合の下限
+  min_new_positives: 2     # 新規獲得数で採否を決める場合の下限
+  # 採否に使う指標を種別ごとに変えます。
+  #   product: 標識が条件式（語と独立）なので 適合率 が意味を持ちます
+  #   failure: 標識が語そのものなので 適合率 は循環します。新規に取れた positive の数で測ります
+  metric_by_kind:
+    product: precision
+    failure: yield
+  # 新規率（既知でない事例の割合）は記録しますが、採否には使いません。
+  # 新規率は「その時点で何件持っているか」で変わる量であり、検索語の良し悪しではないためです。
+  # 飽和の判定と、実行順の並び替えにだけ使います。
+  max_candidates_per_round: 12
+
+saturation:
+  max_rounds: 4
+  min_new_positives: 3     # この数を下回った round を「収穫なし」と数える
+  patience: 2              # 収穫なしが続いたら終了
+
+budget:
+  hn.algolia.com: 400      # 1回の実行で許す request 数の上限
+  qiita.com: 40
+
+# 失敗事例の「定義」。検索語ではなく、何を失敗事例と呼ぶかの定義です。
+# 発見はここから始まり、keyness と歩留まりで語を広げます。
+failure_definition:
+  phrases:
+    - "shutting down"
+    - "shut down"
+    - "postmortem"
+    - "post-mortem"
+    - "sunsetting"
+    - "winding down"
+    - "we failed"
+    - "startup died"
+
+jp_expansion:
+  items_per_term: 40       # 需要語1件あたりに読む Qiita 記事数（1 request で取れる上限は100）
+  background_tags: 30      # 比較用に取る人気 tag の数
+  background_items_per_tag: 10
+  min_count: 3
+  min_terms: 2             # 2つ以上の需要語の結果に現れた tag だけを候補にする（単発の雑音よけ）
+  top_k: 12
+  min_total_hits: 20       # 提案語の Qiita 総件数の下限
+  max_total_hits: 20000

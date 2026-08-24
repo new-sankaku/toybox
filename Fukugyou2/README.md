@@ -2,8 +2,11 @@
 
 **目的:** 継続課金で積み上がり（Stock型）、提供の中核を機械が回せる副業の題材を、**既に製品化された事例から**選びます。
 
-**この folder がやること:** 事例（成功・失敗の両方）の収集 → 条件照合 → 日本市場への当てはめ → 他業界への転用 worksheet → 一覧化。
+**この folder がやること:** 検索語の自動発見 → 事例（成功・失敗の両方）の収集 → 条件照合 → 日本市場への当てはめ → 他業界への転用 worksheet → 一覧化。
 **この folder がやらないこと:** 採否の決定、価格の決定、事例の要約。**決めるのは人です**（`doc/METHOD.md` §5 規律8）。
+
+**検索語は人が書きません。** 人が書くのは「何を positive と呼ぶか」の定義だけで、
+検索語は母集団から機械が作り、実測の歩留まりで採否を決めます（`doc/METHOD.md` §5A）。
 
 ---
 
@@ -18,11 +21,20 @@ pip install -r requirements.txt
 python tools/run_pipeline.py
 ```
 
+test を回す場合:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests -q
+```
+
 個別に流す場合は `doc/PIPELINE.md` を見てください。
 
 ```bash
-python tools/collect_cases.py --queries config/queries_product.txt --kind product
-python tools/collect_cases.py --queries config/queries_failure.txt --kind failure
+python tools/discover_queries.py --kind product      # 検索語を data から作る
+python tools/discover_queries.py --kind failure
+python tools/collect_cases.py --queries config/queries_auto-product-YYYYMMDD.txt --kind product
+python tools/collect_cases.py --queries config/queries_auto-failure-YYYYMMDD.txt --kind failure
 python tools/fetch_pricing.py --limit 30 --min-points 100
 python tools/screen_cases.py
 python tools/jp_market_check.py --only billing field_ops --limit 2
@@ -37,14 +49,19 @@ python tools/build_report.py
 ## 構成
 
 ```
-config/    検索語・条件・分類・業界・情報源・LLM 設定（閾値は全部ここ。code に埋めません）
-tools/     工程1〜6 の program（venv 前提、Windows / Linux 両対応、標準 library のみ＋PyYAML）
-doc/       METHOD.md（何を・なぜ）/ PIPELINE.md（工程）/ SOURCES.md（情報源と上限）
-log/       出力。file 名に取得日が入ります。raw/ に生 response を残します
+config/    条件・分類・業界・情報源・発見・LLM 設定（閾値は全部ここ。code に埋めません）
+           queries_auto-*.txt は工程0 が書き出す検索語です（人が書いた語ではありません）
+tools/     工程0〜6 の program（venv 前提、Windows / Linux 両対応、標準 library のみ＋PyYAML）
+tests/     pytest。純関数・設定の整合・robots の解釈・条件照合を検査します
+doc/       METHOD.md（何を・なぜ・発見 algorithm）/ PIPELINE.md（工程）
+           SOURCES.md（情報源と上限）/ ENGINEERING.md（道具としての現在地と不足）
+log/       出力。file 名に取得日が入ります。raw/ に生 response、runs/ に実行の記録を残します
 ```
 
 | program | 役割 |
 |---|---|
+| `discover_queries.py` | **検索語を母集団から作り、実測で採否を決める**（人は語を書きません） |
+| `discover_jp_terms.py` | 日本語の語を Qiita の tag から広げる（提案のみ。自動反映しません） |
 | `collect_cases.py` | Hacker News から事例を集める（**失敗事例も**） |
 | `fetch_pricing.py` | 事例の site を見て価格表の証拠を採る（robots.txt 尊重） |
 | `screen_cases.py` | 4軸の条件に何件該当したかを出す（採否は書かない） |
@@ -89,3 +106,7 @@ log/       出力。file 名に取得日が入ります。raw/ に生 response �
 - 画面を JavaScript で描く site の価格は取れません
 
 **機械は候補を絞るところまでです。最後は人が会って聞くまで、何も確定しません。**
+
+道具としての不足（情報源が1本であること、取り逃しの量を測っていないこと）と、
+その解消の順序は **`doc/ENGINEERING.md`** に書いています。**現時点の一覧は候補の生成には使えますが、
+「他に無い」という主張には使えません。**

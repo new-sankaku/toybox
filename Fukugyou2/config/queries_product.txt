@@ -1,6 +1,6 @@
-# 製品化済みの事例を拾うための検索語（英語圏 / Hacker News）。
-# 人が書きます。program は語を生成しません（doc/METHOD.md §5 規律1）。
-# 1行1語。# 始まりは注釈。
+# 製品化事例の検索語（人が書いた語）。
+# 既定の経路では使いません。検索語は tools/discover_queries.py が data から作ります。
+# この file は `run_pipeline.py --no-discover` で自動発見と比較するときの対照用です。
 
 "Show HN" saas
 "Show HN" api for

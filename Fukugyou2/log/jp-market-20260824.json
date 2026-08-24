@@ -208,8 +208,8 @@
    "label": "請求・経理",
    "measured_on": "2026-08-24",
    "en_hn": {
-    "invoice automation": 212,
-    "bookkeeping automation": 21
+    "invoice automation": 359,
+    "bookkeeping automation": 16
    },
    "jp_qiita_demand": {
     "請求書 自動化": 2221,
@@ -220,7 +220,7 @@
     "請求書 SaaS": 502,
     "経費精算 システム": 311
    },
-   "qiita_rate_remaining": 52,
+   "qiita_rate_remaining": 50,
    "jp_zenn_demand": {
     "請求書 自動化": [
      9,
@@ -236,10 +236,10 @@
     ]
    },
    "totals": {
-    "en_hn": 233,
+    "en_hn": 375,
     "jp_qiita_demand": 2363,
     "jp_qiita_supply": 813,
-    "jp_per_en": 10.142,
+    "jp_per_en": 6.301,
     "demand_per_supply": 2.907
    }
   }

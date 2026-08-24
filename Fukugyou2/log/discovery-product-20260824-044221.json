@@ -1,0 +1,691 @@
+{
+ "kind": "product",
+ "discovered_on": "2026-08-24",
+ "corpus": {
+  "target": 480,
+  "background": 480,
+  "positives": 95
+ },
+ "accepted": [
+  {
+   "term": "+workflows automation",
+   "query": "workflows automation",
+   "total_hits": 222,
+   "fetched": 20,
+   "positives": 19,
+   "new_positives": 3,
+   "metric": "precision",
+   "precision": 0.95,
+   "novelty": 0.15,
+   "accepted": true,
+   "rejected_for": [],
+   "round": 3
+  },
+  {
+   "term": "+workflows automations",
+   "query": "workflows automations",
+   "total_hits": 116,
+   "fetched": 20,
+   "positives": 19,
+   "new_positives": 0,
+   "metric": "precision",
+   "precision": 0.95,
+   "novelty": 0.0,
+   "accepted": true,
+   "rejected_for": [],
+   "round": 3
+  },
+  {
+   "term": "+workflows websites",
+   "query": "workflows websites",
+   "total_hits": 88,
+   "fetched": 20,
+   "positives": 17,
+   "new_positives": 7,
+   "metric": "precision",
+   "precision": 0.85,
+   "novelty": 0.35,
+   "accepted": true,
+   "rejected_for": [],
+   "round": 3
+  },
+  {
+   "term": "+automation agent",
+   "query": "automation agent",
+   "total_hits": 105,
+   "fetched": 20,
+   "positives": 12,
+   "new_positives": 2,
+   "metric": "precision",
+   "precision": 0.6,
+   "novelty": 0.15,
+   "accepted": true,
+   "rejected_for": [],
+   "round": 3
+  },
+  {
+   "term": "workflows",
+   "query": "workflows",
+   "total_hits": 863,
+   "fetched": 20,
+   "positives": 8,
+   "new_positives": 3,
+   "metric": "precision",
+   "precision": 0.4,
+   "novelty": 0.15,
+   "accepted": true,
+   "rejected_for": [],
+   "round": 2
+  },
+  {
+   "term": "browser automations",
+   "query": "\"browser automations\"",
+   "total_hits": 10,
+   "fetched": 10,
+   "positives": 4,
+   "new_positives": 0,
+   "metric": "precision",
+   "precision": 0.4,
+   "novelty": 0.0,
+   "accepted": true,
+   "rejected_for": [],
+   "round": 3
+  },
+  {
+   "term": "+workflows agent",
+   "query": "workflows agent",
+   "total_hits": 258,
+   "fetched": 20,
+   "positives": 7,
+   "new_positives": 2,
+   "metric": "precision",
+   "precision": 0.35,
+   "novelty": 0.25,
+   "accepted": true,
+   "rejected_for": [],
+   "round": 3
+  },
+  {
+   "term": "+workflows agents",
+   "query": "workflows agents",
+   "total_hits": 235,
+   "fetched": 20,
+   "positives": 7,
+   "new_positives": 1,
+   "metric": "precision",
+   "precision": 0.35,
+   "novelty": 0.1,
+   "accepted": true,
+   "rejected_for": [],
+   "round": 3
+  },
+  {
+   "term": "automation",
+   "query": "automation",
+   "total_hits": 1570,
+   "fetched": 20,
+   "positives": 5,
+   "new_positives": 1,
+   "metric": "precision",
+   "precision": 0.25,
+   "novelty": 0.15,
+   "accepted": true,
+   "rejected_for": [],
+   "round": 2
+  },
+  {
+   "term": "automations",
+   "query": "automations",
+   "total_hits": 577,
+   "fetched": 20,
+   "positives": 5,
+   "new_positives": 0,
+   "metric": "precision",
+   "precision": 0.25,
+   "novelty": 0.0,
+   "accepted": true,
+   "rejected_for": [],
+   "round": 3
+  }
+ ],
+ "rounds": [
+  {
+   "round": 1,
+   "candidates": [
+    {
+     "term": "agent",
+     "query": "agent",
+     "total_hits": 2934,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 0.95,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "agents",
+     "query": "agents",
+     "total_hits": 2231,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 0.95,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "pipeline",
+     "query": "pipeline",
+     "total_hits": 703,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "claude code",
+     "query": "\"claude code\"",
+     "total_hits": 560,
+     "fetched": 20,
+     "positives": 1,
+     "new_positives": 1,
+     "metric": "precision",
+     "precision": 0.05,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.05 < 0.2"
+     ]
+    },
+    {
+     "term": "knowledge",
+     "query": "knowledge",
+     "total_hits": 999,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "claude",
+     "query": "claude",
+     "total_hits": 1545,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "real-world",
+     "query": "real-world",
+     "total_hits": 332,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "plugins",
+     "query": "plugins",
+     "total_hits": 541,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "coding",
+     "query": "coding",
+     "total_hits": 2674,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "accelerate",
+     "query": "accelerate",
+     "total_hits": 580,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "loop",
+     "query": "loop",
+     "total_hits": 5085,
+     "fetched": 20,
+     "positives": 1,
+     "new_positives": 1,
+     "metric": "precision",
+     "precision": 0.05,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.05 < 0.2"
+     ]
+    },
+    {
+     "term": "llms",
+     "query": "llms",
+     "total_hits": 2729,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    }
+   ],
+   "new_positives": 0
+  },
+  {
+   "round": 2,
+   "candidates": [
+    {
+     "term": "engine",
+     "query": "engine",
+     "total_hits": 6081,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "shipped",
+     "query": "shipped",
+     "total_hits": 806,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "import",
+     "query": "import",
+     "total_hits": 1364,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "natural language",
+     "query": "\"natural language\"",
+     "total_hits": 224,
+     "fetched": 20,
+     "positives": 2,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.1,
+     "novelty": 0.85,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.1 < 0.2"
+     ]
+    },
+    {
+     "term": "update",
+     "query": "update",
+     "total_hits": 2704,
+     "fetched": 20,
+     "positives": 1,
+     "new_positives": 1,
+     "metric": "precision",
+     "precision": 0.05,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.05 < 0.2"
+     ]
+    },
+    {
+     "term": "configuration",
+     "query": "configuration",
+     "total_hits": 320,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "includes",
+     "query": "includes",
+     "total_hits": 1203,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "outputs",
+     "query": "outputs",
+     "total_hits": 732,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "data",
+     "query": "data",
+     "total_hits": 9412,
+     "fetched": 20,
+     "positives": 1,
+     "new_positives": 1,
+     "metric": "precision",
+     "precision": 0.05,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.05 < 0.2"
+     ]
+    },
+    {
+     "term": "workflows",
+     "query": "workflows",
+     "total_hits": 863,
+     "fetched": 20,
+     "positives": 8,
+     "new_positives": 3,
+     "metric": "precision",
+     "precision": 0.4,
+     "novelty": 0.15,
+     "accepted": true,
+     "rejected_for": []
+    },
+    {
+     "term": "automation",
+     "query": "automation",
+     "total_hits": 1570,
+     "fetched": 20,
+     "positives": 5,
+     "new_positives": 1,
+     "metric": "precision",
+     "precision": 0.25,
+     "novelty": 0.15,
+     "accepted": true,
+     "rejected_for": []
+    },
+    {
+     "term": "continuous",
+     "query": "continuous",
+     "total_hits": 482,
+     "fetched": 20,
+     "positives": 1,
+     "new_positives": 1,
+     "metric": "precision",
+     "precision": 0.05,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.05 < 0.2"
+     ]
+    }
+   ],
+   "new_positives": 12
+  },
+  {
+   "round": 3,
+   "candidates": [
+    {
+     "term": "websites",
+     "query": "websites",
+     "total_hits": 2452,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "automations",
+     "query": "automations",
+     "total_hits": 577,
+     "fetched": 20,
+     "positives": 5,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.25,
+     "novelty": 0.0,
+     "accepted": true,
+     "rejected_for": []
+    },
+    {
+     "term": "browser automations",
+     "query": "\"browser automations\"",
+     "total_hits": 10,
+     "fetched": 10,
+     "positives": 4,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.4,
+     "novelty": 0.0,
+     "accepted": true,
+     "rejected_for": []
+    },
+    {
+     "term": "log",
+     "query": "log",
+     "total_hits": 3081,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.0 < 0.2"
+     ]
+    },
+    {
+     "term": "security",
+     "query": "security",
+     "total_hits": 3255,
+     "fetched": 20,
+     "positives": 1,
+     "new_positives": 1,
+     "metric": "precision",
+     "precision": 0.05,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.05 < 0.2"
+     ]
+    },
+    {
+     "term": "data analysis",
+     "query": "\"data analysis\"",
+     "total_hits": 60,
+     "fetched": 20,
+     "positives": 2,
+     "new_positives": 2,
+     "metric": "precision",
+     "precision": 0.1,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "適合率 0.1 < 0.2"
+     ]
+    },
+    {
+     "term": "+workflows agent",
+     "query": "workflows agent",
+     "total_hits": 258,
+     "fetched": 20,
+     "positives": 7,
+     "new_positives": 2,
+     "metric": "precision",
+     "precision": 0.35,
+     "novelty": 0.25,
+     "accepted": true,
+     "rejected_for": []
+    },
+    {
+     "term": "+workflows automation",
+     "query": "workflows automation",
+     "total_hits": 222,
+     "fetched": 20,
+     "positives": 19,
+     "new_positives": 3,
+     "metric": "precision",
+     "precision": 0.95,
+     "novelty": 0.15,
+     "accepted": true,
+     "rejected_for": []
+    },
+    {
+     "term": "+workflows agents",
+     "query": "workflows agents",
+     "total_hits": 235,
+     "fetched": 20,
+     "positives": 7,
+     "new_positives": 1,
+     "metric": "precision",
+     "precision": 0.35,
+     "novelty": 0.1,
+     "accepted": true,
+     "rejected_for": []
+    },
+    {
+     "term": "+workflows websites",
+     "query": "workflows websites",
+     "total_hits": 88,
+     "fetched": 20,
+     "positives": 17,
+     "new_positives": 7,
+     "metric": "precision",
+     "precision": 0.85,
+     "novelty": 0.35,
+     "accepted": true,
+     "rejected_for": []
+    },
+    {
+     "term": "+workflows automations",
+     "query": "workflows automations",
+     "total_hits": 116,
+     "fetched": 20,
+     "positives": 19,
+     "new_positives": 0,
+     "metric": "precision",
+     "precision": 0.95,
+     "novelty": 0.0,
+     "accepted": true,
+     "rejected_for": []
+    },
+    {
+     "term": "+automation agent",
+     "query": "automation agent",
+     "total_hits": 105,
+     "fetched": 20,
+     "positives": 12,
+     "new_positives": 2,
+     "metric": "precision",
+     "precision": 0.6,
+     "novelty": 0.15,
+     "accepted": true,
+     "rejected_for": []
+    }
+   ],
+   "new_positives": 42
+  }
+ ]
+}

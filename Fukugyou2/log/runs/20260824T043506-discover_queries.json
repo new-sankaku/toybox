@@ -1,0 +1,33 @@
+{
+ "tool": "discover_queries",
+ "started_at": "2026-08-24T04:35:06+00:00",
+ "git_commit": "8b2febd8df0d7992906eed1298c3158044900f62",
+ "python": "3.11.15",
+ "platform": "Linux-6.18.44-fc-v21-x86_64-with-glibc2.39",
+ "params": {
+  "kind": "product",
+  "discovery": "/home/user/toybox/Fukugyou2/config/discovery.yaml",
+  "sources": "/home/user/toybox/Fukugyou2/config/sources.yaml",
+  "screen": "/home/user/toybox/Fukugyou2/config/screen.yaml",
+  "max_rounds": 3,
+  "dry_run": false,
+  "out": "/home/user/toybox/Fukugyou2/log"
+ },
+ "counts": {
+  "cases_added_round2": 0,
+  "cases_added_round3": 10,
+  "accepted": 10,
+  "tried": 36,
+  "rounds": 3,
+  "positives": 95
+ },
+ "failures": [],
+ "outputs": [
+  "/home/user/toybox/Fukugyou2/log/discovery-product-20260824.json",
+  "/home/user/toybox/Fukugyou2/config/queries_auto-product-20260824.txt"
+ ],
+ "ended_at": "2026-08-24T04:36:16+00:00",
+ "requests": {
+  "hn.algolia.com": 52
+ }
+}

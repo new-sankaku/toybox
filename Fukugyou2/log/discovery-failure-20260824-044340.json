@@ -1,0 +1,397 @@
+{
+ "kind": "failure",
+ "discovered_on": "2026-08-24",
+ "corpus": {
+  "target": 605,
+  "background": 480,
+  "positives": 120
+ },
+ "accepted": [
+  {
+   "term": "+\"shutting down\" money",
+   "query": "\"shutting down\" money",
+   "total_hits": 4,
+   "fetched": 4,
+   "positives": 4,
+   "new_positives": 2,
+   "metric": "yield",
+   "precision": 1.0,
+   "novelty": 0.5,
+   "accepted": true,
+   "rejected_for": [],
+   "round": 1
+  }
+ ],
+ "rounds": [
+  {
+   "round": 1,
+   "candidates": [
+    {
+     "term": "online",
+     "query": "online",
+     "total_hits": 2346,
+     "fetched": 20,
+     "positives": 1,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.05,
+     "novelty": 0.9,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "phone",
+     "query": "phone",
+     "total_hits": 1783,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "digital",
+     "query": "digital",
+     "total_hits": 1718,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "money",
+     "query": "money",
+     "total_hits": 1817,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "safety",
+     "query": "safety",
+     "total_hits": 954,
+     "fetched": 20,
+     "positives": 1,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.05,
+     "novelty": 0.95,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "longer",
+     "query": "longer",
+     "total_hits": 1075,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "+\"shutting down\" online",
+     "query": "\"shutting down\" online",
+     "total_hits": 3,
+     "fetched": 3,
+     "positives": 2,
+     "new_positives": 1,
+     "metric": "yield",
+     "precision": 0.667,
+     "novelty": 0.667,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 1 < 2"
+     ]
+    },
+    {
+     "term": "+\"shutting down\" phone",
+     "query": "\"shutting down\" phone",
+     "total_hits": 5,
+     "fetched": 5,
+     "positives": 4,
+     "new_positives": 1,
+     "metric": "yield",
+     "precision": 0.8,
+     "novelty": 0.2,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 1 < 2"
+     ]
+    },
+    {
+     "term": "+\"shutting down\" digital",
+     "query": "\"shutting down\" digital",
+     "total_hits": 4,
+     "fetched": 4,
+     "positives": 3,
+     "new_positives": 1,
+     "metric": "yield",
+     "precision": 0.75,
+     "novelty": 0.25,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 1 < 2"
+     ]
+    },
+    {
+     "term": "+\"shutting down\" money",
+     "query": "\"shutting down\" money",
+     "total_hits": 4,
+     "fetched": 4,
+     "positives": 4,
+     "new_positives": 2,
+     "metric": "yield",
+     "precision": 1.0,
+     "novelty": 0.5,
+     "accepted": true,
+     "rejected_for": []
+    },
+    {
+     "term": "+\"shutting down\" safety",
+     "query": "\"shutting down\" safety",
+     "total_hits": 1,
+     "fetched": 1,
+     "positives": 1,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 1.0,
+     "novelty": 0.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "+\"shutting down\" longer",
+     "query": "\"shutting down\" longer",
+     "total_hits": 3,
+     "fetched": 3,
+     "positives": 2,
+     "new_positives": 1,
+     "metric": "yield",
+     "precision": 0.667,
+     "novelty": 0.667,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 1 < 2"
+     ]
+    }
+   ],
+   "new_positives": 3
+  },
+  {
+   "round": 2,
+   "candidates": [
+    {
+     "term": "stuck",
+     "query": "stuck",
+     "total_hits": 2254,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "able",
+     "query": "able",
+     "total_hits": 1424,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "away",
+     "query": "away",
+     "total_hits": 1746,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "lot",
+     "query": "lot",
+     "total_hits": 3063,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "don",
+     "query": "don",
+     "total_hits": 7694,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "service",
+     "query": "service",
+     "total_hits": 2952,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "worked",
+     "query": "worked",
+     "total_hits": 1027,
+     "fetched": 20,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 1.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "+\"shutting down\" money online",
+     "query": "\"shutting down\" money online",
+     "total_hits": 0,
+     "fetched": 0,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 0.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "+\"shutting down\" money phone",
+     "query": "\"shutting down\" money phone",
+     "total_hits": 0,
+     "fetched": 0,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 0.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "+\"shutting down\" money digital",
+     "query": "\"shutting down\" money digital",
+     "total_hits": 0,
+     "fetched": 0,
+     "positives": 0,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 0.0,
+     "novelty": 0.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "+\"shutting down\" money stuck",
+     "query": "\"shutting down\" money stuck",
+     "total_hits": 2,
+     "fetched": 2,
+     "positives": 2,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 1.0,
+     "novelty": 0.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    },
+    {
+     "term": "+\"shutting down\" money able",
+     "query": "\"shutting down\" money able",
+     "total_hits": 2,
+     "fetched": 2,
+     "positives": 2,
+     "new_positives": 0,
+     "metric": "yield",
+     "precision": 1.0,
+     "novelty": 0.0,
+     "accepted": false,
+     "rejected_for": [
+      "新規 positive 0 < 2"
+     ]
+    }
+   ],
+   "new_positives": 0
+  }
+ ]
+}

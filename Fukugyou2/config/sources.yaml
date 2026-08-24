@@ -4,6 +4,7 @@
 hn_algolia:
   label: Hacker News / Algolia Search API
   search_endpoint: https://hn.algolia.com/api/v1/search
+  by_date_endpoint: https://hn.algolia.com/api/v1/search_by_date
   item_url_template: "https://news.ycombinator.com/item?id={id}"
   auth: none
   max_hits_per_page: 100

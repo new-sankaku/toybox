@@ -1,0 +1,5 @@
+# failure の検索語（自動発見 2026-08-24）。人が書いた語ではありません。
+# 生成: tools/discover_queries.py / 実測値は log/discovery-failure-20260824-044340.json にあります。
+# 採用条件: 適合率 >= 0.2 / 該当 5〜20000件
+
+"shutting down" money

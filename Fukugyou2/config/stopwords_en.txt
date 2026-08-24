@@ -1,0 +1,21 @@
+# 語の除外 list（発見の filter であり、検索語ではありません）。
+# 一般語と Hacker News の定型語を落とすためのものです。
+the and for with from that this you your our are was were has have had not but
+all can will its it's they them then than there here what when where which who
+how why into out over under more most some any few one two new now get got make
+made using use used via about after before between during through
+show hn ask launch tell github com http https www html json api app apps
+using built build building make making launched launching introducing
+open source project post comment comments
+also just even take took turn turned stop stopped still much many way ways
+year years month months day days week weeks time times first last next
+like want need needs know known think thought say said see seen look looking
+work works working thing things people person human someone something anything
+back down out off over again once only own same such very too own don't didn't
+been being does did doing would could should may might must shall
+who's what's that's isn't aren't wasn't weren't won't can't couldn't
+our ours their theirs his her hers its itself myself yourself themselves
+because while before after until since though although however therefore
+good great best better bad worse well nice cool simple easy hard
+today tomorrow yesterday january february march april june july august
+september october november december

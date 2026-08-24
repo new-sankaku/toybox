@@ -1,0 +1,14 @@
+# product の検索語（自動発見 2026-08-24）。人が書いた語ではありません。
+# 生成: tools/discover_queries.py / 実測値は log/discovery-product-20260824-044221.json にあります。
+# 採用条件: 適合率 >= 0.2 / 該当 5〜20000件
+
+workflows automation
+workflows automations
+workflows websites
+automation agent
+workflows
+"browser automations"
+workflows agent
+workflows agents
+automation
+automations

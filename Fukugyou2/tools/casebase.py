@@ -15,14 +15,20 @@ from __future__ import annotations
 
 import datetime
 import glob
+import html
 import json
+import math
 import os
+import platform
 import re
+import subprocess
 import sys
+import time
 import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UA = "Fukugyou2-case-research/1.0 (+https://github.com/new-sankaku/toybox Fukugyou2/doc/SOURCES.md)"
@@ -85,21 +91,71 @@ def load_terms(file_path: str, limit: int, what: str) -> list[str]:
     return terms
 
 
-def http_json(url: str, headers: dict | None = None, timeout: int = 30) -> tuple[object, str, dict]:
-    """JSON を取得して (解析済み, 生 text, response header) を返す。失敗は SourceError。"""
+TRANSIENT_STATUS = (408, 425, 429, 500, 502, 503, 504)
+
+
+class Budget:
+    """host ごとの request 数を数え、上限で止めます。上限超過は例外です（黙って続けません）。"""
+
+    def __init__(self, limits: dict[str, int] | None = None):
+        self.limits = dict(limits or {})
+        self.used: Counter = Counter()
+
+    def spend(self, url: str) -> None:
+        host = urllib.parse.urlsplit(url).netloc.lower()
+        self.used[host] += 1
+        cap = self.limits.get(host)
+        if cap is not None and self.used[host] > cap:
+            raise SystemExit(f"{host} への request が上限 {cap} 件を超えました。"
+                             "上限は config/*.yaml にあります。意図的に上げる場合のみ変更してください。")
+
+    def report(self) -> dict:
+        return dict(self.used)
+
+
+def _retry_wait(attempt: int, base: float, retry_after: str | None) -> float:
+    if retry_after:
+        try:
+            return min(float(retry_after), 60.0)
+        except ValueError:
+            pass
+    return base * (2 ** attempt)
+
+
+def http_json(url: str, headers: dict | None = None, timeout: int = 30,
+              retries: int = 2, backoff: float = 1.0, budget: "Budget | None" = None
+              ) -> tuple[object, str, dict]:
+    """JSON を取得して (解析済み, 生 text, response header) を返す。
+
+    一時的な失敗（429・5xx・通信断）だけ指数 backoff で再送します。同じ request の
+    やり直しであり、代替値での穴埋めではありません。恒久的な失敗は即座に SourceError です。
+    """
     req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            raw = r.read().decode("utf-8", errors="replace")
-            head = {k.lower(): v for k, v in r.headers.items()}
-    except urllib.error.HTTPError as e:
-        raise SourceError(f"HTTP {e.code} {url}", status=e.code) from e
-    except Exception as e:
-        raise SourceError(f"{type(e).__name__}: {e} {url}") from e
-    try:
-        return json.loads(raw), raw, head
-    except json.JSONDecodeError as e:
-        raise SourceError(f"JSON として解釈できません: {url} ({e})") from e
+    last: Exception | None = None
+    for attempt in range(retries + 1):
+        if budget is not None:
+            budget.spend(url)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = r.read().decode("utf-8", errors="replace")
+                head = {k.lower(): v for k, v in r.headers.items()}
+            try:
+                return json.loads(raw), raw, head
+            except json.JSONDecodeError as e:
+                raise SourceError(f"JSON として解釈できません: {url} ({e})") from e
+        except urllib.error.HTTPError as e:
+            last = SourceError(f"HTTP {e.code} {url}", status=e.code)
+            if e.code not in TRANSIENT_STATUS or attempt == retries:
+                raise last from e
+            time.sleep(_retry_wait(attempt, backoff, e.headers.get("Retry-After") if e.headers else None))
+        except SourceError:
+            raise
+        except Exception as e:
+            last = SourceError(f"{type(e).__name__}: {e} {url}")
+            if attempt == retries:
+                raise last from e
+            time.sleep(_retry_wait(attempt, backoff, None))
+    raise last if last else SourceError(f"取得できませんでした: {url}")
 
 
 def http_text(url: str, timeout: int = 30, max_bytes: int = 2_000_000) -> tuple[str, str, int]:
@@ -146,6 +202,29 @@ def read_jsonl(file_path: str) -> list[dict]:
             except json.JSONDecodeError as e:
                 raise SystemExit(f"{file_path}:{i} が JSON として読めません（{e}）。")
     return rows
+
+
+def merge_cases(file_path: str, rows: list[dict]) -> tuple[int, int, list[dict]]:
+    """事例を既存 file に併合します。重複は case_id と正規化 URL で落とします。
+
+    戻り値は (追加数, 重複数, 併合後の全件)。同じ日に何度実行しても増えるだけです。
+    """
+    existing = read_jsonl(file_path) if os.path.exists(file_path) else []
+    by_id = {r["case_id"]: r for r in existing}
+    seen = {norm_url(r.get("url")) for r in existing if norm_url(r.get("url"))}
+    added = dup = 0
+    for c in rows:
+        key = norm_url(c.get("url"))
+        if c["case_id"] in by_id or (key and key in seen):
+            dup += 1
+            continue
+        by_id[c["case_id"]] = c
+        if key:
+            seen.add(key)
+        added += 1
+    out = sorted(by_id.values(), key=lambda r: (r.get("kind", ""), -(r.get("points") or 0)))
+    write_jsonl(file_path, out)
+    return added, dup, out
 
 
 def write_json(file_path: str, obj) -> None:
@@ -214,3 +293,120 @@ def new_case(**kw) -> dict:
 
 def eprint(*a) -> None:
     print(*a, file=sys.stderr)
+
+
+def git_commit() -> str | None:
+    try:
+        r = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"],
+                           capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() or None
+    except Exception:
+        return None
+
+
+class Manifest:
+    """実行の記録。同じ結果を再現するために要るものを1 file に残します。"""
+
+    def __init__(self, tool: str, params: dict):
+        self.data = {
+            "tool": tool,
+            "started_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "git_commit": git_commit(),
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "params": {k: v for k, v in params.items() if not k.startswith("_")},
+            "counts": {},
+            "failures": [],
+            "outputs": [],
+        }
+
+    def count(self, **kw) -> None:
+        self.data["counts"].update(kw)
+
+    def fail(self, **kw) -> None:
+        self.data["failures"].append(kw)
+
+    def output(self, p: str) -> None:
+        self.data["outputs"].append(p)
+
+    def write(self, out_dir: str, budget: "Budget | None" = None) -> str:
+        self.data["ended_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+        if budget is not None:
+            self.data["requests"] = budget.report()
+        d = os.path.join(out_dir, "runs")
+        os.makedirs(d, exist_ok=True)
+        name = self.data["started_at"].replace(":", "").replace("-", "")[:15]
+        p = os.path.join(d, f"{name}-{self.data['tool']}.json")
+        write_json(p, self.data)
+        return p
+
+
+WORD = re.compile(r"[a-z][a-z0-9+#\-]{2,}")
+URL = re.compile(r"https?://\S+|www\.\S+|\b[\w.\-]+\.(?:com|io|dev|org|net|ai|co|app|sh)\b")
+HTML_TAG = re.compile(r"<[^>]+>")
+PERCENT = re.compile(r"%[0-9a-fA-F]{2}")
+
+
+def strip_noise(text: str) -> str:
+    """URL・HTML tag・実体参照・percent encode を落とします。
+
+    これらは keyness で上位に来ますが、検索語としては使えません
+    （x2f や quot のような断片が候補に混ざる原因になります）。
+    """
+    t = html.unescape(text or "")
+    t = HTML_TAG.sub(" ", t)
+    t = URL.sub(" ", t)
+    t = PERCENT.sub(" ", t)
+    return t
+
+
+def tokenize_en(text: str, stopwords: set[str]) -> list[str]:
+    return [w for w in WORD.findall(strip_noise(text).lower()) if w not in stopwords]
+
+
+def ngrams(tokens: list[str], n: int) -> list[str]:
+    return [" ".join(tokens[i:i + n]) for i in range(len(tokens) - n + 1)]
+
+
+def log_likelihood(a: int, b: int, c: int, d: int) -> float:
+    """Dunning の G^2。target に偏るほど正、background に偏るほど負を返します。
+
+    a: target での出現数 / b: background での出現数 / c,d: それぞれの総語数。
+    corpus 比較の keyness としては業界標準の指標で、低頻度語に強い点で
+    単純な頻度差や TF-IDF より適しています。
+    """
+    if c <= 0 or d <= 0 or (a + b) <= 0:
+        return 0.0
+    e1 = c * (a + b) / (c + d)
+    e2 = d * (a + b) / (c + d)
+    g = 0.0
+    if a > 0 and e1 > 0:
+        g += a * math.log(a / e1)
+    if b > 0 and e2 > 0:
+        g += b * math.log(b / e2)
+    g *= 2.0
+    return g if (a / c) >= (b / d) else -g
+
+
+def keyness(target_docs: list[list[str]], background_docs: list[list[str]],
+            min_count: int = 3, top_k: int = 40, min_docs: int = 1) -> list[dict]:
+    """target を background から分ける語を G^2 の降順で返します。
+
+    min_docs は「いくつの文書に現れたか」の下限です。1件の文書にだけ出る語
+    （製品名・作者名などの固有名詞）を落とすために使います。
+    """
+    t = Counter(w for doc in target_docs for w in doc)
+    b = Counter(w for doc in background_docs for w in doc)
+    t_docs = Counter(w for doc in target_docs for w in set(doc))
+    c, d = sum(t.values()), sum(b.values())
+    rows = []
+    for w, a in t.items():
+        if a < min_count or t_docs[w] < min_docs:
+            continue
+        g = log_likelihood(a, b.get(w, 0), c, d)
+        if g <= 0:
+            continue
+        rows.append({"term": w, "g2": round(g, 2), "target_count": a,
+                     "background_count": b.get(w, 0), "target_docs": t_docs[w]})
+    rows.sort(key=lambda r: -r["g2"])
+    return rows[:top_k]

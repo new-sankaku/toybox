@@ -35,7 +35,8 @@ def parse_title(title: str) -> tuple[str | None, str | None]:
     return m.group("name").strip(), m.group("tagline").strip()
 
 
-def search(source: dict, query: str, hits: int, min_points: int, since_epoch: int | None) -> tuple[list[dict], list[dict], int]:
+def search(source: dict, query: str, hits: int, min_points: int, since_epoch: int | None,
+           budget: "cb.Budget | None" = None) -> tuple[list[dict], list[dict], int]:
     per_page = min(hits, int(source["max_hits_per_page"]))
     numeric = [f"points>={min_points}"]
     if since_epoch is not None:
@@ -50,7 +51,7 @@ def search(source: dict, query: str, hits: int, min_points: int, since_epoch: in
             "page": page,
         })
         data, _, _ = cb.http_json(f"{source['search_endpoint']}?{params}",
-                                  timeout=int(source["timeout_seconds"]))
+                                  timeout=int(source["timeout_seconds"]), budget=budget)
         pages.append(data)
         nb_hits = data.get("nbHits", 0)
         got = data.get("hits", [])
@@ -106,41 +107,36 @@ def main(argv=None) -> int:
     since = int((datetime.datetime.now() - datetime.timedelta(days=365.25 * ns.since_years)).timestamp())
 
     out_path = os.path.join(ns.out, f"cases-{day_stamp}.jsonl")
-    existing = cb.read_jsonl(out_path) if os.path.exists(out_path) else []
-    by_id = {r["case_id"]: r for r in existing}
-    seen_url = {cb.norm_url(r.get("url")) for r in existing if cb.norm_url(r.get("url"))}
+    manifest = cb.Manifest("collect_cases", vars(ns))
+    budget = cb.Budget()
+    rows = cb.read_jsonl(out_path) if os.path.exists(out_path) else []
 
     print(f"取得日 {day} / {source['label']} / 検索語 {len(queries)}語 × 最大{ns.hits}件 / {ns.min_points}点以上")
     added, dup, failures = 0, 0, []
     for i, q in enumerate(queries, 1):
         try:
-            hits, pages, nb = search(source, q, ns.hits, ns.min_points, since)
+            hits, pages, nb = search(source, q, ns.hits, ns.min_points, since, budget)
         except cb.SourceError as e:
             failures.append({"query": q, "error": str(e)})
             cb.eprint(f"  失敗: {q} — {e}")
             continue
         cb.save_raw("hn", f"{ns.kind}-{q}", json.dumps({"query": q, "pages": pages}, ensure_ascii=False),
                     day_stamp, ns.out)
-        new_here = 0
-        for h in hits:
-            case = to_case(h, q, ns.kind, source["item_url_template"], day.isoformat())
-            key = cb.norm_url(case["url"])
-            if case["case_id"] in by_id or (key and key in seen_url):
-                dup += 1
-                continue
-            by_id[case["case_id"]] = case
-            if key:
-                seen_url.add(key)
-            new_here += 1
+        cases = [to_case(h, q, ns.kind, source["item_url_template"], day.isoformat()) for h in hits]
+        new_here, dup_here, rows = cb.merge_cases(out_path, cases)
         added += new_here
+        dup += dup_here
         print(f"  [{i:>2}/{len(queries)}] {q[:44]:<44} 該当{nb:>6}件 取得{len(hits):>3} 新規{new_here:>3}")
         time.sleep(float(source["sleep_seconds"]))
 
-    if not by_id:
+    if not rows:
         raise SystemExit("1件も取得できませんでした。代替値では埋めません（doc/METHOD.md §5 規律3）。")
 
-    rows = sorted(by_id.values(), key=lambda r: (r["kind"], -(r["points"] or 0)))
-    cb.write_jsonl(out_path, rows)
+    manifest.count(added=added, duplicated=dup, total=len(rows), queries=len(queries))
+    for f in failures:
+        manifest.fail(**f)
+    manifest.output(out_path)
+    manifest.write(ns.out, budget)
     if failures:
         cb.write_json(os.path.join(ns.out, f"cases-{day_stamp}-failures.json"), failures)
 

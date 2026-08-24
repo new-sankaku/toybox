@@ -1,0 +1,7 @@
+# 分類ごとの日本語の提案語（自動発見 2026-08-24）。人が書いた語ではありません。
+# 実測値は log/discovery-jp-20260824.json にあります。
+# categories.yaml へは自動反映しません。採否は人が決めます。
+categories:
+  - id: billing
+    label: 請求・経理
+    proposed_terms: ["確定申告", "フリーランス", "強化学習", "情シス", "notion", "mcp"]
