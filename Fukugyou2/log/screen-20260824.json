@@ -1,0 +1,3044 @@
+{
+ "summary": {
+  "screened_on": "2026-08-24",
+  "cases_file": "cases-20260824.jsonl",
+  "pricing_file": "pricing-20260824.jsonl",
+  "n_cases": 123,
+  "n_pricing_fetched": 38,
+  "axes_met_histogram": {
+   "0": 44,
+   "1": 54,
+   "2": 19,
+   "3": 5,
+   "4": 1
+  },
+  "condition_hits": {
+   "ai_machine_core": 44,
+   "stock_subscription_word": 30,
+   "b2b_business_object": 19,
+   "ai_repetitive_target": 18,
+   "proof_money_number": 10,
+   "stock_pricing_page": 3,
+   "b2b_workflow_word": 2
+  },
+  "category_hits": {
+   "booking": 12,
+   "doc_generation": 11,
+   "compliance": 10,
+   "billing": 9,
+   "data_plumbing": 5,
+   "contract": 2,
+   "field_ops": 1,
+   "hr": 1
+  },
+  "uncategorized": 80,
+  "exclude_marked": 6
+ },
+ "axes": {
+  "stock": {
+   "label": "Stock性（継続課金の型か）",
+   "conditions_required": 1
+  },
+  "ai": {
+   "label": "AI自動化性（提供の中核を機械が回せるか）",
+   "conditions_required": 1
+  },
+  "proof": {
+   "label": "証拠性（出所つきの数字があるか）",
+   "conditions_required": 1
+  },
+  "b2b": {
+   "label": "法人が払うか",
+   "conditions_required": 1
+  }
+ },
+ "items": [
+  {
+   "case_id": "hn:47536761",
+   "kind": "product",
+   "title": "Show HN: I put an AI agent on a $7/month VPS with IRC as its transport layer",
+   "url": "https://georgelarson.me/writing/2026-03-23-nullclaw-doorman/",
+   "discussion_url": "https://news.ycombinator.com/item?id=47536761",
+   "points": 340,
+   "created_at": "2026-03-26T22:41:25Z",
+   "categories": [
+    "billing",
+    "booking"
+   ],
+   "axes_met": [
+    "stock",
+    "ai",
+    "proof",
+    "b2b"
+   ],
+   "axes_met_count": 4,
+   "matched": [
+    "stock_subscription_word",
+    "ai_machine_core",
+    "ai_repetitive_target",
+    "proof_money_number",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 2,
+    "proof": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "ow HN: I put an AI agent on a $7/month VPS with IRC as its transport",
+    "ai_machine_core": "(ironclaw) handles email and scheduling, reachable only over Tails",
+    "ai_repetitive_target": "rivate one (ironclaw) handles email and scheduling, reachable onl",
+    "proof_money_number": "ow HN: I put an AI agent on a $7/month VPS with IRC as its tra",
+    "b2b_business_object": "re&#x27;s one API key and one billing relationship regardless of wh"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:31210680",
+   "kind": "product",
+   "title": "Show HN: Radiopaper – Troll-resistant public conversations",
+   "url": "https://radiopaper.com/explore",
+   "discussion_url": "https://news.ycombinator.com/item?id=31210680",
+   "points": 346,
+   "created_at": "2022-04-29T21:18:47Z",
+   "categories": [],
+   "axes_met": [
+    "stock",
+    "ai",
+    "proof"
+   ],
+   "axes_met_count": 3,
+   "matched": [
+    "stock_subscription_word",
+    "ai_repetitive_target",
+    "proof_money_number"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 1,
+    "proof": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "from the smattering of other SaaS offerings we use: Sentry, Mix",
+    "ai_repetitive_target": "t with Radiopaper entirely by email, and never log-in interactive",
+    "proof_money_number": "r overall burn rate is around $40&#x2F;month, mostly from the s"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:35764635",
+   "kind": "product",
+   "title": "Show HN: PySaaS – Python SaaS starter kit",
+   "url": "https://pysaas.io",
+   "discussion_url": "https://news.ycombinator.com/item?id=35764635",
+   "points": 121,
+   "created_at": "2023-04-30T17:22:42Z",
+   "categories": [],
+   "axes_met": [
+    "stock",
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 3,
+   "matched": [
+    "stock_subscription_word",
+    "ai_machine_core",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "authentication, Lemon Squeezy subscription management (MoR removes a maj",
+    "ai_machine_core": "provide more opportunities to generate revenue and give value to cu",
+    "b2b_business_object": "nagement (MoR removes a major tax headache), Notion as a headle"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:46094552",
+   "kind": "product",
+   "title": "Show HN: ReadyKit – Superfast SaaS Starter with Multi-Tenant Workspaces",
+   "url": "https://readykit.dev/",
+   "discussion_url": "https://news.ycombinator.com/item?id=46094552",
+   "points": 121,
+   "created_at": "2025-11-30T07:18:15Z",
+   "categories": [
+    "billing",
+    "compliance",
+    "doc_generation"
+   ],
+   "axes_met": [
+    "stock",
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 3,
+   "matched": [
+    "stock_subscription_word",
+    "ai_machine_core",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "Show HN: ReadyKit – Superfast SaaS Starter with Multi-Tenant Wor",
+    "ai_machine_core": "5 minutes.<p>Features include automatic query scoping for workspace",
+    "b2b_business_object": "lti-tenant workspaces, Stripe billing, OAuth + MFA authentication,"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:40236637",
+   "kind": "product",
+   "title": "Show HN: I built a tool for repeatable checklists",
+   "url": "https://steplist.app/",
+   "discussion_url": "https://news.ycombinator.com/item?id=40236637",
+   "points": 117,
+   "created_at": "2024-05-02T14:21:59Z",
+   "categories": [
+    "booking"
+   ],
+   "axes_met": [
+    "stock",
+    "ai",
+    "proof"
+   ],
+   "axes_met_count": 3,
+   "matched": [
+    "stock_subscription_word",
+    "ai_machine_core",
+    "ai_repetitive_target",
+    "proof_money_number"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 2,
+    "proof": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "lists to be done once or on a recurring basis, with email reminders.<",
+    "ai_machine_core": "or mobile browser.<p>Flexible Scheduling: Set up lists to be done o",
+    "ai_repetitive_target": "or on a recurring basis, with email reminders.<p>Simple Delegatio",
+    "proof_money_number": "epList is free to use, with a $5&#x2F;month premium plan for u"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:41456371",
+   "kind": "product",
+   "title": "Show HN: Assertly – scriptable monitoring for infosec, IT, compliance, DevOps",
+   "url": "https://www.assertly.com",
+   "discussion_url": "https://news.ycombinator.com/item?id=41456371",
+   "points": 53,
+   "created_at": "2024-09-05T13:20:04Z",
+   "categories": [
+    "booking",
+    "compliance"
+   ],
+   "axes_met": [
+    "stock",
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 3,
+   "matched": [
+    "stock_subscription_word",
+    "ai_machine_core",
+    "ai_repetitive_target",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 2,
+    "b2b": 1
+   },
+   "evidence": {
+    "stock_subscription_word": ";&#x2F;celtra.com</a>), a B2B SaaS company, for over 10 years, f",
+    "ai_machine_core": "how HN: Assertly – scriptable monitoring for infosec, IT, complianc",
+    "ai_repetitive_target": "it is verified, it is done so manually and infrequently (e.g. quarte",
+    "b2b_business_object": "e monitoring for infosec, IT, compliance, DevOps \nscriptable monitorin"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:47736555",
+   "kind": "product",
+   "title": "I run multiple $10K MRR companies on a $20/month tech stack",
+   "url": "https://stevehanov.ca/blog/how-i-run-multiple-10k-mrr-companies-on-a-20month-tech-stack",
+   "discussion_url": "https://news.ycombinator.com/item?id=47736555",
+   "points": 980,
+   "created_at": "2026-04-12T06:00:00Z",
+   "categories": [],
+   "axes_met": [
+    "stock",
+    "proof"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_subscription_word",
+    "stock_pricing_page",
+    "proof_money_number"
+   ],
+   "by_axis": {
+    "stock": 2,
+    "proof": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "tiple $10K MRR companies on a $20/month tech stack",
+    "stock_pricing_page": "I run multiple $10K MRR companies on a $20/month tech stack | Steve Hanov&#39;s Blog I k",
+    "proof_money_number": "I run multiple $10K MRR companies on a $20/month"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:41465735",
+   "kind": "product",
+   "title": "Show HN: Wealthfolio: Private, open-source investment tracker",
+   "url": "https://wealthfolio.app",
+   "discussion_url": "https://news.ycombinator.com/item?id=41465735",
+   "points": 924,
+   "created_at": "2024-09-06T12:56:15Z",
+   "categories": [
+    "data_plumbing"
+   ],
+   "axes_met": [
+    "stock",
+    "ai"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_subscription_word",
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "y own needs. Getting tired of SaaS app subscriptions and privacy",
+    "ai_repetitive_target": "ow, the activities are logged manually or imported from a CSV file."
+   },
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:25929259",
+   "kind": "product",
+   "title": "My 2 Year Journey to $10K MRR",
+   "url": "https://www.bannerbear.com/journey-to-10k-mrr/",
+   "discussion_url": "https://news.ycombinator.com/item?id=25929259",
+   "points": 654,
+   "created_at": "2021-01-27T15:22:19Z",
+   "categories": [],
+   "axes_met": [
+    "stock",
+    "proof"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_subscription_word",
+    "stock_pricing_page",
+    "proof_money_number"
+   ],
+   "by_axis": {
+    "stock": 2,
+    "proof": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "My 2 Year Journey to $10K MRR",
+    "stock_pricing_page": "expectation on pricing was around $5 to $10 per month, it seemed. For me it was not the right",
+    "proof_money_number": "My 2 Year Journey to $10K MRR"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:36860898",
+   "kind": "product",
+   "title": "Show HN: Invoice Dragon – An open source app to create PDF invoices",
+   "url": "https://invoicedragon.com/",
+   "discussion_url": "https://news.ycombinator.com/item?id=36860898",
+   "points": 564,
+   "created_at": "2023-07-25T11:45:06Z",
+   "categories": [
+    "billing"
+   ],
+   "axes_met": [
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "ai_repetitive_target",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "ai": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "ai_repetitive_target": "An open source app to create PDF invoices \nAn open source app",
+    "b2b_business_object": "Show HN: Invoice Dragon – An open source app t"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:46454693",
+   "kind": "product",
+   "title": "Show HN: OpenWorkers – Self-hosted Cloudflare workers in Rust",
+   "url": "https://openworkers.com/introducing-openworkers",
+   "discussion_url": "https://news.ycombinator.com/item?id=46454693",
+   "points": 500,
+   "created_at": "2026-01-01T15:09:06Z",
+   "categories": [
+    "booking"
+   ],
+   "axes_met": [
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "ai_machine_core",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "ai": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "ai_machine_core": "es bindings, S3&#x2F;R2, cron scheduling, crypto.subtle.<p>Self-hos",
+    "b2b_business_object": "DX as Cloudflare Workers, no vendor lock-in.<p>What works today:"
+   },
+   "exclude_marks": [
+    "crypto"
+   ],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:34897645",
+   "kind": "product",
+   "title": "Show HN: We’re open-sourcing our session replay tool",
+   "url": "https://github.com/highlight/highlight",
+   "discussion_url": "https://news.ycombinator.com/item?id=34897645",
+   "points": 408,
+   "created_at": "2023-02-22T16:02:26Z",
+   "categories": [
+    "billing"
+   ],
+   "axes_met": [
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "ai_machine_core",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "ai": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "ai_machine_core": "), a session replay and error monitoring tool. Highlight.io gives y",
+    "b2b_business_object": "ployment, similar to gitlab’s billing model, and thoughts from the"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:22306996",
+   "kind": "product",
+   "title": "Show HN: Autocode – Automatically generate API code for SaaS apps",
+   "url": "https://autocode.com/",
+   "discussion_url": "https://news.ycombinator.com/item?id=22306996",
+   "points": 247,
+   "created_at": "2020-02-12T08:29:00Z",
+   "categories": [],
+   "axes_met": [
+    "stock",
+    "ai"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_subscription_word",
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "tically generate API code for SaaS apps \nAutomatically generate",
+    "ai_machine_core": "HN: Autocode – Automatically generate API code for SaaS apps \nAuto"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:40432213",
+   "kind": "product",
+   "title": "Show HN: Openpanel – An open-source alternative to Mixpanel",
+   "url": "https://github.com/Openpanel-dev/openpanel",
+   "discussion_url": "https://news.ycombinator.com/item?id=40432213",
+   "points": 244,
+   "created_at": "2024-05-21T18:43:50Z",
+   "categories": [
+    "billing"
+   ],
+   "axes_met": [
+    "proof",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "proof_money_number",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "proof": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "proof_money_number": "pps, but the last invoice was $300, which was way over my budget.",
+    "b2b_business_object": "act Native apps, but the last invoice was $300, which was way over"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:46955712",
+   "kind": "product",
+   "title": "Show HN: I built a macOS tool for network engineers – it's called NetViews",
+   "url": "https://www.netviews.app",
+   "discussion_url": "https://news.ycombinator.com/item?id=46955712",
+   "points": 243,
+   "created_at": "2026-02-10T05:20:32Z",
+   "categories": [],
+   "axes_met": [
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "ai_machine_core",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "ai": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "ai_machine_core": "but for discovery and ongoing monitoring, I kept bouncing between t",
+    "b2b_business_object": "vice on your subnet (IP, MAC, vendor, open ports).\n* Fast scans us"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:32540478",
+   "kind": "failure",
+   "title": "I Reached $4k/Mo. But How Many Great Startup Ideas Have Died?",
+   "url": "https://microfounder.com/blog/no",
+   "discussion_url": "https://news.ycombinator.com/item?id=32540478",
+   "points": 205,
+   "created_at": "2022-08-21T14:22:48Z",
+   "categories": [],
+   "axes_met": [
+    "stock",
+    "proof"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_pricing_page",
+    "proof_money_number"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "proof": 1
+   },
+   "evidence": {
+    "stock_pricing_page": "Startup Ideas Have Died? I just reached $4,000/month with my internet startup as a solo deve",
+    "proof_money_number": "I Reached $4k/Mo. But How Many Great Startu"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:46130260",
+   "kind": "product",
+   "title": "Show HN: HCB Mobile – financial app built by 17 y/o, processing $6M/month",
+   "url": "https://hackclub.com/fiscal-sponsorship/mobile/",
+   "discussion_url": "https://news.ycombinator.com/item?id=46130260",
+   "points": 176,
+   "created_at": "2025-12-03T04:20:44Z",
+   "categories": [
+    "compliance"
+   ],
+   "axes_met": [
+    "proof",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "proof_money_number",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "proof": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "proof_money_number": "p built by 17 y/o, processing $6M/month \nfinancial app built by",
+    "b2b_business_object": "est case recordings, and also compliance checks.<p>Even after securing"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:30767084",
+   "kind": "product",
+   "title": "Show HN: BoxyHQ – open-source alternative to Auth0/WorkOS",
+   "url": "https://boxyhq.com/",
+   "discussion_url": "https://news.ycombinator.com/item?id=30767084",
+   "points": 176,
+   "created_at": "2022-03-22T15:16:28Z",
+   "categories": [
+    "compliance"
+   ],
+   "axes_met": [
+    "stock",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_subscription_word",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "te enterprise features in any SaaS app with just a few lines of",
+    "b2b_business_object": "de SAML Single Sign-On (SSO), Audit logs, with more to come :)<p>"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:32376672",
+   "kind": "product",
+   "title": "Micro-SaaS Alternatives to BigTech/VC",
+   "url": "https://microfounder.com/alternatives",
+   "discussion_url": "https://news.ycombinator.com/item?id=32376672",
+   "points": 151,
+   "created_at": "2022-08-07T14:19:41Z",
+   "categories": [],
+   "axes_met": [
+    "stock",
+    "proof"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_subscription_word",
+    "proof_money_number"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "proof": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "use Tally (by two devs, $14K MRR) instead of Typeform ($190M f",
+    "proof_money_number": "u can use Tally (by two devs, $14K MRR) instead of Typeform ($19"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:42704160",
+   "kind": "product",
+   "title": "Show HN: Simplex: Automate browser workflows using code and natural language",
+   "url": "https://www.simplex.sh/playground",
+   "discussion_url": "https://news.ycombinator.com/item?id=42704160",
+   "points": 147,
+   "created_at": "2025-01-14T21:30:14Z",
+   "categories": [
+    "contract"
+   ],
+   "axes_met": [
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "ai_machine_core",
+    "b2b_workflow_word"
+   ],
+   "by_axis": {
+    "ai": 1,
+    "b2b": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: Simplex: Automate browser workflows using code",
+    "b2b_workflow_word": "f it failed at step 20 of our workflow.<p>So we built a vision-based"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:31098065",
+   "kind": "failure",
+   "title": "Show HN: Two-way Jira sync in a collaborative spreadsheet and Gantt",
+   "url": "https://www.visor.us/landing/visor-for-jira-launch",
+   "discussion_url": "https://news.ycombinator.com/item?id=31098065",
+   "points": 116,
+   "created_at": "2022-04-20T15:11:19Z",
+   "categories": [
+    "data_plumbing"
+   ],
+   "axes_met": [
+    "stock",
+    "ai"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_subscription_word",
+    "ai_machine_core",
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 2
+   },
+   "evidence": {
+    "stock_subscription_word": "x2F; Salesforce &#x2F; insert SaaS app}.<p>When we followed this",
+    "ai_machine_core": "Show HN: Two-way Jira sync in a collaborative spreadshee",
+    "ai_repetitive_target": "Jira sync in a collaborative spreadsheet and Gantt \nway Jira sync in a"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:46557823",
+   "kind": "product",
+   "title": "Show HN: EuConform – Offline-first EU AI Act compliance tool (open source)",
+   "url": "https://github.com/Hiepler/EuConform",
+   "discussion_url": "https://news.ycombinator.com/item?id=46557823",
+   "points": 71,
+   "created_at": "2026-01-09T19:11:57Z",
+   "categories": [
+    "compliance"
+   ],
+   "axes_met": [
+    "ai",
+    "b2b"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "ai_machine_core",
+    "ai_repetitive_target",
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "ai": 2,
+    "b2b": 1
+   },
+   "evidence": {
+    "ai_machine_core": "EU AI Act\nrequirements can be translated into concrete, inspectable",
+    "ai_repetitive_target": "– automatic Annex IV–oriented PDF reports\n– no cloud services o",
+    "b2b_business_object": "orm – Offline-first EU AI Act compliance tool (open source) \nOffline-f"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:48595882",
+   "kind": "product",
+   "title": "Show HN: Write SaaS apps where users control where their data is stored",
+   "url": "https://github.com/wolfoo2931/linkedrecords/",
+   "discussion_url": "https://news.ycombinator.com/item?id=48595882",
+   "points": 70,
+   "created_at": "2026-06-19T07:37:14Z",
+   "categories": [],
+   "axes_met": [
+    "stock",
+    "ai"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_subscription_word",
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "Show HN: Write SaaS apps where users control wher",
+    "ai_machine_core": "n (no captions on figures, no automatic heading numbering, slow whe"
+   },
+   "exclude_marks": [
+    "crypto"
+   ],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:26025254",
+   "kind": "product",
+   "title": "Show HN: TurnShift, I turned an Algolia internal scheduling tool into a SaaS",
+   "url": "https://turnshift.app/",
+   "discussion_url": "https://news.ycombinator.com/item?id=26025254",
+   "points": 49,
+   "created_at": "2021-02-04T13:47:40Z",
+   "categories": [
+    "booking"
+   ],
+   "axes_met": [
+    "stock",
+    "ai"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_subscription_word",
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "ai": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "ternal scheduling tool into a SaaS",
+    "ai_machine_core": "I turned an Algolia internal scheduling tool into a SaaS"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:22569074",
+   "kind": "product",
+   "title": "I started $10K MRR business – Print My City story",
+   "url": "https://oyestartups.com/interviews/how-to-start-a-printing-business",
+   "discussion_url": "https://news.ycombinator.com/item?id=22569074",
+   "points": 46,
+   "created_at": "2020-03-13T17:22:12Z",
+   "categories": [],
+   "axes_met": [
+    "stock",
+    "proof"
+   ],
+   "axes_met_count": 2,
+   "matched": [
+    "stock_subscription_word",
+    "proof_money_number"
+   ],
+   "by_axis": {
+    "stock": 1,
+    "proof": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "I started $10K MRR business – Print My City stor",
+    "proof_money_number": "I started $10K MRR business – Print My City"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:37326870",
+   "kind": "product",
+   "title": "Show HN: I automated half of my typing",
+   "url": "https://github.com/eschluntz/compress",
+   "discussion_url": "https://news.ycombinator.com/item?id=37326870",
+   "points": 815,
+   "created_at": "2023-08-30T18:40:52Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "this for about a year now - I parsed 6 months of my messages on s"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:40837610",
+   "kind": "product",
+   "title": "Show HN: Drop-in SQS replacement based on SQLite",
+   "url": "https://github.com/poundifdef/SmoothMQ",
+   "discussion_url": "https://news.ycombinator.com/item?id=40837610",
+   "points": 656,
+   "created_at": "2024-06-30T15:11:08Z",
+   "categories": [
+    "booking"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "lls and whistles - searching, scheduling into the future, observabi"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:47224295",
+   "kind": "product",
+   "title": "Show HN: I built a sub-500ms latency voice agent from scratch",
+   "url": "https://www.ntik.me/posts/voice-agent",
+   "discussion_url": "https://news.ycombinator.com/item?id=47224295",
+   "points": 570,
+   "created_at": "2026-03-02T21:23:40Z",
+   "categories": [
+    "doc_generation"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "you need semantic end-of-turn detection.<p>The system reduces to o"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:42585009",
+   "kind": "product",
+   "title": "Show HN: I completed shipping my desktop app",
+   "url": "https://pimosa.app/",
+   "discussion_url": "https://news.ycombinator.com/item?id=42585009",
+   "points": 526,
+   "created_at": "2025-01-03T12:20:27Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "aily, and it has surprisingly generated a few thousand dollars for"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:36365511",
+   "kind": "product",
+   "title": "Show HN: 77 Year old launches SaaS platform today. Seeks feedback",
+   "url": "https://propbox.co",
+   "discussion_url": "https://news.ycombinator.com/item?id=36365511",
+   "points": 520,
+   "created_at": "2023-06-16T23:45:25Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "Show HN: 77 Year old launches SaaS platform today. Seeks feedbac"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:44526015",
+   "kind": "product",
+   "title": "Show HN: Pangolin – Open source alternative to Cloudflare Tunnels",
+   "url": "https://github.com/fosrl/pangolin",
+   "discussion_url": "https://news.ycombinator.com/item?id=44526015",
+   "points": 500,
+   "created_at": "2025-07-10T21:50:43Z",
+   "categories": [
+    "doc_generation"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core",
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "ai": 2
+   },
+   "evidence": {
+    "ai_machine_core": "oT and edge devices for field monitoring\n\n  - Bring localhost onlin",
+    "ai_repetitive_target": "pecific pin codes, passwords, email OTP\n\n  - Self-destructing sha"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:38316936",
+   "kind": "product",
+   "title": "Show HN: Open-source tool for creating courses like Duolingo",
+   "url": "https://uneebee.com",
+   "discussion_url": "https://news.ycombinator.com/item?id=38316936",
+   "points": 459,
+   "created_at": "2023-11-18T08:28:27Z",
+   "categories": [
+    "hr"
+   ],
+   "axes_met": [
+    "b2b"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "b2b": 1
+   },
+   "evidence": {
+    "b2b_business_object": "this is going to be great for onboarding and internal training.<p>- Ed"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:38507446",
+   "kind": "failure",
+   "title": "Report Phone Spam – Shut down robocallers and text spammers",
+   "url": "https://reportphonespam.org/",
+   "discussion_url": "https://news.ycombinator.com/item?id=38507446",
+   "points": 407,
+   "created_at": "2023-12-03T14:49:51Z",
+   "categories": [
+    "doc_generation"
+   ],
+   "axes_met": [
+    "b2b"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "b2b_workflow_word"
+   ],
+   "by_axis": {
+    "b2b": 1
+   },
+   "evidence": {
+    "b2b_workflow_word": "Report Phone Spam – Shut down roboca"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:34343122",
+   "kind": "product",
+   "title": "Show HN: Val Town – A Cloud Scripting Site",
+   "url": "https://www.val.town/",
+   "discussion_url": "https://news.ycombinator.com/item?id=34343122",
+   "points": 332,
+   "created_at": "2023-01-11T19:18:28Z",
+   "categories": [
+    "booking",
+    "data_plumbing"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core",
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "ai": 2
+   },
+   "evidence": {
+    "ai_machine_core": "run it, get its API endpoint, schedule it - all from the browser, i",
+    "ai_repetitive_target": "ing tool.<p>We added `console.email` to the runtime to make it in"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:47337607",
+   "kind": "product",
+   "title": "Show HN: I built a tool that watches webpages and exposes changes as RSS",
+   "url": "https://sitespy.app",
+   "discussion_url": "https://news.ycombinator.com/item?id=47337607",
+   "points": 320,
+   "created_at": "2026-03-11T16:21:06Z",
+   "categories": [
+    "booking"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core",
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "ai": 2
+   },
+   "evidence": {
+    "ai_machine_core": "nd interesting is that it can monitor a specific element on a page,",
+    "ai_repetitive_target": "r AI agents<p>- Browser push, Email, and Telegram notifications<p"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:41389176",
+   "kind": "product",
+   "title": "Show HN: Homemade automated solar concentrator",
+   "url": "https://github.com/remipch/solar_concentrator",
+   "discussion_url": "https://news.ycombinator.com/item?id=41389176",
+   "points": 296,
+   "created_at": "2024-08-29T10:14:00Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: Homemade automated solar concentrator \nHi HN!<"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:26899066",
+   "kind": "product",
+   "title": "Show HN: I built a tool to generate triangulated art from images",
+   "url": "https://github.com/RH12503/Triangula",
+   "discussion_url": "https://news.ycombinator.com/item?id=26899066",
+   "points": 296,
+   "created_at": "2021-04-22T05:25:57Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: I built a tool to generate triangulated art from images"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:22483436",
+   "kind": "product",
+   "title": "Show HN: Monitoror – Unified monitoring wallboard",
+   "url": "https://monitoror.com",
+   "discussion_url": "https://news.ycombinator.com/item?id=22483436",
+   "points": 295,
+   "created_at": "2020-03-04T13:13:23Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: Monitoror – Unified monitoring wallbo"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:41764635",
+   "kind": "product",
+   "title": "Show HN: Visualization of website accessibility tree",
+   "url": "https://chromewebstore.google.com/detail/aria-devtools/dneemiigcbbgbdjlcdjjnianlikimpck",
+   "discussion_url": "https://news.ycombinator.com/item?id=41764635",
+   "points": 272,
+   "created_at": "2024-10-07T10:38:36Z",
+   "categories": [
+    "compliance"
+   ],
+   "axes_met": [
+    "b2b"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "b2b": 1
+   },
+   "evidence": {
+    "b2b_business_object": "pened to work on our app WCAG compliance for a few months at the time"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:42145419",
+   "kind": "product",
+   "title": "Show HN: OnAir – create link, receive calls",
+   "url": "https://onair.io/",
+   "discussion_url": "https://news.ycombinator.com/item?id=42145419",
+   "points": 263,
+   "created_at": "2024-11-15T09:58:11Z",
+   "categories": [
+    "doc_generation"
+   ],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "ivation behind it: One of our SaaS products was struggling to gr"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:46316968",
+   "kind": "product",
+   "title": "Show HN: TinyPDF – 3kb pdf library (70x smaller than jsPDF)",
+   "url": "https://github.com/Lulzx/tinypdf",
+   "discussion_url": "https://news.ycombinator.com/item?id=46316968",
+   "points": 253,
+   "created_at": "2025-12-18T18:59:33Z",
+   "categories": [
+    "billing"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core",
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "ai": 2
+   },
+   "evidence": {
+    "ai_machine_core": "ller than jsPDF) \nI needed to generate invoices in a Node.js app. j",
+    "ai_repetitive_target": "Show HN: TinyPDF – 3kb pdf library (70x smaller than jsP"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:24261192",
+   "kind": "product",
+   "title": "Making money building Shopify micro-SaaS apps",
+   "url": "https://www.preetamnath.com/blog/building-your-first-micro-saas-app-on-shopify",
+   "discussion_url": "https://news.ycombinator.com/item?id=24261192",
+   "points": 247,
+   "created_at": "2020-08-24T14:47:40Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "money building Shopify micro-SaaS apps"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:46220794",
+   "kind": "product",
+   "title": "Show HN: Automated license plate reader coverage in the USA",
+   "url": "https://alpranalysis.com",
+   "discussion_url": "https://news.ycombinator.com/item?id=46220794",
+   "points": 239,
+   "created_at": "2025-12-10T17:42:30Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "based on a Rust codebase that parses the latest ALPR reports from"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:42200099",
+   "kind": "product",
+   "title": "Show HN: We open-sourced our compost monitoring tech",
+   "url": "https://github.com/gtls64/MontyHome-Hackers-Guide",
+   "discussion_url": "https://news.ycombinator.com/item?id=42200099",
+   "points": 236,
+   "created_at": "2024-11-21T01:30:07Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core",
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "ai": 2
+   },
+   "evidence": {
+    "ai_machine_core": ": We open-sourced our compost monitoring tech \nsourced our compost",
+    "ai_repetitive_target": "p>All data can be exported as CSV files for analysis. While it’"
+   },
+   "exclude_marks": [
+    "hardware"
+   ],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:28917184",
+   "kind": "product",
+   "title": "How to Create a SaaS and Compete with the Big Players as a Solo Founder",
+   "url": "https://www.mikealche.com/product-development/an-underdog-guide-to-creating-alternative-in-markets",
+   "discussion_url": "https://news.ycombinator.com/item?id=28917184",
+   "points": 233,
+   "created_at": "2021-10-19T12:04:54Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "How to Create a SaaS and Compete with the Big Play"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:18004270",
+   "kind": "product",
+   "title": "Show HN: My new SaaS side-project, after years of open source",
+   "url": "https://news.ycombinator.com/item?id=18004270",
+   "discussion_url": "https://news.ycombinator.com/item?id=18004270",
+   "points": 229,
+   "created_at": "2018-09-17T09:09:52Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "Show HN: My new SaaS side-project, after years of"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:41048196",
+   "kind": "product",
+   "title": "Show HN: I built a tool to expand your network (that introverts will love)",
+   "url": "https://www.moreoverlap.com/",
+   "discussion_url": "https://news.ycombinator.com/item?id=41048196",
+   "points": 229,
+   "created_at": "2024-07-23T16:50:05Z",
+   "categories": [
+    "doc_generation"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_repetitive_target": "hanced the system to focus on email introductions. Here’s how it"
+   },
+   "exclude_marks": [
+    "consumer_only"
+   ],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:39027543",
+   "kind": "product",
+   "title": "Show HN: Htmldocs – Typeset and generate pdfs with HTML/CSS",
+   "url": "https://htmldocs.com",
+   "discussion_url": "https://news.ycombinator.com/item?id=39027543",
+   "points": 226,
+   "created_at": "2024-01-17T13:44:01Z",
+   "categories": [
+    "billing"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core",
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "ai": 2
+   },
+   "evidence": {
+    "ai_machine_core": "ow HN: Htmldocs – Typeset and generate pdfs with HTML/CSS \nTypeset",
+    "ai_repetitive_target": "he rendered HTML document and PDF.<p>Will also consider open so"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:29288618",
+   "kind": "product",
+   "title": "Show HN: Cleanvoice – Automated Podcast Editing",
+   "url": "https://cleanvoice.ai",
+   "discussion_url": "https://news.ycombinator.com/item?id=29288618",
+   "points": 221,
+   "created_at": "2021-11-20T14:58:24Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: Cleanvoice – Automated Podcast Editing \nAutomated"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:41585468",
+   "kind": "product",
+   "title": "Show HN: I've Built an Accounting System",
+   "url": "https://github.com/denys-olleik/accounting",
+   "discussion_url": "https://news.ycombinator.com/item?id=41585468",
+   "points": 214,
+   "created_at": "2024-09-18T21:04:55Z",
+   "categories": [
+    "billing"
+   ],
+   "axes_met": [
+    "b2b"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "b2b": 1
+   },
+   "evidence": {
+    "b2b_business_object": "Show HN: I've Built an Accounting System \nIt can create invoice"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:22607402",
+   "kind": "product",
+   "title": "Show HN: WorkOS – APIs for enterprise features like SSO/SAML",
+   "url": "https://workos.com/",
+   "discussion_url": "https://news.ycombinator.com/item?id=22607402",
+   "points": 205,
+   "created_at": "2020-03-17T17:24:13Z",
+   "categories": [],
+   "axes_met": [
+    "b2b"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "b2b": 1
+   },
+   "evidence": {
+    "b2b_business_object": "Show HN: WorkOS – APIs for enterprise features like SSO/SAML \nAPIs"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:32894429",
+   "kind": "product",
+   "title": "Show HN: Distributed JMAP and IMAP Servers in Rust",
+   "url": "https://github.com/stalwartlabs/jmap-server",
+   "discussion_url": "https://news.ycombinator.com/item?id=32894429",
+   "points": 190,
+   "created_at": "2022-09-19T04:57:16Z",
+   "categories": [
+    "compliance"
+   ],
+   "axes_met": [
+    "b2b"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "b2b": 1
+   },
+   "evidence": {
+    "b2b_business_object": "and JMAP over WebSocket full compliance.\n- IMAP4 rev2&#x2F;1 support"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:31975730",
+   "kind": "product",
+   "title": "The New American Micro-SaaS Dream",
+   "url": "https://microfounder.com/blog/american-micro-saas-dream",
+   "discussion_url": "https://news.ycombinator.com/item?id=31975730",
+   "points": 189,
+   "created_at": "2022-07-04T11:00:56Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "The New American Micro-SaaS Dream"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:31364983",
+   "kind": "failure",
+   "title": "Show HN: Fruits – Sell digital products via your website, newsletter, etc",
+   "url": "https://fruits.de/en",
+   "discussion_url": "https://news.ycombinator.com/item?id=31364983",
+   "points": 185,
+   "created_at": "2022-05-13T09:01:56Z",
+   "categories": [
+    "billing",
+    "doc_generation"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "r you, and this is completely automated.<p>What do you think? We ar"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:32935506",
+   "kind": "product",
+   "title": "Show HN: Rocketry – Statement-based scheduling framework for Python",
+   "url": "https://github.com/Miksus/rocketry",
+   "discussion_url": "https://news.ycombinator.com/item?id=32935506",
+   "points": 168,
+   "created_at": "2022-09-22T06:44:30Z",
+   "categories": [
+    "booking"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "N: Rocketry – Statement-based scheduling framework for Python \nStat"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:39192304",
+   "kind": "product",
+   "title": "Show HN: Open SaaS – An open-source alternative to paid boilerplate starters",
+   "url": "https://github.com/wasp-lang/open-saas",
+   "discussion_url": "https://news.ycombinator.com/item?id=39192304",
+   "points": 163,
+   "created_at": "2024-01-30T16:48:22Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "Show HN: Open SaaS – An open-source alternative"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:36225239",
+   "kind": "product",
+   "title": "Show HN: Homelab Monitoring Setup with Grafana",
+   "url": "https://blog.randombits.host/monitoring-self-hosted-services/",
+   "discussion_url": "https://news.ycombinator.com/item?id=36225239",
+   "points": 155,
+   "created_at": "2023-06-07T10:52:47Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: Homelab Monitoring Setup with Grafana"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:43445720",
+   "kind": "product",
+   "title": "Show HN: FastOpenAPI – automated docs for many Python frameworks",
+   "url": "https://github.com/mr-fatalyst/fastopenapi",
+   "discussion_url": "https://news.ycombinator.com/item?id=43445720",
+   "points": 153,
+   "created_at": "2025-03-22T14:10:30Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: FastOpenAPI – automated docs for many Python framew"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:39973150",
+   "kind": "product",
+   "title": "Show HN: Shorebird 1.0, Flutter Code Push",
+   "url": "https://github.com/shorebirdtech/shorebird",
+   "discussion_url": "https://news.ycombinator.com/item?id=39973150",
+   "points": 153,
+   "created_at": "2024-04-08T20:01:45Z",
+   "categories": [
+    "compliance"
+   ],
+   "axes_met": [
+    "b2b"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "b2b": 1
+   },
+   "evidence": {
+    "b2b_business_object": "custom interpreter (for store compliance).  But it works!  Our beta ha"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:47376584",
+   "kind": "product",
+   "title": "Show HN: GitAgent – An open standard that turns any Git repo into an AI agent",
+   "url": "https://www.gitagent.sh/",
+   "discussion_url": "https://news.ycombinator.com/item?id=47376584",
+   "points": 147,
+   "created_at": "2026-03-14T13:41:25Z",
+   "categories": [
+    "compliance"
+   ],
+   "axes_met": [
+    "b2b"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "b2b_business_object"
+   ],
+   "by_axis": {
+    "b2b": 1
+   },
+   "evidence": {
+    "b2b_business_object": "uman reviews before merge)\n4. Audit trail via git blame and git d"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:41863398",
+   "kind": "product",
+   "title": "Show HN: Automated smooth Nth order derivatives of noisy data",
+   "url": "https://github.com/hugohadfield/kalmangrad",
+   "discussion_url": "https://news.ycombinator.com/item?id=41863398",
+   "points": 146,
+   "created_at": "2024-10-16T20:17:46Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: Automated smooth Nth order derivative"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:20797828",
+   "kind": "product",
+   "title": "Show HN: Base – API for authentication, email sending, images and more",
+   "url": "https://www.base-api.io",
+   "discussion_url": "https://news.ycombinator.com/item?id=20797828",
+   "points": 140,
+   "created_at": "2019-08-26T06:21:36Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_repetitive_target": "ase – API for authentication, email sending, images and more \nAPI"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:23734539",
+   "kind": "product",
+   "title": "How I grew my Shopify micro-SaaS",
+   "url": "https://www.preetamnath.com/blog/grow-shopify-micro-saas-to-25k-mrr-in-14-months",
+   "discussion_url": "https://news.ycombinator.com/item?id=23734539",
+   "points": 139,
+   "created_at": "2020-07-04T20:00:20Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "How I grew my Shopify micro-SaaS"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:25517226",
+   "kind": "product",
+   "title": "Show HN: Django and React SaaS boilerplate tutorial",
+   "url": "https://github.com/saasitive/django-react-boilerplate",
+   "discussion_url": "https://news.ycombinator.com/item?id=25517226",
+   "points": 135,
+   "created_at": "2020-12-23T13:09:35Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "Show HN: Django and React SaaS boilerplate tutorial"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:39160998",
+   "kind": "product",
+   "title": "Show HN: WAYF – A Simple Scheduling App",
+   "url": "https://wayf.vercel.app",
+   "discussion_url": "https://news.ycombinator.com/item?id=39160998",
+   "points": 122,
+   "created_at": "2024-01-27T23:39:58Z",
+   "categories": [
+    "booking"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: WAYF – A Simple Scheduling App \nA Simple Scheduling A"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:39508626",
+   "kind": "product",
+   "title": "Show HN: Free Certificate Monitoring via RSS",
+   "url": "https://raphting.dev/posts/monitor-rss/",
+   "discussion_url": "https://news.ycombinator.com/item?id=39508626",
+   "points": 120,
+   "created_at": "2024-02-26T07:51:35Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: Free Certificate Monitoring via RSS"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:21818323",
+   "kind": "product",
+   "title": "Show HN: SaaS application boilerplate",
+   "url": "https://github.com/saasforge/open-source-saas-boilerpate",
+   "discussion_url": "https://news.ycombinator.com/item?id=21818323",
+   "points": 107,
+   "created_at": "2019-12-17T20:21:02Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "Show HN: SaaS application boilerplate"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:46840558",
+   "kind": "product",
+   "title": "Brazilian Micro-SaaS Map",
+   "url": "https://saas-map.ssr.trapiche.cloud/",
+   "discussion_url": "https://news.ycombinator.com/item?id=46840558",
+   "points": 93,
+   "created_at": "2026-01-31T20:35:51Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "Brazilian Micro-SaaS Map"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:40457631",
+   "kind": "failure",
+   "title": "Show HN: Excel to Python Compiler",
+   "url": "https://pyoneer.ai?source=hn&utm_campaign=shn1",
+   "discussion_url": "https://news.ycombinator.com/item?id=40457631",
+   "points": 79,
+   "created_at": "2024-05-23T17:40:20Z",
+   "categories": [
+    "field_ops"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core",
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "ai": 2
+   },
+   "evidence": {
+    "ai_machine_core": "Excel file<p>2. We statically parse the Excel file and build a de",
+    "ai_repetitive_target": "Show HN: Excel to Python Compiler \nWe (me an"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:39358072",
+   "kind": "product",
+   "title": "Show HN: Statusduck – Website monitoring tool where the data is public",
+   "url": "https://statusduck.io/",
+   "discussion_url": "https://news.ycombinator.com/item?id=39358072",
+   "points": 78,
+   "created_at": "2024-02-13T14:49:24Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: Statusduck – Website monitoring tool where the data is pub"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:41124112",
+   "kind": "product",
+   "title": "Show HN: Non SaaS – Directory of Non SaaS Apps",
+   "url": "https://nonsaas.com",
+   "discussion_url": "https://news.ycombinator.com/item?id=41124112",
+   "points": 76,
+   "created_at": "2024-07-31T22:19:18Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "Show HN: Non SaaS – Directory of Non SaaS Apps"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:19898568",
+   "kind": "product",
+   "title": "Show HN: Cloudmarker – Cloud monitoring tool and framework",
+   "url": "https://github.com/cloudmarker/cloudmarker",
+   "discussion_url": "https://news.ycombinator.com/item?id=19898568",
+   "points": 73,
+   "created_at": "2019-05-13T12:26:56Z",
+   "categories": [],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: Cloudmarker – Cloud monitoring tool and framework \nCloud"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:31098205",
+   "kind": "failure",
+   "title": "Show HN: DTL: a language and JavaScript lib to transform and manipulate data",
+   "url": "https://getdtl.org/",
+   "discussion_url": "https://news.ycombinator.com/item?id=31098205",
+   "points": 63,
+   "created_at": "2022-04-20T15:20:43Z",
+   "categories": [
+    "doc_generation"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core",
+    "ai_repetitive_target"
+   ],
+   "by_axis": {
+    "ai": 2
+   },
+   "evidence": {
+    "ai_machine_core": "useful to me I felt I had to extract it and make it usable to ever",
+    "ai_repetitive_target": "you to slice, dice and remap csv, yaml, json or even plaintext"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:49037971",
+   "kind": "product",
+   "title": "Micro-SaaS Is Dead. Service With A Software Replaces It",
+   "url": "https://adriengonin.com/writing/service-with-a-software/",
+   "discussion_url": "https://news.ycombinator.com/item?id=49037971",
+   "points": 55,
+   "created_at": "2026-07-24T16:27:58Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "Micro-SaaS Is Dead. Service With A Softw"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:30310990",
+   "kind": "product",
+   "title": "Friends, come warm yourselves by the flaming wreckage of my micro-SaaS",
+   "url": "https://www.indiehackers.com/post/friends-come-warm-yourselves-by-the-flaming-wreckage-of-my-micro-saas-93d393b07f",
+   "discussion_url": "https://news.ycombinator.com/item?id=30310990",
+   "points": 51,
+   "created_at": "2022-02-12T08:23:15Z",
+   "categories": [],
+   "axes_met": [
+    "stock"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "stock_subscription_word"
+   ],
+   "by_axis": {
+    "stock": 1
+   },
+   "evidence": {
+    "stock_subscription_word": "flaming wreckage of my micro-SaaS"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:32296783",
+   "kind": "product",
+   "title": "Show HN: DevRaven – Monitoring for Developers",
+   "url": "https://www.devraven.io",
+   "discussion_url": "https://news.ycombinator.com/item?id=32296783",
+   "points": 46,
+   "created_at": "2022-07-31T16:46:53Z",
+   "categories": [
+    "compliance"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: DevRaven – Monitoring for Developers \nMonitoring"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:31855732",
+   "kind": "product",
+   "title": "Show HN: Nerd Crawler – monitoring original comic art sites so you don't have to",
+   "url": "https://www.nerdcrawler.com/",
+   "discussion_url": "https://news.ycombinator.com/item?id=31855732",
+   "points": 45,
+   "created_at": "2022-06-23T22:10:24Z",
+   "categories": [
+    "doc_generation"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "Show HN: Nerd Crawler – monitoring original comic"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:42194248",
+   "kind": "product",
+   "title": "Show HN: Postiz – open-source social media scheduling tool",
+   "url": "https://postiz.com/",
+   "discussion_url": "https://news.ycombinator.com/item?id=42194248",
+   "points": 42,
+   "created_at": "2024-11-20T14:37:50Z",
+   "categories": [
+    "booking"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "iz – open-source social media scheduling tool \nopen-source social m"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:44767304",
+   "kind": "product",
+   "title": "Show HN: NaturalCron – Human-Readable Scheduling for .NET (With Fluent Builder)",
+   "url": "https://github.com/hugoj0s3/NaturalCron",
+   "discussion_url": "https://news.ycombinator.com/item?id=44767304",
+   "points": 40,
+   "created_at": "2025-08-02T13:09:06Z",
+   "categories": [
+    "booking",
+    "doc_generation"
+   ],
+   "axes_met": [
+    "ai"
+   ],
+   "axes_met_count": 1,
+   "matched": [
+    "ai_machine_core"
+   ],
+   "by_axis": {
+    "ai": 1
+   },
+   "evidence": {
+    "ai_machine_core": "NaturalCron – Human-Readable Scheduling for .NET (With Fluent Buil"
+   },
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:33022768",
+   "kind": "failure",
+   "title": "Google is shutting down Stadia",
+   "url": "https://www.theverge.com/2022/9/29/23378713/google-stadia-shutting-down-game-streaming-january-2023",
+   "discussion_url": "https://news.ycombinator.com/item?id=33022768",
+   "points": 2090,
+   "created_at": "2022-09-29T16:17:10Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:18169243",
+   "kind": "failure",
+   "title": "Shutting Down Google+ for Consumers",
+   "url": "https://blog.google/technology/safety-security/project-strobe/",
+   "discussion_url": "https://news.ycombinator.com/item?id=18169243",
+   "points": 1613,
+   "created_at": "2018-10-08T17:14:39Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:23285466",
+   "kind": "failure",
+   "title": "Unable to deal with Chrome Extension Team, Kozmos is shutting down",
+   "url": "https://kodfabrik.com/journal/why-am-i-shutting-down-kozmos",
+   "discussion_url": "https://news.ycombinator.com/item?id=23285466",
+   "points": 1178,
+   "created_at": "2020-05-23T19:00:37Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:39476074",
+   "kind": "failure",
+   "title": "Vice website is shutting down",
+   "url": "https://writing.exchange/@ernie/111977450241144169",
+   "discussion_url": "https://news.ycombinator.com/item?id=39476074",
+   "points": 836,
+   "created_at": "2024-02-23T02:09:43Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:42433044",
+   "kind": "failure",
+   "title": "Lfgss shutting down 16th March 2025 (day before Online Safety Act is enforced)",
+   "url": "https://www.lfgss.com/conversations/401475/",
+   "discussion_url": "https://news.ycombinator.com/item?id=42433044",
+   "points": 798,
+   "created_at": "2024-12-16T17:18:08Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:35639370",
+   "kind": "failure",
+   "title": "Shutting down my legal torrent site after 17 years",
+   "url": "https://www.legittorrents.info/",
+   "discussion_url": "https://news.ycombinator.com/item?id=35639370",
+   "points": 749,
+   "created_at": "2023-04-20T13:09:13Z",
+   "categories": [
+    "contract"
+   ],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:36128082",
+   "kind": "failure",
+   "title": "Show HN: I open sourced the QR designer from my failed startup",
+   "url": "https://github.com/kochrt/qr-designer",
+   "discussion_url": "https://news.ycombinator.com/item?id=36128082",
+   "points": 711,
+   "created_at": "2023-05-30T17:53:00Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:43711957",
+   "kind": "failure",
+   "title": "Zoom outage caused by accidental 'shutting down' of the zoom.us domain",
+   "url": "https://status.zoom.us/incidents/pw9r9vnq5rvk",
+   "discussion_url": "https://news.ycombinator.com/item?id=43711957",
+   "points": 634,
+   "created_at": "2025-04-17T00:55:49Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:18654998",
+   "kind": "product",
+   "title": "Super Micro says review found no malicious chips in motherboards",
+   "url": "https://www.reuters.com/article/us-supermicro-chips/super-micro-says-review-found-no-malicious-chips-in-motherboards-idUSKBN1OA12R",
+   "discussion_url": "https://news.ycombinator.com/item?id=18654998",
+   "points": 629,
+   "created_at": "2018-12-11T12:58:51Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:44118023",
+   "kind": "product",
+   "title": "Show HN: I rewrote my Mac Electron app in Rust",
+   "url": "https://desktopdocs.com/?v=2025",
+   "discussion_url": "https://news.ycombinator.com/item?id=44118023",
+   "points": 597,
+   "created_at": "2025-05-28T16:53:11Z",
+   "categories": [
+    "data_plumbing",
+    "doc_generation"
+   ],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:38250459",
+   "kind": "failure",
+   "title": "Placemark is going open source and shutting down",
+   "url": "https://macwright.com/2023/11/13/placemark",
+   "discussion_url": "https://news.ycombinator.com/item?id=38250459",
+   "points": 565,
+   "created_at": "2023-11-13T14:28:53Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:42771676",
+   "kind": "failure",
+   "title": "I am (not) a failure: Lessons learned from six failed startup attempts",
+   "url": "http://blog.rongarret.info/2025/01/i-am-not-failure-lessons-learned-from.html",
+   "discussion_url": "https://news.ycombinator.com/item?id=42771676",
+   "points": 547,
+   "created_at": "2025-01-20T18:40:45Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:29664742",
+   "kind": "failure",
+   "title": "Twitter’s founder admits that shutting down the API was “worst thing we did”",
+   "url": "https://www.revyuh.com/news/software/developers/twitters-founder-admits-that-shutting-down-the-api-was-worst-thing-we-did-it-affected-users-and-developers/",
+   "discussion_url": "https://news.ycombinator.com/item?id=29664742",
+   "points": 523,
+   "created_at": "2021-12-23T18:24:12Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:42699099",
+   "kind": "failure",
+   "title": "Google’s OAuth login doesn’t protect against purchasing a failed startup domain",
+   "url": "https://trufflesecurity.com/blog/millions-at-risk-due-to-google-s-oauth-flaw",
+   "discussion_url": "https://news.ycombinator.com/item?id=42699099",
+   "points": 503,
+   "created_at": "2025-01-14T16:14:01Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:24850298",
+   "kind": "failure",
+   "title": "Quibi Is Shutting Down",
+   "url": "https://www.wsj.com/articles/quibi-weighs-shutting-down-as-problems-mount-11603301946",
+   "discussion_url": "https://news.ycombinator.com/item?id=24850298",
+   "points": 479,
+   "created_at": "2020-10-21T17:52:00Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:35641448",
+   "kind": "failure",
+   "title": "BuzzFeed News is shutting down",
+   "url": "https://www.thedailybeast.com/buzzfeed-news-is-shutting-down",
+   "discussion_url": "https://news.ycombinator.com/item?id=35641448",
+   "points": 444,
+   "created_at": "2023-04-20T15:18:25Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:28499910",
+   "kind": "product",
+   "title": "Show HN: Weather API for non-commercial use",
+   "url": "https://open-meteo.com/en/docs",
+   "discussion_url": "https://news.ycombinator.com/item?id=28499910",
+   "points": 443,
+   "created_at": "2021-09-12T10:18:31Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:32637996",
+   "kind": "product",
+   "title": "Show HN: I built a tool to help you read Hacker News on Kindle",
+   "url": "https://ktool.io/hacker-news-to-kindle",
+   "discussion_url": "https://news.ycombinator.com/item?id=32637996",
+   "points": 393,
+   "created_at": "2022-08-29T13:31:55Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:26443406",
+   "kind": "failure",
+   "title": "RethinkDB: why we failed (2017)",
+   "url": "https://www.defmacro.org/2017/01/18/why-rethinkdb-failed.html",
+   "discussion_url": "https://news.ycombinator.com/item?id=26443406",
+   "points": 362,
+   "created_at": "2021-03-13T02:41:03Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:21417965",
+   "kind": "product",
+   "title": "Show HN: Turn any website into an API (for those who miss Kimono)",
+   "url": "https://simplescraper.io/",
+   "discussion_url": "https://news.ycombinator.com/item?id=21417965",
+   "points": 332,
+   "created_at": "2019-11-01T12:19:38Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:42169998",
+   "kind": "failure",
+   "title": "We are shutting down Ondsel",
+   "url": "https://ondsel.com/blog/goodbye/",
+   "discussion_url": "https://news.ycombinator.com/item?id=42169998",
+   "points": 317,
+   "created_at": "2024-11-18T05:40:58Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:47652007",
+   "kind": "product",
+   "title": "Show HN: Real-time AI (audio/video in, voice out) on an M3 Pro with Gemma E2B",
+   "url": "https://github.com/fikrikarim/parlor",
+   "discussion_url": "https://news.ycombinator.com/item?id=47652007",
+   "points": 298,
+   "created_at": "2026-04-05T17:53:19Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:42417330",
+   "kind": "failure",
+   "title": "Show HN: Open-sourcing my failed startup Buzee – A file search application",
+   "url": "https://github.com/gsidhu/buzee-tauri",
+   "discussion_url": "https://news.ycombinator.com/item?id=42417330",
+   "points": 229,
+   "created_at": "2024-12-14T14:24:59Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:24148113",
+   "kind": "product",
+   "title": "Research Says Solo Founders Perform Better",
+   "url": "https://www.growthclub.online/post/research-says-solo-founders-perform-better-here-is-why",
+   "discussion_url": "https://news.ycombinator.com/item?id=24148113",
+   "points": 227,
+   "created_at": "2020-08-13T20:12:32Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:44837783",
+   "kind": "failure",
+   "title": "AI is impressive because we've failed at personal computing",
+   "url": "https://rakhim.exotext.com/ai-is-impressive-because-we-ve-failed-at-semantic-web-and-personal-computing",
+   "discussion_url": "https://news.ycombinator.com/item?id=44837783",
+   "points": 206,
+   "created_at": "2025-08-08T14:57:06Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:18033802",
+   "kind": "failure",
+   "title": "Lessons From a Failed Startup — From and For First Time Founders",
+   "url": "https://medium.com/swlh/4-lessons-from-a-failed-startup-from-and-for-first-time-founders-c61913df3bb5",
+   "discussion_url": "https://news.ycombinator.com/item?id=18033802",
+   "points": 202,
+   "created_at": "2018-09-20T16:47:11Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:36146062",
+   "kind": "failure",
+   "title": "FTC says Ring employees illegally surveilled customers, failed to stop hackers",
+   "url": "https://www.ftc.gov/news-events/news/press-releases/2023/05/ftc-says-ring-employees-illegally-surveilled-customers-failed-stop-hackers-taking-control-users",
+   "discussion_url": "https://news.ycombinator.com/item?id=36146062",
+   "points": 174,
+   "created_at": "2023-05-31T23:51:48Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:43703682",
+   "kind": "failure",
+   "title": "A Postmortem of a Startup",
+   "url": "https://buildwithtract.com/",
+   "discussion_url": "https://news.ycombinator.com/item?id=43703682",
+   "points": 168,
+   "created_at": "2025-04-16T10:39:13Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:21894150",
+   "kind": "failure",
+   "title": "To everything there is a season – Why we're shutting down",
+   "url": "https://blog.8tracks.com/2019/12/26/to-everything-there-is-a-season/",
+   "discussion_url": "https://news.ycombinator.com/item?id=21894150",
+   "points": 149,
+   "created_at": "2019-12-27T20:11:14Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": true
+  },
+  {
+   "case_id": "hn:27875356",
+   "kind": "failure",
+   "title": "“We're Shutting Down Our 3G Network”",
+   "url": "https://benergize.com/2021/07/16/were-shutting-down-our-3g-network/",
+   "discussion_url": "https://news.ycombinator.com/item?id=27875356",
+   "points": 142,
+   "created_at": "2021-07-18T18:44:49Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:23093990",
+   "kind": "product",
+   "title": "Show HN: I built a tool to remove news articles from HN",
+   "url": "http://hn.luap.info/",
+   "discussion_url": "https://news.ycombinator.com/item?id=23093990",
+   "points": 131,
+   "created_at": "2020-05-06T17:41:53Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:33623697",
+   "kind": "product",
+   "title": "Show HN: I built a tool to get instant test results",
+   "url": "https://github.com/nabaz-io/nabaz",
+   "discussion_url": "https://news.ycombinator.com/item?id=33623697",
+   "points": 96,
+   "created_at": "2022-11-16T14:39:59Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:33551066",
+   "kind": "product",
+   "title": "Show HN: An API for CO₂ Removal",
+   "url": "https://docs.cdrplatform.com",
+   "discussion_url": "https://news.ycombinator.com/item?id=33551066",
+   "points": 94,
+   "created_at": "2022-11-10T18:37:33Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:21108220",
+   "kind": "product",
+   "title": "Show HN: Geodata API for country and city select drop-downs",
+   "url": "https://github.com/shivammathur/countrycity",
+   "discussion_url": "https://news.ycombinator.com/item?id=21108220",
+   "points": 78,
+   "created_at": "2019-09-29T17:09:54Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:36672447",
+   "kind": "failure",
+   "title": "Postmortem: Co-founding a Web3 startup as a crypto skeptic young dev",
+   "url": "https://anicetnougaret.fr/blog/farswap-xp",
+   "discussion_url": "https://news.ycombinator.com/item?id=36672447",
+   "points": 70,
+   "created_at": "2023-07-10T20:24:58Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [
+    "crypto"
+   ],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:21228549",
+   "kind": "failure",
+   "title": "How we failed, then succeeded, at migrating to TypeScript",
+   "url": "https://heap.io/blog/engineering/migrating-to-typescript",
+   "discussion_url": "https://news.ycombinator.com/item?id=21228549",
+   "points": 69,
+   "created_at": "2019-10-11T21:15:17Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:31548251",
+   "kind": "failure",
+   "title": "Car rental startup Kyte didn't know money was running out, rescinds offer(s)",
+   "url": "https://twitter.com/ahmedszakaria/status/1530507363362512896",
+   "discussion_url": "https://news.ycombinator.com/item?id=31548251",
+   "points": 66,
+   "created_at": "2022-05-29T11:24:05Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:22686383",
+   "kind": "failure",
+   "title": "We failed in our response because of widespread asystemic thinking",
+   "url": "https://www.theatlantic.com/technology/archive/2020/03/what-really-doomed-americas-coronavirus-response/608596/",
+   "discussion_url": "https://news.ycombinator.com/item?id=22686383",
+   "points": 65,
+   "created_at": "2020-03-25T16:56:35Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:23917210",
+   "kind": "product",
+   "title": "Show HN: Free API service for crypto and foreign exchange rates",
+   "url": "https://www.exchangerate.host/",
+   "discussion_url": "https://news.ycombinator.com/item?id=23917210",
+   "points": 62,
+   "created_at": "2020-07-22T14:15:13Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [
+    "crypto"
+   ],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:34051088",
+   "kind": "failure",
+   "title": "Post mortem of our 1st YC startup: a Reverse ETL",
+   "url": "https://github.com/getlago/lago/wiki/Post-mortem-of-our-1st-YC-startup:-a-Reverse-ETL",
+   "discussion_url": "https://news.ycombinator.com/item?id=34051088",
+   "points": 57,
+   "created_at": "2022-12-19T11:57:03Z",
+   "categories": [
+    "data_plumbing"
+   ],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:41998083",
+   "kind": "failure",
+   "title": "Mistakes from building a model to scalp concert tickets",
+   "url": "https://datastream.substack.com/p/mistakes-from-my-failed-startup-in",
+   "discussion_url": "https://news.ycombinator.com/item?id=41998083",
+   "points": 52,
+   "created_at": "2024-10-30T17:44:43Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:39145901",
+   "kind": "product",
+   "title": "Show HN: PHP API Bindings for Open Brewery DB",
+   "url": "https://github.com/JoeyMckenzie/openbrewerydb-php-api",
+   "discussion_url": "https://news.ycombinator.com/item?id=39145901",
+   "points": 50,
+   "created_at": "2024-01-26T18:18:10Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:20332704",
+   "kind": "failure",
+   "title": "It’s not that we’ve failed to rein in Facebook and Google. We’ve not even tried",
+   "url": "https://www.theguardian.com/commentisfree/2019/jul/02/facebook-google-data-change-our-behaviour-democracy",
+   "discussion_url": "https://news.ycombinator.com/item?id=20332704",
+   "points": 33,
+   "created_at": "2019-07-02T06:37:56Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  },
+  {
+   "case_id": "hn:41490865",
+   "kind": "failure",
+   "title": "Show HN: A directory of startups that did things that don't scale",
+   "url": "https://dothingsthatdontscale.org/",
+   "discussion_url": "https://news.ycombinator.com/item?id=41490865",
+   "points": 31,
+   "created_at": "2024-09-09T17:16:50Z",
+   "categories": [],
+   "axes_met": [],
+   "axes_met_count": 0,
+   "matched": [],
+   "by_axis": {},
+   "evidence": {},
+   "exclude_marks": [],
+   "pricing_fetched": false
+  }
+ ]
+}

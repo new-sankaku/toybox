@@ -1,0 +1,14 @@
+# LLM の設定。provider と model は必ずこの file で指定します（code に埋めません）。
+# API key は環境変数から読みます。この file に key を書かないでください。
+#
+# 使う場所: tools/transfer_matrix.py --hypothesis（転用 仮説の下書き）
+# 出力は「仮説（未検証）」として証拠と別の file に分けて保存されます。
+
+provider: openrouter
+endpoint: https://openrouter.ai/api/v1/chat/completions
+model: ""            # 例: anthropic/claude-sonnet-4 — 使う前に必ず記入してください
+api_key_env: OPENROUTER_API_KEY
+temperature: 0.3
+max_tokens: 4000
+timeout_seconds: 180
+api_version: "2023-06-01"   # provider: anthropic を使う場合のみ

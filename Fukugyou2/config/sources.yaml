@@ -1,0 +1,41 @@
+# 情報源の定義。endpoint と 利用上限 を code に埋めないための file です。
+# 規約と既知の癖は doc/SOURCES.md に書いています。
+
+hn_algolia:
+  label: Hacker News / Algolia Search API
+  search_endpoint: https://hn.algolia.com/api/v1/search
+  item_url_template: "https://news.ycombinator.com/item?id={id}"
+  auth: none
+  max_hits_per_page: 100
+  sleep_seconds: 0.5
+  timeout_seconds: 30
+
+qiita:
+  label: Qiita API v2
+  search_endpoint: https://qiita.com/api/v2/items
+  auth: none
+  token_env: QIITA_TOKEN
+  total_count_header: total-count
+  rate_limit_note: 認証なし 60 req/h、token あり 1000 req/h
+  sleep_seconds: 1.0
+  timeout_seconds: 30
+
+zenn:
+  label: Zenn 記事検索
+  search_endpoint: https://zenn.dev/api/search
+  auth: none
+  max_pages: 3
+  rate_limit_note: 公開仕様が無いため、間隔を空けて少量のみ取得する
+  sleep_seconds: 1.5
+  timeout_seconds: 30
+
+page_fetch:
+  label: 事例 site の直接取得（価格の証拠）
+  respect_robots: true
+  pricing_paths:
+    - /pricing
+    - /price
+    - /plans
+  max_pages_per_case: 2
+  sleep_seconds: 1.5
+  timeout_seconds: 25

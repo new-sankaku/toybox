@@ -1,0 +1,247 @@
+{
+ "measured_on": "2026-08-24",
+ "sources": {
+  "hn": "https://hn.algolia.com/api/v1/search",
+  "qiita": "https://qiita.com/api/v2/items",
+  "zenn": "https://zenn.dev/api/search"
+ },
+ "limits": [
+  "言及量は需要ではありません（代理指標です）",
+  "Qiita / Zenn は技術者に偏るため、非 IT 業界の需要は過小に出ます",
+  "Zenn は総件数を返さないため、上限 page までの実数です",
+  "この file には 6 分類が入っています（分類ごとの測定日は measured_on を見てください）"
+ ],
+ "stopped": null,
+ "failures": [],
+ "categories": [
+  {
+   "id": "contract",
+   "label": "契約・法務",
+   "measured_on": "2026-08-24",
+   "en_hn": {
+    "contract review automation": 43,
+    "legal document automation": 35
+   },
+   "jp_qiita_demand": {
+    "契約書 レビュー 大変": 186,
+    "契約書 管理 Excel": 459
+   },
+   "jp_qiita_supply": {
+    "契約書管理 SaaS": 623,
+    "電子契約 サービス": 843
+   },
+   "qiita_rate_remaining": 52,
+   "jp_zenn_demand": {
+    "契約書 レビュー 大変": [
+     3,
+     false
+    ],
+    "契約書 管理 Excel": [
+     0,
+     false
+    ]
+   },
+   "totals": {
+    "en_hn": 78,
+    "jp_qiita_demand": 645,
+    "jp_qiita_supply": 1466,
+    "jp_per_en": 8.269,
+    "demand_per_supply": 0.44
+   }
+  },
+  {
+   "id": "booking",
+   "label": "予約・日程",
+   "measured_on": "2026-08-24",
+   "en_hn": {
+    "appointment scheduling software": 18
+   },
+   "jp_qiita_demand": {
+    "予約 電話 対応 大変": 99,
+    "日程調整 面倒": 114
+   },
+   "jp_qiita_supply": {
+    "予約システム SaaS": 263,
+    "日程調整 ツール": 386
+   },
+   "qiita_rate_remaining": 57,
+   "jp_zenn_demand": {
+    "予約 電話 対応 大変": [
+     0,
+     false
+    ],
+    "日程調整 面倒": [
+     21,
+     false
+    ]
+   },
+   "totals": {
+    "en_hn": 18,
+    "jp_qiita_demand": 213,
+    "jp_qiita_supply": 649,
+    "jp_per_en": 11.833,
+    "demand_per_supply": 0.328
+   }
+  },
+  {
+   "id": "compliance",
+   "label": "監査・規制対応",
+   "measured_on": "2026-08-24",
+   "en_hn": {
+    "compliance automation": 269,
+    "audit evidence collection": 14
+   },
+   "jp_qiita_demand": {
+    "監査 対応 資料 作成": 1108,
+    "ISO 文書 管理": 1081,
+    "法改正 対応 大変": 97
+   },
+   "jp_qiita_supply": {
+    "内部統制 SaaS": 170,
+    "文書管理 システム": 6498
+   },
+   "qiita_rate_remaining": 59,
+   "jp_zenn_demand": {
+    "監査 対応 資料 作成": [
+     0,
+     false
+    ],
+    "ISO 文書 管理": [
+     144,
+     true
+    ],
+    "法改正 対応 大変": [
+     6,
+     false
+    ]
+   },
+   "totals": {
+    "en_hn": 283,
+    "jp_qiita_demand": 2286,
+    "jp_qiita_supply": 6668,
+    "jp_per_en": 8.078,
+    "demand_per_supply": 0.343
+   }
+  },
+  {
+   "id": "doc_generation",
+   "label": "文書生成・要約",
+   "measured_on": "2026-08-24",
+   "en_hn": {
+    "document generation saas": 17,
+    "meeting minutes automation": 57
+   },
+   "jp_qiita_demand": {
+    "議事録 作成 大変": 288,
+    "見積書 作成 手作業": 64,
+    "提案書 作成 時間": 3372
+   },
+   "jp_qiita_supply": {
+    "議事録 自動作成 SaaS": 140,
+    "帳票 作成 システム": 665
+   },
+   "qiita_rate_remaining": 56,
+   "jp_zenn_demand": {
+    "議事録 作成 大変": [
+     122,
+     false
+    ],
+    "見積書 作成 手作業": [
+     1,
+     false
+    ],
+    "提案書 作成 時間": [
+     17,
+     false
+    ]
+   },
+   "totals": {
+    "en_hn": 74,
+    "jp_qiita_demand": 3724,
+    "jp_qiita_supply": 805,
+    "jp_per_en": 50.324,
+    "demand_per_supply": 4.626
+   }
+  },
+  {
+   "id": "field_ops",
+   "label": "現場作業・報告",
+   "measured_on": "2026-08-24",
+   "en_hn": {
+    "field service software": 104,
+    "inspection report automation": 12
+   },
+   "jp_qiita_demand": {
+    "現場 report 手書き": 32,
+    "点検 記録 Excel": 61,
+    "日報 集計 手作業": 16
+   },
+   "jp_qiita_supply": {
+    "現場管理 SaaS": 1540,
+    "点検 アプリ 業務": 206
+   },
+   "qiita_rate_remaining": 54,
+   "jp_zenn_demand": {
+    "現場 report 手書き": [
+     8,
+     false
+    ],
+    "点検 記録 Excel": [
+     144,
+     true
+    ],
+    "日報 集計 手作業": [
+     37,
+     false
+    ]
+   },
+   "totals": {
+    "en_hn": 116,
+    "jp_qiita_demand": 109,
+    "jp_qiita_supply": 1746,
+    "jp_per_en": 0.94,
+    "demand_per_supply": 0.062
+   }
+  },
+  {
+   "id": "billing",
+   "label": "請求・経理",
+   "measured_on": "2026-08-24",
+   "en_hn": {
+    "invoice automation": 212,
+    "bookkeeping automation": 21
+   },
+   "jp_qiita_demand": {
+    "請求書 自動化": 2221,
+    "経費精算 面倒": 81,
+    "帳簿 手入力": 61
+   },
+   "jp_qiita_supply": {
+    "請求書 SaaS": 502,
+    "経費精算 システム": 311
+   },
+   "qiita_rate_remaining": 52,
+   "jp_zenn_demand": {
+    "請求書 自動化": [
+     9,
+     false
+    ],
+    "経費精算 面倒": [
+     7,
+     false
+    ],
+    "帳簿 手入力": [
+     10,
+     false
+    ]
+   },
+   "totals": {
+    "en_hn": 233,
+    "jp_qiita_demand": 2363,
+    "jp_qiita_supply": 813,
+    "jp_per_en": 10.142,
+    "demand_per_supply": 2.907
+   }
+  }
+ ]
+}

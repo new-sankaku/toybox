@@ -1,0 +1,18 @@
+# 製品化済みの事例を拾うための検索語（英語圏 / Hacker News）。
+# 人が書きます。program は語を生成しません（doc/METHOD.md §5 規律1）。
+# 1行1語。# 始まりは注釈。
+
+"Show HN" saas
+"Show HN" api for
+"Show HN" automate
+"Show HN" I built a tool
+"Show HN" invoice
+"Show HN" compliance
+"Show HN" scheduling
+"Show HN" monitoring
+"Launch HN"
+indie hacker MRR
+bootstrapped saas revenue
+solo founder saas
+"$10k MRR"
+micro saas

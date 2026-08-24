@@ -1,0 +1,17 @@
+# 失敗事例・撤退事例を拾うための検索語。
+# 生き残りだけを見る偏りを消すために必須です（doc/METHOD.md §3）。
+# 語は Hacker News の該当件数を見ながら人が選びます（0件の語を置かないこと）。
+
+"shutting down"
+startup died
+"Ask HN" failed startup
+"failed startup"
+"we failed"
+"post-mortem" startup
+"shut down" my saas
+"we're shutting down"
+startup failure lessons
+"why we failed"
+"we are shutting down"
+"lessons learned" failed startup
+saas failed customers

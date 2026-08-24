@@ -1,0 +1,105 @@
+# 選別条件。program はこの file の条件に何件該当したかを出すだけで、採否は決めません
+# （doc/METHOD.md §5 規律8）。閾値を code に埋めないための file です。
+
+axes:
+  stock:
+    label: Stock性（継続課金の型か）
+    conditions_required: 1
+  ai:
+    label: AI自動化性（提供の中核を機械が回せるか）
+    conditions_required: 1
+  proof:
+    label: 証拠性（出所つきの数字があるか）
+    conditions_required: 1
+  b2b:
+    label: 法人が払うか
+    conditions_required: 1
+
+conditions:
+  - id: stock_subscription_word
+    axis: stock
+    label: 継続課金の語が本文にある
+    evidence: text
+    any_of:
+      - "(?i)\\bsubscription\\b"
+      - "(?i)\\bper (?:month|seat|user)\\b"
+      - "(?i)\\$\\d+\\s*/\\s*(?:mo|month|seat|user)\\b"
+      - "(?i)\\bMRR\\b"
+      - "(?i)\\bARR\\b"
+      - "(?i)\\brecurring\\b"
+      - "(?i)\\bSaaS\\b"
+
+  - id: stock_pricing_page
+    axis: stock
+    label: 価格 page に継続課金の表示がある
+    evidence: pricing
+    any_of:
+      - "(?i)\\$\\s?\\d[\\d,.]*\\s*(?:/|per\\s*)(?:mo\\b|month|seat|user)"
+      - "(?i)\\b(?:monthly|annual(?:ly)?)\\s+(?:plan|billing|price)"
+      - "(?i)\\bbilled\\s+(?:monthly|annually)\\b"
+      - "(?i)\\bper\\s+seat\\b"
+      - "(?i)[¥￥]\\s?\\d[\\d,]*\\s*/\\s*(?:月|人|ユーザー)"
+
+  - id: ai_machine_core
+    axis: ai
+    label: 中核の作業が機械で回る動詞である
+    evidence: text
+    any_of:
+      - "(?i)\\b(?:extract|parse|classif|transcrib|summari[sz]|translat|generat|detect|reconcil|normali[sz]|dedup)"
+      - "(?i)\\b(?:OCR|LLM|GPT|embedding|vector search)\\b"
+      - "(?i)\\b(?:automat|scrape|crawl|sync|monitor|alert|schedul)"
+
+  - id: ai_repetitive_target
+    axis: ai
+    label: 反復作業を名指ししている
+    evidence: text
+    any_of:
+      - "(?i)\\b(?:spreadsheet|excel|csv|pdf|email|inbox|copy[- ]?paste|manual(?:ly)?)\\b"
+      - "(?i)\\b(?:every (?:day|week|month)|hours? (?:a|per) week)\\b"
+
+  - id: proof_money_number
+    axis: proof
+    label: 金額の数字がある
+    evidence: text
+    any_of:
+      - "(?i)\\$\\s?\\d[\\d,.]*\\s*(?:k|m|million)?\\b"
+      - "(?i)\\b\\d+\\s*(?:k|万)?\\s*(?:MRR|ARR)\\b"
+      - "(?i)[¥￥]\\s?\\d[\\d,]*"
+
+  - id: proof_scale_number
+    axis: proof
+    label: 規模の数字がある
+    evidence: text
+    any_of:
+      - "(?i)\\b\\d[\\d,]*\\+?\\s*(?:customers?|users?|companies|teams?|subscribers?)\\b"
+      - "(?i)\\b\\d+\\s*(?:%|percent)\\b"
+
+  - id: b2b_business_object
+    axis: b2b
+    label: 法人の業務対象を名指ししている
+    evidence: text
+    any_of:
+      - "(?i)\\b(?:invoice|billing|payroll|procurement|vendor|contract|compliance|audit|tax|accounting|inventory|logistics|shipment|claims?|underwrit|onboarding|helpdesk|ticketing)\\b"
+      - "(?i)\\b(?:B2B|enterprise|SMB|agency|clinic|law firm|construction|manufactur)\\b"
+
+  - id: b2b_workflow_word
+    axis: b2b
+    label: 業務 flow の語がある
+    evidence: text
+    any_of:
+      - "(?i)\\b(?:workflow|approval|back[- ]?office|operations|ops team|regulat|filing|report(?:ing)?)\\b"
+
+# 対象外の印。削除はせず、印だけ付けます（後から見直せるようにするため）
+exclude:
+  - id: consumer_only
+    label: 個人向けのみ・法人が払わない型
+    any_of:
+      - "(?i)\\b(?:game|meme|dating|wallpaper|emoji|fitness tracker|recipe app)\\b"
+  - id: crypto
+    label: 暗号資産
+    any_of:
+      - "(?i)\\b(?:crypto|blockchain|NFT|web3|token sale)\\b"
+  - id: hardware
+    label: 物理 hardware が必要
+    any_of:
+      - "(?i)\\b(?:raspberry pi|arduino|3d print|drone|sensor kit|PCB)\\b"

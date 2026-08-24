@@ -1,0 +1,8 @@
+# 取得した page の生 HTML は容量が大きいため git に入れない（手元には残す）
+log/raw/pages/
+
+# venv
+.venv/
+venv/
+__pycache__/
+*.pyc

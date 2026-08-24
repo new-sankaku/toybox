@@ -1,0 +1,76 @@
+# 事例を業務の型で束ねるための分類。日本側の実測（jp_market_check.py）はこの単位で行います。
+#   assign_any_of : 事例の本文に当てると分類が付く正規表現
+#   en_terms      : 英語圏の言及量を測る語（Hacker News）
+#   jp_demand_terms : 日本語圏で「困っている」側の語
+#   jp_supply_terms : 日本語圏で「もう売られている」側の語
+
+categories:
+  - id: billing
+    label: 請求・経理
+    assign_any_of: ["(?i)\\b(?:invoic\\w*|billing|accounting|bookkeep\\w*|expenses?|receipts?|reconcil\\w*)\\b"]
+    en_terms: ["invoice automation", "bookkeeping automation"]
+    jp_demand_terms: ["請求書 自動化", "経費精算 面倒", "帳簿 手入力"]
+    jp_supply_terms: ["請求書 SaaS", "経費精算 システム"]
+
+  - id: contract
+    label: 契約・法務
+    assign_any_of: ["(?i)\\b(?:contracts?|legal|clauses?|NDA|e-?sign\\w*|litigation)\\b"]
+    en_terms: ["contract review automation", "legal document automation"]
+    jp_demand_terms: ["契約書 レビュー 大変", "契約書 管理 Excel"]
+    jp_supply_terms: ["契約書管理 SaaS", "電子契約 サービス"]
+
+  - id: hr
+    label: 人事・労務
+    assign_any_of: ["(?i)\\b(?:payroll|recruit\\w*|hiring|applicants?|HR|onboarding|attendance|timesheets?)\\b"]
+    en_terms: ["payroll automation", "recruiting automation"]
+    jp_demand_terms: ["勤怠 集計 手作業", "採用 事務 大変", "労務 手続き 面倒"]
+    jp_supply_terms: ["勤怠管理 SaaS", "労務管理 システム"]
+
+  - id: field_ops
+    label: 現場作業・報告
+    assign_any_of: ["(?i)\\b(?:field service|inspections?|construction|maintenance|work orders?|dispatch\\w*|shifts?)\\b"]
+    en_terms: ["field service software", "inspection report automation"]
+    jp_demand_terms: ["現場 report 手書き", "点検 記録 Excel", "日報 集計 手作業"]
+    jp_supply_terms: ["現場管理 SaaS", "点検 アプリ 業務"]
+
+  - id: booking
+    label: 予約・日程
+    assign_any_of: ["(?i)\\b(?:bookings?|appointments?|schedul\\w*|reservations?|calendars?)\\b"]
+    en_terms: ["appointment scheduling software"]
+    jp_demand_terms: ["予約 電話 対応 大変", "日程調整 面倒"]
+    jp_supply_terms: ["予約システム SaaS", "日程調整 ツール"]
+
+  - id: supply_chain
+    label: 在庫・受発注・物流
+    assign_any_of: ["(?i)\\b(?:inventory|procurement|purchase orders?|suppliers?|shipments?|logistics|warehouses?)\\b"]
+    en_terms: ["inventory management software", "procurement automation"]
+    jp_demand_terms: ["受発注 FAX", "在庫 管理 Excel", "配車 手配 電話"]
+    jp_supply_terms: ["受発注 システム", "在庫管理 SaaS"]
+
+  - id: support
+    label: 顧客対応・問い合わせ
+    assign_any_of: ["(?i)\\b(?:helpdesk|support tickets?|customer service|chatbots?|FAQ|inbox)\\b"]
+    en_terms: ["helpdesk automation", "support ticket automation"]
+    jp_demand_terms: ["問い合わせ 対応 属人", "メール 対応 大変"]
+    jp_supply_terms: ["問い合わせ管理 SaaS", "chatbot 導入"]
+
+  - id: compliance
+    label: 監査・規制対応
+    assign_any_of: ["(?i)\\b(?:compliance|audits?|SOC ?2|ISO ?27001|GDPR|regulat\\w*|filings?|KYC|AML)\\b"]
+    en_terms: ["compliance automation", "audit evidence collection"]
+    jp_demand_terms: ["監査 対応 資料 作成", "ISO 文書 管理", "法改正 対応 大変"]
+    jp_supply_terms: ["内部統制 SaaS", "文書管理 システム"]
+
+  - id: data_plumbing
+    label: data 連携・移行
+    assign_any_of: ["(?i)\\b(?:ETL|integrations?|migrations?|sync|webhooks?|connectors?|API glue|scraping)\\b"]
+    en_terms: ["data integration tool", "csv import automation"]
+    jp_demand_terms: ["システム 連携 CSV", "data 移行 手作業"]
+    jp_supply_terms: ["iPaaS 国内", "data連携 SaaS"]
+
+  - id: doc_generation
+    label: 文書生成・要約
+    assign_any_of: ["(?i)\\b(?:document generation|proposals?|quotes?|summari[sz]\\w*|transcri\\w*|minutes|report writing)\\b"]
+    en_terms: ["document generation saas", "meeting minutes automation"]
+    jp_demand_terms: ["議事録 作成 大変", "見積書 作成 手作業", "提案書 作成 時間"]
+    jp_supply_terms: ["議事録 自動作成 SaaS", "帳票 作成 システム"]
