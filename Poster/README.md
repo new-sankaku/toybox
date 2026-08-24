@@ -60,6 +60,10 @@ npm i playwright-core      # 初回のみ
 node tests/smoke.mjs
 ```
 
+`tests/sample.jpg` を先に置いてください。`smoke.mjs` と `decor-catalog.mjs` が
+`input[type=file]` へ投入する入力です。画像は版権の恐れがあるため git に入れていません。
+人物が写った写真であれば何でも構いません（顔検出と saliency を通すため）。
+
 Chromiumのpathは `CHROMIUM_PATH` で上書きできる。指定が無ければ playwright の browser、
 installed Chrome / Chromium の順に探す。
 

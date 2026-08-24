@@ -9,3 +9,4 @@ doc/reference/**/*.avif
 doc/reference/**/*.gif
 tests/repro/crops/
 tests/repro/compare/
+tests/sample.jpg
