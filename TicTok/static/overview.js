@@ -513,7 +513,7 @@ function buildTileBattle(b, owner) {
   const topo = battleTopology(b, owner);
   // スコアバーは形式に応じてN分割(個人=参加者数, チーム=チーム数)。動画overlayと統一。
   card.append(head, buildBattleScoreBar(topo));
-  const byHost = groupContribsByHost(b, topo);
+  const byHost = groupContribsByHost(b);
 
   const groups = document.createElement("div");
   groups.className = "tb-groups";
@@ -529,7 +529,9 @@ function buildTileBattle(b, owner) {
       team.members
         .slice()
         .sort((a, c) => (c.score || 0) - (a.score || 0))
-        .forEach((host) => teamBox.appendChild(hostGroup(host, byHost, owner)));
+        .forEach((host) => teamBox.appendChild(hostGroup(host, byHost, owner, b)));
+      const unattributed = unattributedGroup(byHost, team.own ? "__own__" : "__opp__");
+      if (unattributed) teamBox.appendChild(unattributed);
       groups.appendChild(teamBox);
     });
   } else {
@@ -537,7 +539,11 @@ function buildTileBattle(b, owner) {
     topo.parts
       .slice()
       .sort((a, c) => (a.is_own === c.is_own ? (c.score || 0) - (a.score || 0) : a.is_own ? -1 : 1))
-      .forEach((host) => groups.appendChild(hostGroup(host, byHost, owner)));
+      .forEach((host) => groups.appendChild(hostGroup(host, byHost, owner, b)));
+    ["__own__", "__opp__"].forEach((key) => {
+      const unattributed = unattributedGroup(byHost, key);
+      if (unattributed) groups.appendChild(unattributed);
+    });
   }
   card.appendChild(groups);
   return card;
@@ -546,7 +552,7 @@ function buildTileBattle(b, owner) {
 // 1配信者ぶんの貢献グループ: ヘッダ(配信者 + score + 貢献者N人) + 貢献者全件。
 // 件数制限・内側スクロールは設けず、tileは内容に応じて伸びる。相手陣の実弾内訳は
 // 取得できない場合があり、その時はコイン不明として「—」を表示する(0送信ではない)。
-function hostGroup(host, byHost, owner) {
+function hostGroup(host, byHost, owner, battle) {
   const wrap = document.createElement("div");
   wrap.className = "tb-host " + (host.is_own ? "own" : "opp");
   const contribs = (byHost.get(host.user_id) || [])
@@ -558,13 +564,48 @@ function hostGroup(host, byHost, owner) {
   head.className = "tb-host-head";
   const score = document.createElement("span");
   score.className = "tb-host-score";
-  score.textContent = `BS ${fmtBs(host.score)} / 実弾 ${fmtBs(coinsSum)}`;
+  // 拾えなかった実弾は0ではなく「未取得」。取り違えると欠測が実績として読まれる。
+  const note = coinCoverageNote(battle, host);
+  score.textContent = note
+    ? `BS ${fmtBs(host.score)} / ${note.text}`
+    : `BS ${fmtBs(host.score)} / 実弾 ${fmtBs(coinsSum)}`;
+  if (note) score.title = note.title;
   const cnt = document.createElement("span");
   cnt.className = "tb-host-cnt";
   cnt.textContent = `貢献者${contribs.length}人`;
   head.append(userCell(participantUser(host, owner), { hideId: true }), score, cnt);
   wrap.appendChild(head);
 
+  contribs.forEach((c) => {
+    const row = document.createElement("div");
+    row.className = "tb-c";
+    const d = document.createElement("span");
+    d.className = "tb-d";
+    d.textContent = fmtBsCoins(c);
+    row.append(userCell(c, { hideId: true }), d);
+    wrap.appendChild(row);
+  });
+  return wrap;
+}
+
+// 宛先hostの判らない貢献。チーム戦のarmiesはチーム集約なので、実測で宛先が付かなかった
+// 分はここへ落ちる。hostのカードへ寄せると、支えていない配信者の貢献者として並ぶ。
+function unattributedGroup(byHost, key) {
+  const contribs = (byHost.get(key) || []).slice().sort((a, c) => effectiveBs(c) - effectiveBs(a));
+  if (!contribs.length) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "tb-host " + (key === "__own__" ? "own" : "opp");
+  const head = document.createElement("div");
+  head.className = "tb-host-head";
+  const label = document.createElement("span");
+  label.className = "tb-host-unattr";
+  label.textContent = "宛先不明（陣営の合計のみ）";
+  label.title = "チーム戦のスコア内訳はチーム単位で届くため、どの配信者への貢献かが判りません。";
+  const cnt = document.createElement("span");
+  cnt.className = "tb-host-cnt";
+  cnt.textContent = `貢献者${contribs.length}人`;
+  head.append(label, cnt);
+  wrap.appendChild(head);
   contribs.forEach((c) => {
     const row = document.createElement("div");
     row.className = "tb-c";

@@ -55,6 +55,8 @@
         </select>
       </label>
       <span class="sp"></span>
+      <button id="merge-open" disabled title="checkを付けたSessionを1つの詳細としてまとめて表示します（ギフターやGiftは合算されます）。">選択をマージ表示</button>
+      <button id="merge-clear" class="hidden">選択解除</button>
       <button id="bulk-del-users" class="btn-danger">配信者を削除</button>
       <button id="export-csv">表示中をCSV出力</button>
     </div>
@@ -64,6 +66,7 @@
       <table class="xtab" id="session-table">
         <thead>
           <tr>
+            <th class="sel-th"><input id="merge-selall" type="checkbox" aria-label="表示中を全選択" title="表示中のSessionを全て選択します（マージ表示用）。" /></th>
             <th data-sort="id">#</th>
             <th id="op-th-lead" colspan="2">操作</th>
             <th data-sort="unique_id">配信者</th>
@@ -80,116 +83,142 @@
       <div id="session-empty" class="a-empty" data-label="Session一覧">保存されたSessionがありません。</div>
     </div>
 
+    <!-- Session 詳細（画面下部dock） -->
+    <div id="detail-dock" class="x-dock hidden">
+      <div class="x-dock-panel" role="region" aria-labelledby="detail-title">
+        <div class="modal-head">
+          <h2 id="detail-title">Session 詳細</h2>
+          <div class="modal-head-actions">
+            <a id="detail-csv" class="btn btn-small" href="#" download>CSV出力</a>
+            <a id="detail-json" class="btn btn-small" href="#" download>JSON出力</a>
+            <button id="detail-close" class="modal-close">閉じる ✕</button>
+          </div>
+        </div>
+        <div class="modal-body">
+        <div class="result-totals" id="detail-totals"></div>
+
+        <!-- カテゴリは左の縦paneで選ぶ。表示するのは常に1カテゴリだけで、そのcard内の
+             区画だけがscrollerになる(外側は転がさない)。入れ子scrollでwheelの行き先が
+             争うのを、構造で起こらなくするための形。 -->
+        <div class="dk-split">
+          <nav class="dk-rail" id="detail-rail" aria-label="詳細のカテゴリ">
+            <button type="button" class="dk-tab" data-cat="gift">Gift<span class="dk-n"></span></button>
+            <button type="button" class="dk-tab" data-cat="battle">Battle<span class="dk-n"></span></button>
+            <button type="button" class="dk-tab" data-cat="collab">コラボ<span class="dk-n"></span></button>
+            <button type="button" class="dk-tab" data-cat="rec">録画<span class="dk-n"></span></button>
+            <button type="button" class="dk-tab" data-cat="memo">Memo</button>
+            <button type="button" class="dk-tab" data-cat="ai">AI分析</button>
+            <button type="button" class="dk-tab" data-cat="timeline">Timeline</button>
+          </nav>
+
+          <div class="dk-panes">
+            <!-- Gift: 誰が投げたか ｜ 何が飛んだか -->
+            <section class="dk-pane" data-cat="gift">
+              <div class="dk-block">
+                <h3 class="result-subtitle">■ UserごとのGift</h3>
+                <div class="table-wrap">
+                  <table class="result-table">
+                    <thead><tr><th>#</th><th>User</th><th>GLv</th><th>MLv</th><th>Gift数</th><th>コイン</th><th>Gift内訳</th></tr></thead>
+                    <tbody id="user-ranking"></tbody>
+                  </table>
+                </div>
+                <div id="user-ranking-empty" class="feed-empty">GIFTなし</div>
+              </div>
+              <div class="dk-block">
+                <h3 class="result-subtitle">■ Gift種類別</h3>
+                <div class="table-wrap">
+                  <table class="result-table">
+                    <thead><tr><th>#</th><th>Gift</th><th>個数</th><th>コイン</th></tr></thead>
+                    <tbody id="gift-ranking"></tbody>
+                  </table>
+                </div>
+                <div id="gift-ranking-empty" class="feed-empty">GIFTなし</div>
+              </div>
+            </section>
+
+            <section class="dk-pane" data-cat="battle">
+              <div class="dk-block">
+                <h3 class="result-subtitle">■ Battle <span id="battle-summary" class="result-sub-note"></span></h3>
+                <div class="bcards" id="battle-cards"></div>
+                <div id="battle-empty" class="feed-empty">このSessionにBattleはありません。</div>
+              </div>
+            </section>
+
+            <!-- コラボ(非BattleのLinkMic)の接続区間 -->
+            <section class="dk-pane" data-cat="collab">
+              <div class="dk-block">
+                <h3 class="result-subtitle">■ コラボ <span id="collab-summary" class="result-sub-note"></span></h3>
+                <p class="dk-note">共演者のidentityは記録していないため、接続していた区間のみを表示します。</p>
+                <div class="table-wrap">
+                  <table class="result-table">
+                    <thead>
+                      <tr><th>#</th><th>開始</th><th>終了</th><th>時間</th><th class="num">最大人数</th></tr>
+                    </thead>
+                    <tbody id="collab-rows"></tbody>
+                  </table>
+                </div>
+                <div id="collab-empty" class="feed-empty" data-label="コラボ">このSessionにコラボはありません。</div>
+              </div>
+            </section>
+
+            <section class="dk-pane" data-cat="rec">
+              <div class="dk-block">
+                <h3 class="result-subtitle">■ 録画</h3>
+                <div class="table-wrap">
+                  <table class="result-table rec-table">
+                    <thead>
+                      <tr><th>#</th><th>File</th><th>画質</th><th>状態</th><th>時間</th><th>Size</th><th>操作</th></tr>
+                    </thead>
+                    <tbody id="recording-list"></tbody>
+                  </table>
+                </div>
+                <div id="recording-list-empty" class="feed-empty">このSessionの録画はありません。</div>
+              </div>
+            </section>
+
+            <section class="dk-pane" data-cat="memo">
+              <div class="dk-block">
+                <h3 class="result-subtitle">■ Memo</h3>
+                <div class="dk-body">
+                  <textarea id="note-input" class="note-input" placeholder="このSessionに関するMemoを記入…"></textarea>
+                  <div class="note-actions">
+                    <button id="note-save" class="btn btn-primary">Memoを保存</button>
+                    <span id="note-status" class="form-message"></span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="dk-pane" data-cat="ai">
+              <div class="dk-block">
+                <h3 class="result-subtitle">■ AI コメント分析 <span id="ai-status-note" class="result-sub-note"></span></h3>
+                <div class="dk-body">
+                  <div class="ai-actions">
+                    <button id="ai-analyze-btn" class="btn btn-primary" disabled>分析する</button>
+                    <button id="ai-rerun-btn" class="btn hidden" title="保存済みの結果を捨てて、同じ入力でもう一度ローカルAIに分析させます。">再分析</button>
+                    <span id="ai-analyze-status" class="form-message"></span>
+                  </div>
+                  <div id="ai-meta" class="chart-note"></div>
+                  <div id="ai-result" class="ai-result hidden"></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="dk-pane" data-cat="timeline">
+              <div class="dk-block">
+                <h3 class="result-subtitle">■ Session Timeline</h3>
+                <div class="chart-wrap" id="detail-chart"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
+
     <div class="a-footer">
       <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot" aria-live="polite">Server接続中…</span>
       <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
-    </div>
-  </div>
-
-  <!-- Session 詳細モーダル -->
-  <div id="detail-modal" class="modal-overlay hidden">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title">
-      <div class="modal-head">
-        <h2 id="detail-title">Session 詳細</h2>
-        <div class="modal-head-actions">
-          <a id="detail-csv" class="btn btn-small" href="#" download>CSV出力</a>
-          <a id="detail-json" class="btn btn-small" href="#" download>JSON出力</a>
-          <button id="detail-close" class="modal-close">閉じる ✕</button>
-        </div>
-      </div>
-      <div class="modal-body">
-      <div class="result-totals" id="detail-totals"></div>
-
-      <!-- 主役: Session 内の時系列推移 -->
-      <section class="detail-hero">
-        <h3 class="result-subtitle">■ Session Timeline</h3>
-        <div class="chart-wrap" id="detail-chart"></div>
-      </section>
-
-      <!-- 分析: 貢献ランキング ｜ Battle -->
-      <div class="detail-grid">
-        <section class="detail-rankings">
-          <div class="result-block">
-            <h3 class="result-subtitle">■ UserごとのGift</h3>
-            <div class="table-wrap">
-              <table class="result-table">
-                <thead><tr><th>#</th><th>User</th><th>GLv</th><th>MLv</th><th>Gift数</th><th>コイン</th><th>Gift内訳</th></tr></thead>
-                <tbody id="user-ranking"></tbody>
-              </table>
-            </div>
-            <div id="user-ranking-empty" class="feed-empty">GIFTなし</div>
-          </div>
-          <div class="result-block">
-            <h3 class="result-subtitle">■ Gift種類別</h3>
-            <div class="table-wrap">
-              <table class="result-table">
-                <thead><tr><th>#</th><th>Gift</th><th>個数</th><th>コイン</th></tr></thead>
-                <tbody id="gift-ranking"></tbody>
-              </table>
-            </div>
-            <div id="gift-ranking-empty" class="feed-empty">GIFTなし</div>
-          </div>
-        </section>
-
-        <section class="detail-battle">
-          <h3 class="result-subtitle">■ Battle <span id="battle-summary" class="result-sub-note"></span></h3>
-          <div class="bcards" id="battle-cards"></div>
-          <div id="battle-empty" class="feed-empty">このSessionにBattleはありません。</div>
-        </section>
-      </div>
-
-      <!-- コラボ(非BattleのLinkMic)の接続区間 -->
-      <section class="detail-collab">
-        <h3 class="result-subtitle">■ コラボ <span id="collab-summary" class="result-sub-note"></span></h3>
-        <p class="chart-note">共演者のidentityは記録していないため、接続していた区間のみを表示します。</p>
-        <div class="table-wrap">
-          <table class="result-table">
-            <thead>
-              <tr><th>#</th><th>開始</th><th>終了</th><th>時間</th><th class="num">最大人数</th></tr>
-            </thead>
-            <tbody id="collab-rows"></tbody>
-          </table>
-        </div>
-        <div id="collab-empty" class="feed-empty" data-label="コラボ">このSessionにコラボはありません。</div>
-      </section>
-
-      <!-- AI: コメント分析 -->
-      <section class="detail-ai">
-        <h3 class="result-subtitle">■ AI コメント分析 <span id="ai-status-note" class="result-sub-note"></span></h3>
-        <div class="ai-actions">
-          <button id="ai-analyze-btn" class="btn btn-primary" disabled>分析する</button>
-          <button id="ai-rerun-btn" class="btn hidden" title="保存済みの結果を捨てて、同じ入力でもう一度ローカルAIに分析させます。">再分析</button>
-          <span id="ai-analyze-status" class="form-message"></span>
-        </div>
-        <div id="ai-meta" class="chart-note"></div>
-        <div id="ai-result" class="ai-result hidden"></div>
-      </section>
-
-      <!-- 管理: 録画 ｜ Memo -->
-      <div class="detail-grid detail-grid-manage">
-        <section>
-          <h3 class="result-subtitle">■ 録画</h3>
-          <div class="table-wrap">
-            <table class="result-table rec-table">
-              <thead>
-                <tr><th>#</th><th>File</th><th>画質</th><th>状態</th><th>時間</th><th>Size</th><th>操作</th></tr>
-              </thead>
-              <tbody id="recording-list"></tbody>
-            </table>
-          </div>
-          <div id="recording-list-empty" class="feed-empty">このSessionの録画はありません。</div>
-        </section>
-
-        <section class="note-block">
-          <h3 class="result-subtitle">■ Memo</h3>
-          <textarea id="note-input" class="note-input" rows="3" placeholder="このSessionに関するMemoを記入…"></textarea>
-          <div class="note-actions">
-            <button id="note-save" class="btn btn-primary">Memoを保存</button>
-            <span id="note-status" class="form-message"></span>
-          </div>
-        </section>
-      </div>
-      </div>
     </div>
   </div>
 

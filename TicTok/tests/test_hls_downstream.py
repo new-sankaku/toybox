@@ -22,6 +22,7 @@ from tictok.core import layout
 from tictok.media import clipper, hls_source, reel
 from tictok.media import concat as concat_mod
 from tictok.media import thumbnails as th
+from tictok.media import loudness as ld
 from tictok.media import waveform as wf
 from tictok.record import recorder as rec
 from tictok.record import upscale
@@ -449,6 +450,31 @@ async def test_a_clip_cut_from_segments_is_a_real_playable_mp4(tmp_root):
     assert lead >= 0.0
     assert float(info["format"]["duration"]) == pytest.approx(4.0 + lead, abs=0.5)
     assert result["actual_start_seconds"] == pytest.approx(2.0 - lead, abs=0.01)
+
+
+@needs_ffmpeg
+@pytest.mark.requires_ffmpeg
+@pytest.mark.slow
+async def test_a_gain_curve_built_from_segments_lands_on_the_target(tmp_root):
+    """曲線は実際に測った値でなければ意味が無い。素材は既知の正弦波(振幅0.125 = -21.76 LUFS)
+    なので、目標との差がそのまま答えになる。argv assertionでは、filter chainが受理される
+    ことも、時刻とframeが対応していることも言えない。"""
+    mp4, _ = build_real_recording(tmp_root)
+    params = {"target_lufs": -14.0, "ceiling_dbfs": -1.5,
+              "max_boost_db": 12.0, "max_cut_db": 12.0}
+
+    curve = await ld.ensure_gain_curve(mp4, params)
+
+    assert curve["step_seconds"] == ld.STEP_SECONDS
+    assert curve["duration_seconds"] == pytest.approx(4 * SEGMENT_SECONDS, abs=0.3)
+    assert len(curve["gains"]) == pytest.approx(
+        4 * SEGMENT_SECONDS / ld.STEP_SECONDS, abs=0.3 / ld.STEP_SECONDS)
+    # 正弦波の統合ラウドネスは -21.76 LUFS。目標 -14 との差 7.76 dB へ収まる。
+    assert curve["integrated_lufs"] == pytest.approx(-21.76, abs=0.5)
+    assert min(curve["gains"]) == pytest.approx(7.76, abs=0.8)
+    assert max(curve["gains"]) == pytest.approx(7.76, abs=0.8)
+    # 曲線はcacheされ、2度目はffmpegを回さない(同じ値が返る)。
+    assert (await ld.ensure_gain_curve(mp4, params))["gains"] == curve["gains"]
 
 
 @needs_ffmpeg

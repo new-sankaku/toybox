@@ -914,6 +914,33 @@ async def search(storage, query: str, limit: int = 50, unique_ids: Optional[list
     return {"items": items, "stale": stale}
 
 
+def pending_groups(storage) -> int:
+    """次のbuildで埋め込み直すgroup(未index + search_hitsが張り直されたもの)の数。
+
+    自動構築(sweep)が「起動するか否か」だけを決めるための問い合わせ。同じ数は
+    ``index_status`` も返すが、あちらはgroupごとのpassage数まで数えるため全passageを
+    走査する。周期的に呼ぶ側がそれを踏むと、index規模に比例した走査が定期的に走る。
+    ここは1 group 1行の ``indexed`` 表しか読まない。
+
+    判定は ``build_index`` 内の ``_pending_groups`` と同じ ``_is_current``。条件を二重に
+    書くと、片方だけを直したときに「積む物が無いのに始まるbuild」が空回りする。"""
+    groups = storage.search_hit_groups()
+    if not meta_path().is_file():
+        return len(groups)
+    conn = _open_meta()
+    try:
+        done = {(row["recording_id"], row["source"]): row
+                for row in conn.execute("SELECT * FROM indexed")}
+    finally:
+        conn.close()
+    pending = 0
+    for group in groups:
+        prev = done.get((group["recording_id"], group["source"]))
+        if prev is None or not _is_current(prev, group):
+            pending += 1
+    return pending
+
+
 def index_status(storage=None) -> dict:
     """indexの現況。画面のbadge/構築ボタンの出し分け用。
 

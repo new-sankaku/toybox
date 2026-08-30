@@ -10,6 +10,8 @@ let currentHeatmap = [];
 let currentSessions = [];
 // 同接の水準(通算の時間加重平均・宝箱窓を除いた平均・宝箱の収集開始)。
 let currentViewerLevel = null;
+// コインの日次合計(event時刻ベース)。推移のコイン段はsessionではなくこれを描く。
+let currentDailyCoins = [];
 let aiConfigured = false;
 // 「未設定」と「確かめられなかった」を分けて持つ。status取得が落ちただけの状態を
 // 未設定と名乗ると、確認できていない事実を断定することになる。
@@ -294,7 +296,8 @@ function renderProfile(p) {
   renderEngagement(p.totals);
   currentSessions = p.sessions || [];
   currentViewerLevel = p.viewer_level || null;
-  renderTrend(currentSessions, currentViewerLevel);
+  currentDailyCoins = p.daily_coins || [];
+  renderTrend(currentSessions, currentViewerLevel, currentDailyCoins);
   renderGrowth(currentSessions);
   currentHeatmap = p.heatmap || [];
   renderHeatmap();
@@ -349,6 +352,9 @@ let playingRecordingId = null;
 // 素材(.ts)が残っている録画はHLSで直接観る。mp4しか残っていない録画はmp4を観る。どちらに
 // なるかはserverが録画ごとの実物を見て決めるので、こちらは受け取った経路で読み込む。
 let hlsPlayer = null;
+// 再生listの引き直し(hlsPlaylistMayBeStale 参照)。ts結合で素材の置き場所が変わると、
+// 開いたままのpageは消えたsegmentを指すlistを持ち続ける。
+const playbackGate = hlsReloadGate();
 
 function detachHls() {
   if (!hlsPlayer) return;
@@ -366,12 +372,17 @@ function showVideoMessage(label, text) {
   box.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
-async function openVideo(recordingId, offset, label) {
+// recoveringは失効したlistの引き直し。人が起こした読み込みだけが引き直しの権利を戻す
+// (引き直し自身が戻すと、直らない失敗で読み直し続けることになる)。
+async function openVideo(recordingId, offset, label, recovering = false) {
   const box = document.getElementById("sm-video-box");
   const video = document.getElementById("sm-video");
   const message = document.getElementById("sm-video-message");
   document.getElementById("sm-video-title").textContent = label;
-  message.textContent = "";
+  if (!recovering) playbackGate.reset();
+  message.textContent = recovering
+    ? "素材の置き場所が変わりました。再生listを取り直しています…"
+    : "";
   playingRecordingId = recordingId;
   detachHls();
   box.classList.remove("hidden");
@@ -389,11 +400,19 @@ async function openVideo(recordingId, offset, label) {
     hlsPlayer = new window.Hls();
     hlsPlayer.loadSource(playback.url);
     hlsPlayer.attachMedia(video);
+    // 引き直しが効いた(bufferへ入った)ら、次の失敗もまた引き直してよい。
+    hlsPlayer.on(window.Hls.Events.FRAG_BUFFERED, () => playbackGate.reset());
     hlsPlayer.on(window.Hls.Events.ERROR, (_e, data) => {
       // hls.jsが握った失敗は<video>のerror eventにならないので、ここで理由を出す。
-      if (data.fatal && playingRecordingId === recordingId) {
-        message.textContent = "この録画を再生できませんでした。";
+      if (!data.fatal || playingRecordingId !== recordingId) return;
+      // ts結合で素材の置き場所が変わっただけなら、listを引き直せば同じ位置から続けられる。
+      if (hlsPlaylistMayBeStale(data) && playbackGate.take()) {
+        // 引き直しはhls.js自身の通知の外へ出す。handlerの中でdestroy()を呼ばないため。
+        const at = video.currentTime;
+        setTimeout(() => openVideo(recordingId, at, label, true), 0);
+        return;
       }
+      message.textContent = "この録画を再生できませんでした。";
     });
   } else if (playback.mode === "hls" && !video.canPlayType("application/vnd.apple.mpegurl")) {
     message.textContent = "このBrowserはHLS再生に対応していません。";
@@ -498,21 +517,34 @@ function pctCls(cur, prev) {
 // 移動平均の窓は棒の本数。配信ごとは5配信でコラボ比率の推移(COOP_TREND_WINDOW)と揃える
 // ―― 同じ画面で「移動平均」が2つの意味を持つと、どちらの線も読めなくなる。
 const TREND_MA_WINDOW = 5;
+// コインの段だけは配信ではなく日(期間)で数えるので、単位名と移動平均の窓も別に持つ。
+// 窓は短期・中期・長期の3本。日次で 7/14/25 にしてあるのは、この画面で引ける期間が
+// 実測で最長72日しかなく、日足チャートの定番(日本株・FXの 5/25/75、欧米の 20/50/200)を
+// そのまま当てると長期線が1点も引けないためである。
 const TREND_UNITS = {
-  session: { days: 180, rollup: "", maWindow: TREND_MA_WINDOW, maText: `${TREND_MA_WINDOW}配信`, partial: "" },
-  week: { days: 365, rollup: "を週合計", maWindow: 4, maText: "4週", partial: "右端の週は集計途中" },
-  month: { days: 0, rollup: "を月合計", maWindow: 3, maText: "3か月", partial: "右端の月は集計途中" },
+  session: {
+    days: 180, rollup: "", maWindow: TREND_MA_WINDOW, maText: `${TREND_MA_WINDOW}配信`, partial: "",
+    coinUnit: "日", coinMa: [7, 14, 25], coinMaText: "日",
+  },
+  week: {
+    days: 365, rollup: "を週合計", maWindow: 4, maText: "4週", partial: "右端の週は集計途中",
+    coinUnit: "週", coinMa: [4, 8, 13], coinMaText: "週",
+  },
+  month: {
+    days: 0, rollup: "を月合計", maWindow: 3, maText: "3か月", partial: "右端の月は集計途中",
+    coinUnit: "月", coinMa: [3, 6, 12], coinMaText: "か月",
+  },
 };
 
 function trendUnit() {
   return TREND_UNITS[elTrendUnit.value] ? elTrendUnit.value : "session";
 }
 
-function renderTrend(sessions, viewerLevel) {
-  // createSessionTrendChart は s.id / s.started_at / s.ended_at / s.stats.diamonds と、
-  // 率・水準のpane用に s.comments / s.observed_seconds / s.viewers(Peak) /
-  // s.viewers_avg / s.viewers_avg_nobox / s.nobox_seconds を読む。
-  // profile の session 形(diamonds が top-level)を、その想定 shape へ寄せる。
+function renderTrend(sessions, viewerLevel, daily) {
+  // createSessionTrendChart は s.id / s.started_at / s.ended_at と、率・水準のpane用に
+  // s.comments / s.observed_seconds / s.viewers(Peak) / s.viewers_avg /
+  // s.viewers_avg_nobox / s.nobox_seconds を読む。
+  // コインだけはsessionではなく daily([{date, diamonds}]) を読む。
   const unit = trendUnit();
   const u = TREND_UNITS[unit];
   const from = u.days ? Date.now() / 1000 - u.days * 86400 : 0;
@@ -523,7 +555,6 @@ function renderTrend(sessions, viewerLevel) {
       id: s.session_id,
       started_at: s.started_at,
       ended_at: s.ended_at,
-      stats: { diamonds: s.diamonds },
       comments: s.comments,
       observed_seconds: s.observed_seconds,
       viewers: s.viewers,
@@ -531,6 +562,8 @@ function renderTrend(sessions, viewerLevel) {
       viewers_avg_nobox: s.viewers_avg_nobox,
       nobox_seconds: s.nobox_seconds,
     }));
+  // コインの日次も同じ窓で切る。窓の外の日を残すと、コインの段だけ左へ伸びる。
+  const days = (daily || []).filter((d) => trendYmdStart(d.date) >= trendDayStart(from));
   // 窓の名乗りだけでなく実際に描けた範囲も出す。配信者によっては観測開始が窓より新しく、
   // 「過去180日」と言いながら手前からしか無いことがある(欠けを黙って隠さない)。
   // 期間まとめでは右端が途中の週/月になる。黙って出すと落ち込みとして読まれるので名乗る。
@@ -546,9 +579,17 @@ function renderTrend(sessions, viewerLevel) {
     : "・宝箱の記録がまだ無いため、宝箱窓を除く線は出ません";
   document.getElementById("sm-trend-note").textContent = rows.length
     ? `${scope}・${rows.length}配信（${fmtDate(rows[0].started_at)}〜）${u.rollup}`
+      + `・コインは${u.coinUnit}ごと（移動平均 ${u.coinMa.join("/")}${u.coinMaText}）`
       + `・点線=直近${u.maText}の移動平均${partial}${envelope}`
     : `${scope}・配信なし`;
-  trendChart.update(rows, { unit, movingAvgWindow: u.maWindow });
+  trendChart.update(rows, {
+    unit,
+    movingAvgWindow: u.maWindow,
+    daily: days,
+    coinUnit: u.coinUnit,
+    coinMa: u.coinMa,
+    coinMaText: u.coinMaText,
+  });
 }
 
 // ---- 時間帯ヒートマップ(曜日×時刻・bucket時系列ベース) ----
@@ -1126,8 +1167,9 @@ function renderMatrix(id) {
   matrixSortTh(head, id, st, "count", `${countUnit}数`, `投げた${countUnit}の数です。`);
   matrixSortTh(head, id, st, "trend", "伸び", "窓の後半と前半の差（後半 − 前半）です。");
 
-  // 列で並べているときだけ、その列の順位を行頭に出して未投稿を下へ落とす。昇順のときは
-  // 順位を付けない(1が最下位になり、順位の意味が反転する)。
+  // 今の並び順での順位を行頭に出す。昇順のときは付けない(1が最下位になり、順位の意味が
+  // 反転する)。列で並べているときは未投稿を下へ落とし、0どうしには順位を振らない
+  // (投げていない人に順位が付くと、その列に載っているように読める)。
   const byColumn = keys.includes(st.sort);
   const body = table.createTBody();
   matrixSorted(rows, keys, st).forEach((row, i) => {
@@ -1136,7 +1178,7 @@ function renderMatrix(id) {
     if (byColumn && !onCol) tr.className = "sm-mx-off";
     const who = tr.insertCell();
     who.className = "sm-mx-who";
-    if (byColumn && !st.asc && onCol) {
+    if (!st.asc && (!byColumn || onCol)) {
       const rank = document.createElement("span");
       rank.className = "sm-mx-rank";
       rank.textContent = String(i + 1);
@@ -2196,18 +2238,27 @@ function createWhaleChart(container) {
   let rows = [];
   let people = {};
 
-  // 段の構成: 最上段が「1K↑ 合計」、以下が帯ごと。合計の呼び名は最小帯の下限そのもので、
-  // 文字で書くと帯定義を変えたときここだけ古い額を名乗るのでserverの帯から作る。
-  function panelSpecs(tiers) {
-    if (!tiers.length) return [];
+  // 段の構成: 最上段が「1K↑ 合計」、以下が帯ごと。合計は全帯の和ではなく大口の下限
+  // (total.from_tier)から上の積み上げで、手前の帯は内訳としてだけ出る。呼び名も起点も
+  // serverのtotalから作る — 文字で書くと定義を変えたときここだけ古い額を名乗る。
+  function panelSpecs(tiers, total) {
+    if (!tiers.length || !total) return [];
     const colors = whaleTierColors(tiers.length);
-    return [{ key: "total", label: `${tiers[0].min_label}↑ 合計`, color: WHALE_TOTAL_COLOR, tier: null }].concat(
+    return [{
+      key: "total",
+      label: `${total.min_label}↑ 合計`,
+      color: WHALE_TOTAL_COLOR,
+      tier: null,
+      // 顔ぶれを引くときの下限帯。合計段はここから上の帯だけを集める。
+      from: total.from_tier,
+    }].concat(
       tiers.map((t, i) => ({
         key: `tier${i}`,
         label: t.label,
         color: colors[i],
-        // 顔ぶれを引くときの帯番号。合計段(null)は帯で絞らず、その日の大口を全部出す。
+        // 顔ぶれを引くときの帯番号。
         tier: i,
+        from: i,
       })),
     );
   }
@@ -2238,8 +2289,8 @@ function createWhaleChart(container) {
     container.appendChild(head);
     container.appendChild(plot);
 
-    // 棒に重ねたときの札。段が持つのは帯だけなので、その日の顔ぶれをこの段の帯で絞る
-    // (合計段は絞らない)。人数は帯の集計そのものを出し、一覧の行数から数え直さない。
+    // 棒に重ねたときの札。その日の顔ぶれをこの段の帯で絞る(合計段は下限帯から上をまとめて
+    // 出す)。人数は帯の集計そのものを出し、一覧の行数から数え直さない。
     function showTip(ctx) {
       const tip = whaleTip();
       const point = (ctx.tooltip.dataPoints || [])[0];
@@ -2258,7 +2309,7 @@ function createWhaleChart(container) {
       if (tip.dataset.at === at) return;
       tip.dataset.at = at;
       const list = (day.whales_list || []).filter(
-        (w) => spec.tier === null || w.tier === spec.tier,
+        (w) => (spec.tier === null ? w.tier >= spec.from : w.tier === spec.tier),
       );
       fillWhaleTip(tip, `${day.date} ${spec.label}`, count, list, people);
       placeWhaleTip(tip, ctx.chart.canvas, ctx.tooltip.caretX, ctx.tooltip.caretY);
@@ -2310,8 +2361,8 @@ function createWhaleChart(container) {
       : last;
   }
 
-  function update(days, tiers, roster) {
-    syncPanels(panelSpecs(tiers || []));
+  function update(days, tiers, total, roster) {
+    syncPanels(panelSpecs(tiers || [], total));
     rows = days;
     people = roster || {};
     // 段を組み直したときも札は前の配信者の顔ぶれを出したまま残りうる。描き直しで畳み、
@@ -2335,19 +2386,37 @@ function createWhaleChart(container) {
   return { update };
 }
 
-// 帯ごとの人数は「その日1K以上を投げた人」の内訳。1人も居ない配信者では空表示にする。
+// 帯ごとの人数は「その日、最小帯の下限以上を投げた人」の内訳。1人も居ない配信者では空表示に
+// する。案内文の中の下限額はserverの帯から入れる(画面側に書くと、帯を足したときここだけ古い
+// 額を名乗る)。帯が来なかったとき(取得失敗)は前の文字を残す — 下限は配信者によらない定数
+// なので古い配信者の値が残ることは無く、消すと「以上を投げた人数」と読めない文になる。
+// 空かどうかは全帯の和で見る(合計段の人数ではない)。合計段は大口の下限から上しか積まない
+// ので、手前の帯にしか人が居ない配信者を「まだいません」と言って段ごと畳んでしまう。
 function renderWhales(data) {
   const days = data.days || [];
   const tiers = data.tiers || [];
-  const total = days.reduce((a, d) => a + (d.whales || 0), 0);
-  document.getElementById("sm-whale-empty").classList.toggle("hidden", total > 0);
+  const total = data.total;
+  if (tiers.length) {
+    document.querySelectorAll(".sm-whale-floor")
+      .forEach((el) => { el.textContent = tiers[0].min_label; });
+  }
+  if (total) {
+    document.querySelectorAll(".sm-whale-total-floor")
+      .forEach((el) => { el.textContent = total.min_label; });
+  }
+  const people = days.reduce(
+    (a, d) => a + (d.tiers || []).reduce((x, n) => x + n, 0), 0,
+  );
+  document.getElementById("sm-whale-empty").classList.toggle("hidden", people > 0);
   // 1人も居ないなら段を並べても0の平線が並ぶだけ。案内文だけを残してgraphは畳む。
-  document.getElementById("sm-whale-panels").classList.toggle("hidden", total === 0);
+  document.getElementById("sm-whale-panels").classList.toggle("hidden", people === 0);
+  // 見出しの最大人数は合計段(大口の下限以上)のもの。全帯の和で数えた空判定とは母数が
+  // 違うので、どの下限の数なのかを添える。
   const peak = days.reduce((a, d) => Math.max(a, d.whales || 0), 0);
-  document.getElementById("sm-whale-note").textContent = total
-    ? `${days.length}日 / 最大 ${fmtNum(peak)}人`
+  document.getElementById("sm-whale-note").textContent = people
+    ? `${days.length}日 / ${total ? `${total.min_label}↑ ` : ""}最大 ${fmtNum(peak)}人`
     : "";
-  whaleChart.update(days, tiers, data.people);
+  whaleChart.update(days, tiers, total, data.people);
 }
 
 // 内訳(新規/復帰/継続)は「つながりの強さ」の順序尺度なので、大口帯と同じく系統色を
@@ -2699,7 +2768,8 @@ elSearch.addEventListener("input", renderList);
 // 復元はここで済ませる。初期描画(renderProfile→renderHeatmap / renderOpponentRows)は
 // profile取得の後なので、この時点で値を入れておけば復元後の値で描かれる。
 bindPref(elHmMetric, PREF_HM_METRIC, renderHeatmap);
-bindPref(elTrendUnit, PREF_TREND_UNIT, () => renderTrend(currentSessions, currentViewerLevel));
+bindPref(elTrendUnit, PREF_TREND_UNIT,
+  () => renderTrend(currentSessions, currentViewerLevel, currentDailyCoins));
 document.getElementById("sm-opp-search").addEventListener("input", renderOpponentRows);
 // 軸の切替は取得済みのrowsを描き直すだけ。profileの再取得は要らない。
 bindPref(document.getElementById("sm-battle-trend-x"), PREF_BATTLE_TREND_X, () => battleTrendChart.applyMode());
@@ -2793,7 +2863,7 @@ document.addEventListener("keydown", (e) => {
   else if (!document.getElementById("sm-battle-modal").classList.contains("hidden")) closeBattleDetail();
 });
 trendChart = createSessionTrendChart(document.getElementById("sm-trend"), {
-  panels: ["coins", "comments", "viewers", "peak", "hours"],
+  panels: ["coins", "coinsMa", "comments", "viewers", "peak", "hours"],
   movingAvg: true,
   movingAvgWindow: TREND_MA_WINDOW,
 });

@@ -32,15 +32,22 @@ from tictok.store._common import (
 
 
 # 実弾(コイン)の大口帯。その日の合計で判定するため、1回のGiftの額ではなく同じ人の同日の
-# 積み上げで数える。帯は排他(1K〜5K / 5K〜10K / …)にして、積み上げた合計がそのまま
-# 「その日1K以上を投げた人数」になるようにする(重ねると同じ人を何度も数えることになる)。
+# 積み上げで数える。帯は排他(100〜1K / 1K〜5K / …)にして、同じ人を帯の数だけ数えない。
 # 閾値はここが唯一の定義で、labelごと画面へ渡す(frontend側で数値を再掲しない)。
 # 10K以上は元の3帯(10K〜50K / 50K〜100K / 100K↑)では中が見えないので、既存の境目
 # (10K・50K・100K)を保ったまま内側を割る。境目を動かすと過去に読んだ帯の人数と
 # 意味が変わるため、割るときは足すだけにする。
 _WHALE_TIERS = (
+    100,
     1000, 5000, 10000, 20000, 30000, 40000, 50000, 75000, 100000, 200000, 300000,
 )
+
+# 最上段の合計が名乗る下限。「大口」と呼ぶのは1K以上で、その手前の100〜1Kは大口へ育つ前の
+# 層として帯だけ出し、合計には積まない(合計が全帯の和でなくなるのはこのためで、画面側も
+# 同じ下限から段の名前と案内文を作る)。帯の境目そのものを指すこと — 境目に無い額を置くと
+# 合計がどの帯からの積み上げなのか対応が取れない。indexは不一致ならimport時に落とす。
+_WHALE_TOTAL_MIN = 1000
+_WHALE_TOTAL_INDEX = _WHALE_TIERS.index(_WHALE_TOTAL_MIN)
 
 # cohortで「その日その人が居た」と数えるevent。giftだけでなく在室の痕跡すべてを採るのが
 # cohortの母集合の定義で、この並びがcacheに載る値を決めるため、変えたら版を上げること。
@@ -178,8 +185,18 @@ def _whale_tier_defs() -> list:
     return defs
 
 
+def _whale_total_def() -> dict:
+    """最上段(合計)の定義。下限額とその表記、どの帯から積むかを画面へ渡す。
+    画面側で帯の並びから割り出させると、帯を足したときに合計の起点が黙ってずれる。"""
+    return {
+        "min": _WHALE_TOTAL_MIN,
+        "min_label": _coin_label(_WHALE_TOTAL_MIN),
+        "from_tier": _WHALE_TOTAL_INDEX,
+    }
+
+
 def _whale_tier_index(coins: int):
-    """coinsが属する排他帯のindex。最小帯に満たなければNone(大口ではない)。"""
+    """coinsが属する排他帯のindex。最小帯にも満たなければNone(どの帯にも入らない)。"""
     idx = None
     for i, low in enumerate(_WHALE_TIERS):
         if coins >= low:
@@ -188,8 +205,8 @@ def _whale_tier_index(coins: int):
 
 
 # 1日ぶんの帯に添える顔ぶれの上限。人数そのものはtiersが持つので、この一覧は表示用で
-# あって数の根拠ではない(切っても人数は狂わない)。実測でも1日25人が最大だが、荒れた日に
-# payloadが際限なく伸びないよう天井を置く。
+# あって数の根拠ではない(切っても人数は狂わない)。実測では下限100コインでも1日38人が最大
+# だが、荒れた日にpayloadが際限なく伸びないよう天井を置く。
 _WHALE_ROSTER_PER_DAY = 100
 
 
@@ -595,6 +612,26 @@ class StreamersMixin:
         # が後から作り直す対象がまさにそれで、空のまま覚えると作り直した後も空のままになる
         # (heatmapと同じ理由・同じ判定)。
         level_ids = [row["id"] for row in session_rows]
+        # コインの日次。推移のコイン段はこの日別合計を描く ―― sessionを1本=1点で並べると、
+        # 同じ配信がreconnectで最大7本のsessionに割れ(実測: 配信者×日の71.7%が2本以上)、
+        # さらにsessionの35.6%が日を跨ぐため、session合計を開始日へ寄せた「日次」は実際の
+        # その日のコインと一致しない。event時刻でその場で数え直す。
+        # 対象はsession_rowsと同じsession集合。画面の他の数字(通算KPI・大口の日次人数)と
+        # 突き合わせられるよう、母集合を揃える。
+        # コインを持つeventはgiftだけ(実測: 全1,415,612件中diamonds>0はgift 34,657件のみ)
+        # なのでkindで絞る。日付はlocaltime ―― 画面の他の日付と同じ物差しに揃える。
+        daily_coins = [
+            {"date": row["ymd"], "diamonds": row["diamonds"] or 0}
+            for row in conn.execute(
+                "SELECT strftime('%Y-%m-%d', e.time, 'unixepoch', 'localtime') AS ymd,"
+                " SUM(e.diamonds) AS diamonds FROM events e"
+                " WHERE e.session_id IN (SELECT je.value FROM json_each(?) je)"
+                "   AND e.kind = 'gift'"
+                " GROUP BY ymd ORDER BY ymd",
+                (json.dumps(level_ids),),
+            ).fetchall()
+            if row["ymd"]
+        ]
         cacheable = [
             row["id"] for row in conn.execute(
                 "SELECT s.id AS id FROM sessions s"
@@ -1103,6 +1140,8 @@ class StreamersMixin:
             "average": average,
             "best": best,
             "viewer_level": viewer_level,
+            # コインの日次合計(event時刻ベース)。推移のコイン段が読む。
+            "daily_coins": daily_coins,
             "gifters": gifters[:100],
             # ライバーだけを抜いた一覧。gifters[:100] から絞ると、コイン順で100位より下の
             # ライバーが消えて「誰が投げたか」が欠ける(比率の分子には入っているのに一覧に
@@ -1179,7 +1218,9 @@ class StreamersMixin:
                     "retention": (len(retained) / len(prev_keys) * 100) if prev_keys else None,
                     "diamonds": sum(by_day[ymd].values()),
                     "tiers": tiers,
-                    "whales": sum(tiers),
+                    # 合計は全帯の和ではなく、大口の下限以上だけを積む。手前の帯
+                    # (100〜1K)は内訳として出すが、大口の人数には数えない。
+                    "whales": sum(tiers[_WHALE_TOTAL_INDEX:]),
                     # 顔ぶれ。tiersが人数で、こちらは誰かの一覧(上限で切れうる)。
                     "whales_list": whales_list,
                 }
@@ -1188,6 +1229,7 @@ class StreamersMixin:
         return {
             "days": days,
             "tiers": _whale_tier_defs(),
+            "total": _whale_total_def(),
             "people": self._whale_people(conn, handles, whale_keys),
         }
 

@@ -167,6 +167,46 @@ commentは `events` の壁時計から今の軸で引き直せる(anchorsが根�
 いる。直す手段は文字起こしのやり直しだけで、判定は「文字起こしの `duration` と素材の実尺の差」で行う。bookmarkも
 同じ理由で機械的には直せない(検出のみ)。
 
+## 障害: 画面から都度引く秒だけが、焼き付けた秒と別の軸に載った
+
+`search_hits.video_time`(comment・文字起こし)は `indexer.build_playback_mapper` が**mp4の尺を
+測ってから**焼き付ける。一方、gift icon・PK・heat bar・切り出し候補・Battle履歴からの飛び先は
+DBへ焼かず、開くたびに `indexer.build_time_mapper_sync` で引き直す。この同期版はffprobeを避ける
+ため尺を渡していなかった。
+
+尺を渡さないと `_media_to_pts` は**恒等写像へ落ちる**(`video_duration` が無ければ何も掛けない)。
+`media_pts` を持つ録画ではmapperがそもそも尺を見ないので誰も気付かなかったが、`media_pts` を
+持たない旧録画(timing.json 版1)でmp4を再生する録画だけは、media軸の秒がそのままPTS軸の秒として
+使われる。**焼き付けた側だけが水増しを吸収し、都度引く側は吸収しない**という食い違いになる。
+
+実測(録画00052 = recording_id 56、pomiiiip 2026-06-21、素材5時間41分/mp4 5時間53分):
+
+| | 表示 | 実際 | ズレ |
+|---|---|---|---|
+| Fly Love (19,999) | 2:21:12 | 2:25:59 | 4分47秒 |
+| Whale diving (2,150) | 2:36:49 | 2:42:08 | 5分19秒 |
+| 末尾 | — | — | 693秒 |
+
+commentと文字起こしは合っていて**giftとPKだけがズレる**という形で出る。ズレは尺に比例して
+育つので、頭のギフトは合って見える。
+
+`build_time_mapper_sync` は尺を受け取るようになり、4つの呼び出し口(`/gifts` `/heat` `/locate`
+`clip-candidates`)が `indexer.mapper_video_duration` 経由で `recordings.duration_seconds` を渡す。
+尺をffprobeで測り直さないのは、既にDBに在るため(実測で probe との差は最大0.14秒)。渡す条件は
+`build_playback_mapper` がffprobeを掛ける条件(mp4が実在すること)に揃える — 素材(.ts)しか
+残っていない録画へmp4の尺を持ち込むと、playerが辿らない軸へ載る。
+
+### 残るズレ
+
+単一scaleは「継ぎ目ごとの水増しが一定」という近似である。実測(録画00052): 映像PTSの前後差は
+中央値0.040秒・最大4.28秒で、**30秒以上の穴は1つも無い**(`_probe_pts_gaps` の閾値
+`PTS_DISCONTINUITY_MIN_SECONDS` = 30.0)。水増し693秒は10,235個の継ぎ目へ1個あたり約0.068秒ずつ
+散っており、凍結区間としては現れない。散っているぶん単一scaleがよく効くが、継ぎ目ごとの
+ばらつきは残る — commentが「わずかにズレる」のはこれで、`media_pts` を作り直さないと消えない。
+
+作り直しには .ts が要る(`scripts/repair_timing_pts.py`)。この母集合8本(recording_id
+56/66/67/68/69/74/75/76、いずれもpomiiiip)は素材が既に無いため、単一scaleが到達点である。
+
 ## 焼き込み(video_overlay)との関係
 
 焼き込みは `prefer_hls=True` で .ts を直接読み、HLS入力のときは `media_pts` に恒等の2点mapを

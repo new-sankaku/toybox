@@ -378,6 +378,74 @@ describe("segmented control", () => {
   });
 });
 
+// 段の多い群(再生速度)はpillを並べず1本のbarで出す。呼び出し側は<select>と同じI/Fで
+// 書かれているので、置き換えて壊れる形は「I/Fが違う」か「操作がchangeを出さない」。
+describe("目盛り付きのbar", () => {
+  let page;
+  let win;
+  let root;
+  const range = () => page.document.querySelector(".segbar-range");
+  const out = () => page.document.querySelector(".segbar-out");
+  const drag = (index) => {
+    range().value = String(index);
+    range().dispatchEvent(new win.Event("input", { bubbles: true }));
+  };
+  beforeEach(() => {
+    page = loadCommon({
+      html: `<!doctype html><html><body>
+        <span id="rate" class="segbar" data-stops="0.5,1,2,4" data-value="1"
+              data-revert="1" data-wheel="1" data-label="再生速度" data-unit="x"></span>
+      </body></html>`,
+    });
+    win = page.win;
+    root = win.initSegBar("rate");
+  });
+  afterEach(async () => page.close());
+
+  it("<select>と同じ value / selectedIndex / options のI/Fを持つ", () => {
+    expect(root.value).toBe("1");
+    expect(root.selectedIndex).toBe(1);
+    expect(root.options.map((o) => o.value)).toEqual(["0.5", "1", "2", "4"]);
+  });
+
+  it("今の値をbarの隣に出す(barだけでは「この辺」までしか読めない)", () => {
+    expect(out().textContent).toBe("1x");
+    expect(range().max).toBe("3");
+    expect(range().value).toBe("1");
+  });
+
+  it("摘みを動かすと change を出す(離すまで待たない)", () => {
+    const onChange = vi.fn();
+    root.addEventListener("change", onChange);
+    drag(3);
+    expect(root.value).toBe("4");
+    expect(out().textContent).toBe("4x");
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("値の表示をclickすると既定値へ戻す(pillの「選択中を再click」の代わり)", () => {
+    drag(3);
+    out().click();
+    expect(root.value).toBe("1");
+  });
+
+  it("wheelは1段ずつ送る(向きはsegmented controlと同じ)", () => {
+    root.dispatchEvent(new win.WheelEvent("wheel", { deltaY: 1, bubbles: true, cancelable: true }));
+    expect(root.value).toBe("2");
+    root.dispatchEvent(new win.WheelEvent("wheel", { deltaY: -1, bubbles: true, cancelable: true }));
+    expect(root.value).toBe("1");
+  });
+
+  it("値の代入はuser操作ではないので change を出さない", () => {
+    const onChange = vi.fn();
+    root.addEventListener("change", onChange);
+    root.value = "2";
+    expect(root.value).toBe("2");
+    expect(range().value).toBe("2");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
 // job件数はnavの「Job」に付くbadge。数の出所はWSだけで、届く前は何も描かない
 // (0件と描くと「job が無い」という未確認の主張になる)。
 describe("job badge", () => {

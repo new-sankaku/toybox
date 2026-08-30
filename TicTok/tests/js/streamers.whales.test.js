@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { loadPage } from "./helpers/page.js";
 
 // 大口(実弾)の日次人数。帯は「その日1日のコイン合計」で決まり、重ならない
-// (1K〜5K / 5K〜10K / …)。重ねて数えると同じ人を帯の数だけ数えることになり、
-// 合計が「1K以上を投げた人数」でなくなる。帯の定義はserverから来るので、本数や
-// labelが変わっても画面側で数値を再掲しないことも縛る。
+// (100〜1K / 1K〜5K / …)。重ねて数えると同じ人を帯の数だけ数えることになる。
+// 最上段の合計は全帯の和ではなく、大口の下限(total.from_tier)から上だけの積み上げで、
+// 手前の帯は内訳としてだけ出る。帯もその下限もserverから来るので、本数やlabelが変わっても
+// 画面側で数値を再掲しないことを縛る。
 //
 // 表示は帯ごとに1段のsmall multiples。積み上げ1枚に戻すと、下の帯が動いた分だけ
 // 上の帯の底が上下し、帯自身の増減が読めなくなる。
@@ -20,6 +21,8 @@ describe("streamers.js の大口(実弾)日次人数", () => {
     { min: 50000, max: 100000, label: "50K〜100K", min_label: "50K" },
     { min: 100000, max: null, label: "100K↑", min_label: "100K" },
   ];
+  // 合計段の起点。ここでは先頭の帯から積む(手前の帯を持たない並び)。
+  const TOTAL = { min: 1000, min_label: "1K", from_tier: 0 };
   const DAYS = [
     { date: "2026-08-01", tiers: [3, 1, 0, 0, 0], whales: 4 },
     { date: "2026-08-02", tiers: [1, 0, 2, 0, 1], whales: 4 },
@@ -88,7 +91,7 @@ describe("streamers.js の大口(実弾)日次人数", () => {
   }
 
   it("最上段が合計、以下がserverのlabel順で帯ごと1段", () => {
-    win.renderWhales({ days: DAYS, tiers: TIERS });
+    win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
     expect(panelNames()).toEqual(["1K↑ 合計", "1K〜5K", "5K〜10K", "10K〜50K", "50K〜100K", "100K↑"]);
     const charts = panelCharts();
     expect(charts).toHaveLength(6);
@@ -100,7 +103,7 @@ describe("streamers.js の大口(実弾)日次人数", () => {
   });
 
   it("積み上げず、段ごとに独立した縦目盛りを持つ(桁の違う帯を潰さない)", () => {
-    win.renderWhales({ days: DAYS, tiers: TIERS });
+    win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
     panelCharts().forEach((c) => {
       expect(c.data.datasets).toHaveLength(1);
       expect(c.data.datasets[0].stack).toBeUndefined();
@@ -113,7 +116,7 @@ describe("streamers.js の大口(実弾)日次人数", () => {
   });
 
   it("日付の目盛りは最下段だけが出す(同じ軸を段の数だけ書かない)", () => {
-    win.renderWhales({ days: DAYS, tiers: TIERS });
+    win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
     const charts = panelCharts();
     expect(charts.map((c) => c.options.scales.x.display)).toEqual([
       false, false, false, false, false, true,
@@ -121,7 +124,7 @@ describe("streamers.js の大口(実弾)日次人数", () => {
   });
 
   it("段ごとの目盛りは伏せる代わりに、名前の脇へその段の最大人数を出す", () => {
-    win.renderWhales({ days: DAYS, tiers: TIERS });
+    win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
     expect(panelPeaks()).toEqual([
       "最大 4人", "最大 3人", "最大 1人", "最大 2人", "最大 0人", "最大 1人",
     ]);
@@ -131,7 +134,7 @@ describe("streamers.js の大口(実弾)日次人数", () => {
   });
 
   it("名前と最大値は塗りの外(左の欄)へ出す(棒に重ねて上の余白を作らない)", () => {
-    win.renderWhales({ days: DAYS, tiers: TIERS });
+    win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
     const container = doc.getElementById("sm-whale-panels");
     // 1段=名前欄+塗りの2cell。塗りの中にlabelを置かない。
     expect(container.children).toHaveLength(12);
@@ -164,7 +167,7 @@ describe("streamers.js の大口(実弾)日次人数", () => {
     }
 
     beforeEach(() => {
-      win.renderWhales({ days: DAYS, tiers: TIERS });
+      win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
     });
 
     it("棒が立った日だけに書く(0の日は書かない)", () => {
@@ -206,6 +209,7 @@ describe("streamers.js の大口(実弾)日次人数", () => {
     win.renderWhales({
       days: [{ date: "2026-08-01", tiers: many.map(() => 1), whales: 11 }],
       tiers: many,
+      total: TOTAL,
     });
     // 先頭は合計段(帯の系統色ではない)なので外す。
     const fills = panelCharts().slice(1).map((c) => c.data.datasets[0].backgroundColor);
@@ -221,10 +225,11 @@ describe("streamers.js の大口(実弾)日次人数", () => {
   });
 
   it("帯の本数が変わったら段を組み直す(古い帯が残らない)", () => {
-    win.renderWhales({ days: DAYS, tiers: TIERS });
+    win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
     win.renderWhales({
       days: [{ date: "2026-08-01", tiers: [2, 1], whales: 3 }],
       tiers: TIERS.slice(0, 2),
+      total: TOTAL,
     });
     expect(panelNames()).toEqual(["1K↑ 合計", "1K〜5K", "5K〜10K"]);
     const charts = panelCharts();
@@ -233,33 +238,73 @@ describe("streamers.js の大口(実弾)日次人数", () => {
   });
 
   it("同じ帯構成で描き直しても段は作り直さない(dataだけ差し替える)", () => {
-    win.renderWhales({ days: DAYS, tiers: TIERS });
+    win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
     const first = panelCharts();
-    win.renderWhales({ days: DAYS.slice(0, 2), tiers: TIERS });
+    win.renderWhales({ days: DAYS.slice(0, 2), tiers: TIERS, total: TOTAL });
     const second = panelCharts();
     expect(second).toHaveLength(6);
     expect(second[0]).toBe(first[0]);
     expect(second[0].data.labels).toEqual(["2026-08-01", "2026-08-02"]);
   });
 
-  it("合計段の呼び名はserverの最小帯から作る", () => {
+  it("合計段の呼び名はserverの合計下限から作る(最小帯ではない)", () => {
     win.renderWhales({
-      days: [{ date: "2026-08-01", tiers: [1], whales: 1 }],
-      tiers: [{ min: 2000, max: null, label: "2K↑", min_label: "2K" }],
+      days: [{ date: "2026-08-01", tiers: [1, 1], whales: 1 }],
+      tiers: [
+        { min: 100, max: 2000, label: "100〜2K", min_label: "100" },
+        { min: 2000, max: null, label: "2K↑", min_label: "2K" },
+      ],
+      total: { min: 2000, min_label: "2K", from_tier: 1 },
     });
-    expect(panelNames()).toEqual(["2K↑ 合計", "2K↑"]);
+    expect(panelNames()).toEqual(["2K↑ 合計", "100〜2K", "2K↑"]);
   });
 
-  it("日数と最大人数を見出しに添える", () => {
-    win.renderWhales({ days: DAYS, tiers: TIERS });
-    expect(doc.getElementById("sm-whale-note").textContent).toBe("3日 / 最大 4人");
+  // 案内文の「N以上を投げた人数」の下限額も定義そのもの。画面に書くと、帯を足したとき
+  // ここだけ古い額を名乗る。合計の下限と最小帯の下限は別物なので、別の場所へ入れる。
+  it("案内文の下限額もserverの帯と合計下限から入れる", () => {
+    win.renderWhales({
+      days: [{ date: "2026-08-01", tiers: [1, 1], whales: 1 }],
+      tiers: [
+        { min: 100, max: 2000, label: "100〜2K", min_label: "100" },
+        { min: 2000, max: null, label: "2K↑", min_label: "2K" },
+      ],
+      total: { min: 2000, min_label: "2K", from_tier: 1 },
+    });
+    const floors = Array.from(doc.querySelectorAll(".sm-whale-floor")).map((el) => el.textContent);
+    expect(floors.length).toBeGreaterThan(0);
+    expect(floors.every((t) => t === "100")).toBe(true);
+    const tops = Array.from(doc.querySelectorAll(".sm-whale-total-floor")).map((el) => el.textContent);
+    expect(tops.length).toBeGreaterThan(0);
+    expect(tops.every((t) => t === "2K")).toBe(true);
+  });
+
+  it("日数と最大人数を見出しに添える(どの下限の数かも名乗る)", () => {
+    win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
+    expect(doc.getElementById("sm-whale-note").textContent).toBe("3日 / 1K↑ 最大 4人");
+  });
+
+  // 合計段は大口の下限から上しか積まない。手前の帯にしか人が居ない配信者を「まだいません」
+  // と言って段ごと畳むと、出ている帯のdataごと消える。
+  it("合計が0でも手前の帯に人が居れば段を出す", () => {
+    win.renderWhales({
+      days: [{ date: "2026-08-01", tiers: [4, 0], whales: 0 }],
+      tiers: [
+        { min: 100, max: 2000, label: "100〜2K", min_label: "100" },
+        { min: 2000, max: null, label: "2K↑", min_label: "2K" },
+      ],
+      total: { min: 2000, min_label: "2K", from_tier: 1 },
+    });
+    expect(doc.getElementById("sm-whale-empty").classList.contains("hidden")).toBe(true);
+    expect(doc.getElementById("sm-whale-panels").classList.contains("hidden")).toBe(false);
+    expect(panelCharts()[0].data.datasets[0].data).toEqual([0]);
+    expect(panelCharts()[1].data.datasets[0].data).toEqual([4]);
   });
 
   it("1人も居なければ案内を出し、0の平線が並ぶだけのgraphは畳む", () => {
-    win.renderWhales({ days: [DAYS[2]], tiers: TIERS });
+    win.renderWhales({ days: [DAYS[2]], tiers: TIERS, total: TOTAL });
     expect(doc.getElementById("sm-whale-empty").classList.contains("hidden")).toBe(false);
     expect(doc.getElementById("sm-whale-panels").classList.contains("hidden")).toBe(true);
-    win.renderWhales({ days: DAYS, tiers: TIERS });
+    win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
     expect(doc.getElementById("sm-whale-empty").classList.contains("hidden")).toBe(true);
     expect(doc.getElementById("sm-whale-panels").classList.contains("hidden")).toBe(false);
   });
@@ -268,7 +313,7 @@ describe("streamers.js の大口(実弾)日次人数", () => {
   // 棒に重ねたら、その日その帯の顔ぶれを名前とアイコンで名乗らせる。
   describe("棒に重ねたときの顔ぶれ", () => {
     beforeEach(() => {
-      win.renderWhales({ days: ROSTER_DAYS, tiers: TIERS, people: PEOPLE });
+      win.renderWhales({ days: ROSTER_DAYS, tiers: TIERS, total: TOTAL, people: PEOPLE });
     });
 
     it("段の帯に属する人だけを額の多い順に出す", () => {
@@ -278,11 +323,37 @@ describe("streamers.js の大口(実弾)日次人数", () => {
         .toBe("2026-08-01 1K〜5K 2人");
     });
 
-    it("合計段は帯で絞らず、その日の大口を全部出す", () => {
+    it("合計段は下限帯から上をまとめて出す", () => {
       hover({ panel: 0, dataIndex: 0 });
       expect(tipNames()).toEqual(["Whale King", "あおい", "(unknown)"]);
       expect(tipEl().querySelector(".sm-whale-tip-head").textContent)
         .toBe("2026-08-01 1K↑ 合計 3人");
+    });
+
+    // 合計に積まない手前の帯の人は、合計段の顔ぶれにも出さない。人数と顔ぶれで別の母数を
+    // 出すと、札の行数が人数と合わない。
+    it("合計段の顔ぶれから、下限に満たない帯の人は外す", () => {
+      win.renderWhales({
+        days: [{
+          date: "2026-08-01",
+          tiers: [1, 1],
+          whales: 1,
+          whales_list: [
+            { key: "k9", coins: 8000, tier: 1 },
+            { key: "k1", coins: 300, tier: 0 },
+          ],
+        }],
+        tiers: [
+          { min: 100, max: 2000, label: "100〜2K", min_label: "100" },
+          { min: 2000, max: null, label: "2K↑", min_label: "2K" },
+        ],
+        total: { min: 2000, min_label: "2K", from_tier: 1 },
+        people: PEOPLE,
+      });
+      hover({ panel: 0, dataIndex: 0 });
+      expect(tipNames()).toEqual(["Whale King"]);
+      expect(tipEl().querySelector(".sm-whale-tip-head").textContent)
+        .toBe("2026-08-01 2K↑ 合計 1人");
     });
 
     it("アイコンを添える(URLがある人は画像、無い人は頭文字)", () => {
@@ -301,6 +372,7 @@ describe("streamers.js の大口(実弾)日次人数", () => {
       win.renderWhales({
         days: [{ date: "2026-08-05", tiers: [40, 0, 0, 0, 0], whales: 40, whales_list: many }],
         tiers: TIERS,
+        total: TOTAL,
         people: {},
       });
       hover({ panel: 1, dataIndex: 0 });
@@ -325,12 +397,12 @@ describe("streamers.js の大口(実弾)日次人数", () => {
 
     it("別の配信者を描き直したら畳む(前の配信者の顔ぶれを出したまま残さない)", () => {
       hover({ panel: 0, dataIndex: 0 });
-      win.renderWhales({ days: ROSTER_DAYS, tiers: TIERS, people: PEOPLE });
+      win.renderWhales({ days: ROSTER_DAYS, tiers: TIERS, total: TOTAL, people: PEOPLE });
       expect(tipEl().classList.contains("hidden")).toBe(true);
     });
 
     it("serverが古くて顔ぶれを返さなくても落ちない(人数だけの表示に留まる)", () => {
-      win.renderWhales({ days: DAYS, tiers: TIERS });
+      win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
       hover({ panel: 1, dataIndex: 0 });
       expect(tipNames()).toEqual([]);
       expect(tipEl().querySelector(".sm-whale-tip-head").textContent).toBe("2026-08-01 1K〜5K 3人");

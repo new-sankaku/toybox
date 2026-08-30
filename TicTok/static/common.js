@@ -436,17 +436,50 @@ function readoutPoint(chart, di, index) {
 
 // どのindexを指しているかはChart.js自身の当たり判定に任せる。x軸がcategoryか実時間かで
 // pixel→値の意味が変わるため、自前でpixelから逆算するとtooltipと違う点を指すことがある。
+//
+// byValueのgroupは、指した点の**x値**を返す。paneごとに点の数が違う時(推移のコイン段は
+// 1日1点・他の段は1配信1点)、indexはpaneを跨いで同じ時点を指さない。
 function xhairIndexAt(chart, args) {
   if (!args.inChartArea || args.event.type === "mouseout") return null;
   const hit = chart.getElementsAtEventForMode(args.event, "index", { intersect: false }, true);
-  return hit.length ? hit[0].index : null;
+  if (!hit.length) return null;
+  const g = chart.$xhair;
+  if (!g || !g.byValue) return hit[0].index;
+  const pt = chart.data.datasets[hit[0].datasetIndex].data[hit[0].index];
+  return pt && typeof pt === "object" && Number.isFinite(pt.x) ? pt.x : null;
 }
 
-// 縦線を引くx。軸の型に依らず、実際に描かれた点のpixelを採る。
-function xhairPixel(chart, index) {
+// group が指している所を、このchartの中のindexへ落とす。byValueでは一番近い点を採るが、
+// toleranceより離れていたら採らない ―― 段ごとに点の並びが違うので(コインは1日1点・他は
+// 1配信1点)、x値が一致する保証は無い。離れすぎた点まで拾うと、その時点には無い値を
+// 縦線の上に並べることになる。
+function xhairSlot(chart, di, at) {
+  const g = chart.$xhair;
+  if (!g || !g.byValue) return at;
+  const tol = g.tolerance || 0;
+  const data = chart.data.datasets[di].data || [];
+  let best = -1;
+  let bestD = Infinity;
+  for (let i = 0; i < data.length; i++) {
+    const pt = data[i];
+    if (!pt || typeof pt !== "object" || !Number.isFinite(pt.x)) continue;
+    const d = Math.abs(pt.x - at);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return bestD <= tol ? best : -1;
+}
+
+// 縦線を引くx。byValueは軸へ直接x値を渡す ―― その段に点が無くても線は引く(段によって
+// 線の位置がずれると、縦に読むための線ではなくなる)。
+function xhairPixel(chart, at) {
+  const g = chart.$xhair;
+  if (g && g.byValue) {
+    const x = chart.scales.x ? chart.scales.x.getPixelForValue(at) : null;
+    return Number.isFinite(x) ? x : null;
+  }
   for (let di = 0; di < chart.data.datasets.length; di++) {
     if (!chart.isDatasetVisible(di)) continue;
-    const el = chart.getDatasetMeta(di).data[index];
+    const el = chart.getDatasetMeta(di).data[at];
     if (el && !el.skip && Number.isFinite(el.x)) return el.x;
   }
   return null;
@@ -454,8 +487,10 @@ function xhairPixel(chart, index) {
 
 // x(時間軸)を共有するchart群を1本の縦線で結ぶ。どのpanelにcursorが在っても全panelの
 // 同じ時点に線が落ちる。
-function linkCrosshair(charts) {
-  const group = { charts, index: null, source: null };
+// byValue: 共有するのをindexではなくx値にする(paneごとに点の数が違うchart用)。
+// tolerance: 縦線から何ぶんまでの点をその時点の値として読むか(byValueのときだけ効く)。
+function linkCrosshair(charts, { byValue = false, tolerance = 0 } = {}) {
+  const group = { charts, index: null, source: null, byValue, tolerance };
   charts.forEach((c) => { c.$xhair = group; });
   return group;
 }
@@ -494,9 +529,11 @@ const crosshairPlugin = {
       const picks = [];
       chart.data.datasets.forEach((ds, di) => {
         if (!chart.isDatasetVisible(di)) return;
-        const p = readoutPoint(chart, di, g.index);
+        const slot = xhairSlot(chart, di, g.index);
+        if (slot < 0) return;
+        const p = readoutPoint(chart, di, slot);
         if (!p) return;
-        const v = readoutValue(chart, di, g.index, p.value);
+        const v = readoutValue(chart, di, slot, p.value);
         if (v == null) return;
         picks.push({ ...p, text: `${ds.label ? `${ds.label} ` : ""}${fmtNum(readoutRound(v))}` });
       });
@@ -682,9 +719,10 @@ function stackedYFit(scale) { scale.width = STACKED_Y_WIDTH; }
 // container(.x-chartstack)の中にpanelを作り、canvasを返す。leadは主指標のpanelで高さを厚く取る。
 // canvasにはcontainerのidから起こした連番idを振る ―― panelは動的に作るので、idが無いと
 // 「どのpanelのchartか」を後から指せない(test・debugの取っ掛かりが消える)。
-function stackPane(container, { lead = false } = {}) {
+// thinは従属のpanel(移動平均だけを引く段など)。主指標より薄く取る。
+function stackPane(container, { lead = false, thin = false } = {}) {
   const pane = document.createElement("div");
-  pane.className = lead ? "x-cs-pane lead" : "x-cs-pane";
+  pane.className = `x-cs-pane${lead ? " lead" : ""}${thin ? " thin" : ""}`;
   const canvas = document.createElement("canvas");
   canvas.id = `${container.id}-p${container.children.length + 1}`;
   pane.appendChild(canvas);
@@ -1067,9 +1105,14 @@ function createTimelineChart(container) {
 // 末尾基準の単純移動平均(trailing SMA)。系列の「伸び」を均して見せる。
 // 値を持たない点(観測が無くて率を出せない配信など)は窓から外す ―― 0として混ぜると
 // 均した線だけが落ち込み、実際には起きていない減少に見える。窓が全部空なら線も引かない。
-function movingAverage(values, window) {
+//
+// requireFull:true は窓が埋まるまで線を引かない。窓の違う線を何本も重ねる時に要る ――
+// 埋まるまでを「手元にある点だけの平均」で描くと、左端では25日線も7日線も同じ点の平均に
+// なり、3本が1本に重なったまま始まる(長い窓ほど本当は遅れて始まる、という形が消える)。
+function movingAverage(values, window, requireFull = false) {
   const out = [];
   for (let i = 0; i < values.length; i++) {
+    if (requireFull && i < window - 1) { out.push(null); continue; }
     const start = Math.max(0, i - window + 1);
     let sum = 0;
     let count = 0;
@@ -1102,6 +1145,20 @@ function weightedShareAverage(numerators, denominators, window) {
   return out;
 }
 
+// 推移の時間軸は「日」で刻む。どちらもbrowserのlocal時刻 — 画面の他の日付
+// (fmtDate・時間帯ヒートマップ・serverが返す日次コインのYYYY-MM-DD)と同じ物差しに揃える。
+const TREND_DAY = 86400;
+function trendDayStart(epochSeconds) {
+  const d = new Date(epochSeconds * 1000);
+  d.setHours(0, 0, 0, 0);
+  return Math.floor(d.getTime() / 1000);
+}
+// server(strftime '%Y-%m-%d' localtime)が返す日付を、その日の0時のepochへ戻す。
+function trendYmdStart(ymd) {
+  const [y, m, d] = String(ymd).split("-").map(Number);
+  return Math.floor(new Date(y, m - 1, d).getTime() / 1000);
+}
+
 // 期間まとめ(週/月)の刻み。週の起点は月曜0時、月は暦月1日の0時で、どちらもbrowserの
 // local時刻で刻む — 画面の他の日付(fmtDate・時間帯ヒートマップ)と同じ物差しに揃える。
 function trendPeriodStart(epochSeconds, unit) {
@@ -1119,26 +1176,41 @@ function trendPeriodNext(startSeconds, unit) {
   return Math.floor(d.getTime() / 1000);
 }
 
-// 推移paneの定義。1指標=1paneで、x軸(時間)だけを共有して縦に積む。
+// 推移paneの定義。1指標=1paneで、x軸(日)だけを共有して縦に積む。
 // value(p) がその点の値(無い時はnullを返す ―― spanGapsで線を繋ぎ、棒は空ける)。
-// ma:true の系列は同じ色の破線で移動平均を重ねる。paneを足すときはここへ1件足す。
+// daily:true のpaneは配信ではなく**日(期間)**の点を描く。paneを足すときはここへ1件足す。
 //
 // 色は指標ごとに1色。同じpaneの複数系列は「同じ量の別の読み方」なので色を変えず、
 // 実線(平均)・破線(条件付きの平均)・細い薄線(Peak)で描き分ける。別の色を当てると
-// 別の指標に見える(コインの移動平均を同色の破線にしているのと同じ理由)。
+// 別の指標に見える。
 const TREND_PANES = {
   coins: {
-    lead: true, type: "bar", title: "コイン", color: 0,
+    // コインは配信ごとではなく日ごとに数える。1配信=1本で並べると、同じ配信が
+    // reconnectで最大7本のsessionに割れ(実測: 配信者×日の71.7%が2本以上)、さらに
+    // sessionの35.6%が日を跨ぐため、棒の1本が「その日いくら出たか」を指さない。
+    lead: true, type: "bar", title: "コイン", color: 0, daily: true,
     ticks: { callback: (v) => fmtCompact(v) },
-    series: [{ label: "コイン", bar: true, ma: true, value: (p) => p.coins,
+    series: [{ label: "コイン", bar: true, value: (p) => p.coins,
                fmt: (v) => fmtNum(Math.round(v)) }],
   },
+  coinsMa: {
+    // コインの移動平均。棒と同じ段に重ねると線が棒に埋もれて形を追えない(窓を3本に
+    // すると尚更)ので段を分ける。3本は同じ指標の平滑度違いなので色は変えず、量の段
+    // (薄→濃 = 短期→長期)で順序を色に出す。
+    type: "line", title: "コイン 移動平均", color: 0, daily: true, maLines: 3,
+    ticks: { callback: (v) => fmtCompact(v) },
+    series: [],
+  },
   comments: {
-    type: "bar", title: "コメント/分", color: 2,
     // 実数のままだと10分の配信と6時間の配信が同じ物差しで並ばない(長く配信した分だけ
     // 棒が伸びる)。分母は名目の配信時間ではなく観測秒 ―― 収集が落ちた区間はコメントも
     // 記録されていないので、名目で割るとその配信だけ率が半分に見える。
-    series: [{ label: "コメント/分", bar: true, ma: true, value: (p) => p.commentsPerMin,
+    //
+    // 棒ではなく線。x軸が実日付になったので、棒の幅は隣の点との実間隔で決まる ――
+    // reconnectで割れた配信は3分しか離れておらず(実測)、その日の棒が軒並み1px未満に
+    // 潰れる。そもそも率は量ではないので、水準の段(同接)と同じく線で読む。
+    type: "line", title: "コメント/分", color: 2,
+    series: [{ label: "コメント/分", ma: true, value: (p) => p.commentsPerMin,
                fmt: (v) => v.toFixed(1) }],
   },
   // 平均とPeakは同じ「人」だが桁が違う(実測で平均12〜29に対しPeakは140〜205)。1枚に
@@ -1161,30 +1233,40 @@ const TREND_PANES = {
                fmt: (v) => fmtNum(Math.round(v)) }],
   },
   hours: {
-    // 4枚が隣り合う面なので、色は先頭4色に収める(隣り合う任意の2色の分離が
-    // 確かめてあるのはそこまで ―― SERIESの定義を参照)。
+    // 隣り合う面なので、色は先頭4色に収める(隣り合う任意の2色の分離が確かめてあるのは
+    // そこまで ―― SERIESの定義を参照)。
     type: "line", title: "配信時間(h)", color: 3,
     series: [{ label: "配信時間", value: (p) => p.hours, text: (p) => p.durText }],
   },
 };
 
-// opts.panels: 積むpaneのkey(TREND_PANESの見出し)。既定は ["coins", "hours"] で、
-// 既存の呼び出し(chart見本ページ)はこれまでどおり2枚のまま。
+// opts.panels: 積むpaneのkey(TREND_PANESの見出し)。既定は ["coins", "hours"]。
 // opts.movingAvg: ma:true のpaneへ移動平均線を重ねる(成長トレンド可視化)。既定off。
 // opts.movingAvgWindow で窓幅(既定5)。containerは .x-chartstack。
 // 指標ごとに単位も桁も違うので、二軸で重ねず上下のpanelへ分ける。時間軸は共有する。
+//
+// x軸は**日**の実数軸(1目盛=1日・0=窓の最初の暦日の0時)。等間隔のcategory軸だと、
+// 隣り合う2本の距離が実際に何日離れているかを表さない ―― 1日に2配信あった日と、
+// 2週間空いた日が同じ幅で並ぶ。日ごとの段(コイン)と配信ごとの段を縦に読むには、
+// 両者が同じ実時間の上に載っている必要がある。
 function createSessionTrendChart(container, opts = {}) {
-  // 描画点。session単位は1配信=1点、week/month単位はその期間の合計=1点。
-  // 棒・線・tooltip・x目盛はすべてこの配列だけを読む。
+  // 配信ごとの段が読む点。単位が配信ごとなら1配信=1点、週/月なら1期間=1点。
   let points = [];
-  // x目盛に出すのは「いつ頃か」だけ。年は期間が延びるほど幅を食い、同じ日の2本目以降に
-  // 付く連番(:2)は棒を区別するための添字で、軸には要らない。1本の素性はtooltipが名乗る。
-  function xTickLabel(index) {
-    const p = points[index];
-    return p ? p.tick : "";
-  }
+  // 日ごとの段(コイン)が読む点。単位が配信ごとなら1日=1点、週/月なら1期間=1点。
+  // 日を跨いだ配信のコインは翌日へ乗るので、配信の点には載せられない。
+  let coinPoints = [];
+  // x=0 が指す日の0時(epoch秒)と、軸が覆う日数。
+  let origin = 0;
+  let span = 1;
+  let viewUnit = "session";
 
   const p2 = (n) => String(n).padStart(2, "0");
+  // 日index。DSTのある地域でも日の境目で数えられるよう、時刻の差ではなく「その日の0時」
+  // どうしの差で数える。
+  const dayNo = (t) => Math.round((trendDayStart(t) - origin) / TREND_DAY);
+  const dayX = (t) => dayNo(t) + (t - trendDayStart(t)) / TREND_DAY;
+  // 日indexが指す日の0時。境目でぶれないよう正午から日の頭へ丸める。
+  const dayAt = (n) => trendDayStart(origin + n * TREND_DAY + TREND_DAY / 2);
 
   // 率の分母。0で割らないだけでなく、観測秒を持たない配信(bucketが無い)は率そのものを
   // 持たないのでnullを返す。0にすると「コメントが無かった」と読めてしまう。
@@ -1204,22 +1286,39 @@ function createSessionTrendChart(container, opts = {}) {
     return den > 0 ? num / den : null;
   }
 
-  // 配信1本=1点。同じ日に2本以上あるとx keyが衝突するので連番を足す(軸には出さない)。
+  // x目盛に出すのは「いつ頃か」だけ。年は期間が延びるほど幅を食うので、月まとめの時だけ
+  // 下2桁を残す。1本の素性はtooltipが名乗る。
+  function tickLabel(v) {
+    const d = new Date(dayAt(Math.round(v)) * 1000);
+    return viewUnit === "month"
+      ? `${String(d.getFullYear()).slice(2)}/${p2(d.getMonth() + 1)}`
+      : `${p2(d.getMonth() + 1)}/${p2(d.getDate())}`;
+  }
+
+  // 目盛の位置。配信ごと(=日)は日index上の等間隔、期間まとめは期間の頭へ置く。
+  // Chart.js任せの「きりのいい数」だと、月まとめで月の途中に目盛が立つ。
+  function tickValues() {
+    if (viewUnit !== "session" && coinPoints.length) {
+      const step = Math.max(1, Math.ceil(coinPoints.length / 12));
+      return coinPoints.filter((_, i) => i % step === 0).map((p) => p.start);
+    }
+    const step = Math.max(1, Math.ceil(span / 11));
+    const out = [];
+    for (let d = 0; d < span; d += step) out.push(d);
+    return out;
+  }
+
+  // 配信1本=1点。x はその配信が始まった実時刻(日の小数)。
   function sessionPoints(rows) {
-    const ymdSeen = {};
     return rows.map((s) => {
-      const ymd = fmtYmd(s.started_at);
-      ymdSeen[ymd] = (ymdSeen[ymd] || 0) + 1;
       const observed = s.observed_seconds || 0;
       return {
-        key: ymdSeen[ymd] > 1 ? `${ymd}:${ymdSeen[ymd]}` : ymd,
-        tick: ymd.length === 8 ? `${ymd.slice(4, 6)}/${ymd.slice(6, 8)}` : ymd,
+        x: dayX(s.started_at),
         title: `#${sessionNo(s.id)}  ${fmtDateTime(s.started_at)}`,
         // 収集中の配信は終端が無い。0時間として黙って畳むと「短い配信」に見えるので、
-        // 尺のかわりに収集中と名乗る(棒の高さは0のまま)。
+        // 尺のかわりに収集中と名乗る(線の高さは0のまま)。
         durText: s.ended_at ? fmtDuration(s.ended_at - s.started_at) : "収集中",
         sub: "",
-        coins: (s.stats && s.stats.diamonds) || 0,
         hours: s.ended_at ? (s.ended_at - s.started_at) / 3600 : 0,
         commentsPerMin: rate(s.comments || 0, observed / 60),
         viewersAvg: s.viewers_avg == null ? null : s.viewers_avg,
@@ -1231,40 +1330,34 @@ function createSessionTrendChart(container, opts = {}) {
     });
   }
 
-  // 週/月の合計。配信の無い期間も0の点として残す — 飛ばすと空白期間が詰まり、離れた
-  // 2つの週(月)が隣り合っているように読める。
-  // 合計にできるのは量(コイン・配信時間)だけ。率(コメント/分)と水準(同接)は期間の中で
-  // 足しても意味を持たないので、期間の中の分子・分母をそれぞれ足してから割る。
-  function periodPoints(rows, unit) {
-    const buckets = new Map();
-    let first = Infinity;
-    let last = -Infinity;
-    rows.forEach((s) => {
-      const start = trendPeriodStart(s.started_at, unit);
-      if (start < first) first = start;
-      if (start > last) last = start;
-      if (!buckets.has(start)) buckets.set(start, []);
-      buckets.get(start).push(s);
-    });
+  // 窓の中の期間(週/月)を頭から順に並べる。配信の無い期間も残す — 飛ばすと空白期間が
+  // 詰まり、離れた2つの週(月)が隣り合っているように読める。
+  function periodList(unit) {
     const out = [];
-    for (let start = first; start <= last; start = trendPeriodNext(start, unit)) {
-      const group = buckets.get(start) || [];
+    const last = trendPeriodStart(dayAt(span - 1), unit);
+    for (let start = trendPeriodStart(origin, unit); start <= last;
+         start = trendPeriodNext(start, unit)) {
+      out.push({ start, next: trendPeriodNext(start, unit) });
+    }
+    return out;
+  }
+
+  // 週/月の合計。合計にできるのは量(配信時間)だけ。率(コメント/分)と水準(同接)は期間の
+  // 中で足しても意味を持たないので、期間の中の分子・分母をそれぞれ足してから割る。
+  function periodPoints(rows, unit, periods) {
+    return periods.map(({ start, next }) => {
+      const group = rows.filter((s) => s.started_at >= start && s.started_at < next);
       const d = new Date(start * 1000);
       const hours = group.reduce((acc, s) => acc + (s.ended_at ? (s.ended_at - s.started_at) / 3600 : 0), 0);
       const observed = group.reduce((acc, s) => acc + (s.observed_seconds || 0), 0);
-      out.push({
-        key: String(start),
-        // 月は年をまたいで並ぶので、目盛にも年(下2桁)を残す。週は日付だけで足りる。
-        tick: unit === "month"
-          ? `${String(d.getFullYear()).slice(2)}/${p2(d.getMonth() + 1)}`
-          : `${p2(d.getMonth() + 1)}/${p2(d.getDate())}`,
+      return {
+        x: (dayNo(start) + dayNo(next - 1) + 1) / 2,
         title: unit === "month"
           ? `${d.getFullYear()}/${p2(d.getMonth() + 1)}（月合計）`
-          : `${fmtDate(start)}〜${fmtDate(trendPeriodNext(start, unit) - 1)}（週合計）`,
+          : `${fmtDate(start)}〜${fmtDate(next - 1)}（週合計）`,
         durText: fmtDuration(Math.round(hours * 3600)),
-        // 1本の棒が何本ぶんの合計かを名乗らないと、1配信の棒と区別が付かない。
+        // 1本が何本ぶんの合計かを名乗らないと、1配信の点と区別が付かない。
         sub: `配信 ${fmtNum(group.length)}本`,
-        coins: group.reduce((acc, s) => acc + ((s.stats && s.stats.diamonds) || 0), 0),
         hours,
         commentsPerMin: rate(group.reduce((acc, s) => acc + (s.comments || 0), 0), observed / 60),
         viewersAvg: weightedMean(group, (s) => s.viewers_avg, (s) => s.observed_seconds),
@@ -1272,9 +1365,60 @@ function createSessionTrendChart(container, opts = {}) {
         viewersPeak: group.reduce((acc, s) => Math.max(acc, s.viewers || 0), 0) || null,
         observedSeconds: observed,
         noboxSeconds: group.reduce((acc, s) => acc + (s.nobox_seconds || 0), 0),
+      };
+    });
+  }
+
+  // コインの日次。配信の無い日も0の点として残す ―― 飛ばすと空いた日が詰まるうえ、
+  // 移動平均の窓が「配信のあった日」で数えられ、窓の実長が配信頻度で伸び縮みする。
+  function dailyCoinPoints(daily, rows) {
+    const byDay = new Map();
+    (daily || []).forEach((d) => {
+      const n = dayNo(trendYmdStart(d.date));
+      if (n < 0 || n >= span) return;
+      byDay.set(n, (byDay.get(n) || 0) + (d.diamonds || 0));
+    });
+    const now = Date.now() / 1000;
+    const out = [];
+    for (let n = 0; n < span; n++) {
+      const start = dayAt(n);
+      const end = start + TREND_DAY;
+      // その日に掛かっていた配信の本数。日を跨いだ配信のコインは翌日へ乗るので、
+      // 「その日に始まった配信」ではなく「その日に掛かっていた配信」で数える。
+      const live = rows.filter((s) => s.started_at < end && (s.ended_at || now) >= start).length;
+      out.push({
+        x: n + 0.5,
+        start: n,
+        lo: n, hi: n + 1,
+        live,
+        title: fmtDate(start),
+        sub: live ? `配信 ${fmtNum(live)}本` : "配信なし",
+        coins: byDay.get(n) || 0,
       });
     }
     return out;
+  }
+
+  // 日次の点を週/月へ畳む。sessionの合計から作り直さないのは、日を跨いだ配信のコインが
+  // 期間の境目でどちらへ入るかを、日次の段と食い違わせないためである。
+  function periodCoinPoints(days, unit, periods) {
+    return periods.map(({ start, next }) => {
+      const group = days.filter((p) => {
+        const t = dayAt(p.start);
+        return t >= start && t < next;
+      });
+      const d = new Date(start * 1000);
+      return {
+        x: (dayNo(start) + dayNo(next - 1) + 1) / 2,
+        start: dayNo(start),
+        lo: dayNo(start), hi: dayNo(next - 1) + 1,
+        title: unit === "month"
+          ? `${d.getFullYear()}/${p2(d.getMonth() + 1)}（月合計）`
+          : `${fmtDate(start)}〜${fmtDate(next - 1)}（週合計）`,
+        sub: `配信のあった日 ${fmtNum(group.filter((p) => p.live > 0).length)}日`,
+        coins: group.reduce((acc, p) => acc + p.coins, 0),
+      };
+    });
   }
 
   const keys = (opts.panels && opts.panels.length ? opts.panels : ["coins", "hours"])
@@ -1283,13 +1427,25 @@ function createSessionTrendChart(container, opts = {}) {
   function paneDatasets(spec) {
     const color = SERIES[spec.color];
     const sets = [];
+    if (spec.maLines) {
+      // 窓の本数は固定。窓幅とlabelは単位ごとに呼び側が決めるのでupdateで入れる。
+      // 同じ指標の平滑度違いなので色は変えず、量の段(薄→濃)で順序を出す。ただしrampの
+      // 隣り合う2段は2pxの線では見分けが付かないので、太さも窓の長さに合わせる
+      // (長い窓ほど太く・濃く = 均されているほど地に近い動きをする、という読み方に揃う)。
+      rampOf(spec.maLines).forEach((c, i) => {
+        sets.push({ label: "", type: "line", data: [], borderColor: c,
+                    backgroundColor: "transparent", borderWidth: 1.4 + i * 0.7,
+                    pointRadius: 0, tension: 0.3, spanGaps: false, noMark: true });
+      });
+      return sets;
+    }
     spec.series.forEach((s) => {
       if (s.bar) {
-        // 数百日ぶんを1枚に並べると1本あたりの幅が数pxまで痩せる。slotをほぼ使い切る
-        // 太さにしておくと本数が増えても棒が消えず、逆に本数が少ない時は太りすぎない
-        // よう上限で抑える。
+        // 棒の幅はChart.jsが点の最小間隔(=1日/1期間)から決める。数百日ぶんを1枚に
+        // 並べると1本あたりの幅が数pxまで痩せるが、上限だけは抑えて本数が少ない時に
+        // 太りすぎないようにする。
         sets.push({ label: s.label, type: "bar", data: [], backgroundColor: color,
-                    categoryPercentage: 0.92, barPercentage: 0.96, maxBarThickness: 26 });
+                    categoryPercentage: 1, barPercentage: 0.9, maxBarThickness: 64 });
       } else {
         sets.push({
           label: s.label, type: "line", data: [],
@@ -1316,6 +1472,9 @@ function createSessionTrendChart(container, opts = {}) {
   // datasetのindexから「どの系列定義か」を引く表。移動平均は元の系列の定義を指す
   // (tooltipの書式を実績と揃えるため)。
   function paneSeriesIndex(spec) {
+    if (spec.maLines) {
+      return Array.from({ length: spec.maLines }, () => ({ fmt: (v) => fmtNum(Math.round(v)) }));
+    }
     const index = [];
     spec.series.forEach((s) => {
       index.push(s);
@@ -1324,16 +1483,19 @@ function createSessionTrendChart(container, opts = {}) {
     return index;
   }
 
+  // その段が読む点の並び。日ごとの段と配信ごとの段で長さが違う。
+  const paneRows = (spec) => (spec.daily ? coinPoints : points);
+
   function tooltipFor(spec, seriesIndex) {
     return {
       ...nierTooltip(),
       callbacks: {
         title: (items) => {
-          const p = points[items[0].dataIndex];
+          const p = paneRows(spec)[items[0].dataIndex];
           return p ? p.title : "";
         },
         label: (item) => {
-          const p = points[item.dataIndex];
+          const p = paneRows(spec)[item.dataIndex];
           // 1系列のpaneはdatasetIndexが無くても引けるようにする(先頭が唯一の系列)。
           const s = seriesIndex[item.datasetIndex || 0];
           if (s && s.text) return `${s.label}: ${p ? s.text(p) : "-"}`;
@@ -1344,7 +1506,7 @@ function createSessionTrendChart(container, opts = {}) {
         },
         // 複数行になり得るので常にlistで返す(Chart.jsは1行でもlistを受ける)。
         footer: (items) => {
-          const p = points[items[0].dataIndex];
+          const p = paneRows(spec)[items[0].dataIndex];
           if (!p) return [];
           const lines = p.sub ? [p.sub] : [];
           // 宝箱窓を除いた同接は、除いた後に残る時間が短いほど代表性が落ちる。何割を
@@ -1364,70 +1526,138 @@ function createSessionTrendChart(container, opts = {}) {
     const spec = { ...TREND_PANES[key], key };
     const datasets = paneDatasets(spec);
     const seriesIndex = paneSeriesIndex(spec);
-    const chart = new Chart(stackPane(container, { lead: Boolean(spec.lead) }), {
-      type: spec.type,
-      data: { labels: [], datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        interaction: { mode: "index", intersect: false },
-        scales: {
-          // 目盛は日付(週/月まとめではその期間の頭)。本数が増えるほど詰まるので出す数を絞る。
-          x: stackedXScale({ bottom: i === keys.length - 1, ticks: { maxTicksLimit: 12, callback: (v, n) => xTickLabel(n) } }),
-          y: {
-            position: "left", beginAtZero: true, afterFit: stackedYFit,
-            title: { display: true, text: spec.title, color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } },
-            // y軸の幅はpanel間で揃えるため固定。桁が伸びると軸titleに被るので、コインは
-            // 短縮表記(250k)にして枠に収める。実数はtooltipと山の値marksで読む。
-            ticks: { ...nierTicks(), ...(spec.ticks || {}) },
-            grid: { color: NIER_GRID_COLOR },
+    const chart = new Chart(
+      stackPane(container, { lead: Boolean(spec.lead), thin: Boolean(spec.maLines) }),
+      {
+        type: spec.type,
+        data: { datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: "index", intersect: false },
+          scales: {
+            // 目盛は日付。本数が増えるほど詰まるので出す数を絞る。
+            x: {
+              ...stackedXScale({ bottom: i === keys.length - 1,
+                                 ticks: { autoSkip: false, callback: (v) => tickLabel(v) } }),
+              type: "linear",
+              afterBuildTicks: (scale) => { scale.ticks = tickValues().map((v) => ({ value: v })); },
+            },
+            y: {
+              position: "left", beginAtZero: true, afterFit: stackedYFit,
+              title: { display: true, text: spec.title, color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } },
+              // y軸の幅はpanel間で揃えるため固定。桁が伸びると軸titleに被るので、コインは
+              // 短縮表記(250k)にして枠に収める。実数はtooltipと山の値marksで読む。
+              ticks: { ...nierTicks(), ...(spec.ticks || {}) },
+              grid: { color: NIER_GRID_COLOR },
+            },
+          },
+          plugins: {
+            // 1系列のpaneに凡例は要らない。軸のtitleがその指標を名乗っている。
+            legend: {
+              display: datasets.length > 1,
+              // 名前の無い系列(窓を渡していない移動平均)は凡例へ出さない。空の札が並ぶ。
+              labels: { color: cssToken("--chart-ink"), font: { family: "monospace", size: 11 },
+                        boxWidth: 14, boxHeight: 8, filter: (item) => Boolean(item.text) },
+            },
+            tooltip: tooltipFor(spec, seriesIndex),
           },
         },
-        plugins: {
-          // 1系列のpaneに凡例は要らない。軸のtitleがその指標を名乗っている。
-          legend: { display: datasets.length > 1, labels: { color: cssToken("--chart-ink"), font: { family: "monospace", size: 11 }, boxWidth: 14, boxHeight: 8 } },
-          tooltip: tooltipFor(spec, seriesIndex),
-        },
       },
-    });
+    );
     enableValueMarks(chart);
     return { spec, chart };
   });
 
-  linkCrosshair(panes.map((p) => p.chart));
+  // 段ごとに点の数が違う(コインは1日1点・他は1配信1点)ので、縦線が共有するのはindexでは
+  // なくx値。読み取る点は「同じ日の中で一番近い点」まで ―― 縦線が指した時刻にコインの棒は
+  // 立っていない(棒は日の真ん中に立つ)が、その日の棒がその時点のコインである。
+  linkCrosshair(panes.map((p) => p.chart), { byValue: true, tolerance: 0.5 });
 
-  // view.unit: "session"(既定・1配信=1本) / "week" / "month"。週・月はその期間の合計を
-  // 1本にまとめる。view.movingAvgWindow は点の本数で数える窓幅(単位ごとに呼び側が決める)。
+  // view.unit: "session"(既定・1配信=1点/コインは1日=1本) / "week" / "month"。
+  // view.daily: [{date:"YYYY-MM-DD", diamonds}] — コインの段はここだけを読む。session
+  //   合計から作らないのは、日を跨いだ配信のコインが開始日へ寄ってしまうためである。
+  // view.movingAvgWindow は点の本数で数える窓幅(単位ごとに呼び側が決める)。
+  // view.coinMa: コインの移動平均の窓([7,14,25]など)、view.coinMaText はその単位名。
+  // view.coinUnit: コインの段のy軸が名乗る単位("日"/"週"/"月")。
   function update(sessionRows, view = {}) {
     const rows = sessionRows || [];
     const unit = view.unit || "session";
-    points = unit === "session" || !rows.length ? sessionPoints(rows) : periodPoints(rows, unit);
-    const labels = points.map((p) => p.key);
+    const daily = (view.daily || []).filter((d) => d && d.date);
+    viewUnit = unit;
+    // 軸の原点と長さ。sessionの日とコインの日の両方から採る ―― 日を跨いだ配信のコインは
+    // 配信の始まった日より後の日へ乗る。
+    const marks = [];
+    rows.forEach((s) => {
+      marks.push(trendDayStart(s.started_at));
+      marks.push(trendDayStart(s.ended_at || s.started_at));
+    });
+    daily.forEach((d) => marks.push(trendYmdStart(d.date)));
+    origin = marks.length ? Math.min(...marks) : trendDayStart(Date.now() / 1000);
+    // 素材が1つも無ければ日の点も作らない。今日の0本の棒を1本立てると、配信が無いことを
+    // 「今日だけ0だった」と名乗ってしまう。
+    span = marks.length ? Math.round((Math.max(...marks) - origin) / TREND_DAY) + 1 : 0;
+
+    const periods = unit === "session" ? null : periodList(unit);
+    points = unit === "session" || !rows.length
+      ? sessionPoints(rows)
+      : periodPoints(rows, unit, periods);
+    const days = dailyCoinPoints(daily, rows);
+    coinPoints = unit === "session" || !periods ? days : periodCoinPoints(days, unit, periods);
+
     const window = view.movingAvgWindow || opts.movingAvgWindow || 5;
+    const coinMa = view.coinMa || [];
+    const coinMaText = view.coinMaText || "";
+    // 軸の端は棒の端から採る。週/月まとめの端の期間は窓の外まではみ出す(6/29から始まる
+    // 窓でも6月の棒は6/1から立つ)ので、日数だけで端を決めると端の棒が切れる。
+    const xMin = (coinPoints.length ? Math.min(...coinPoints.map((p) => p.lo)) : 0) - 0.5;
+    const xMax = (coinPoints.length ? Math.max(...coinPoints.map((p) => p.hi)) : span) + 0.5;
     panes.forEach(({ spec, chart }) => {
-      chart.data.labels = labels;
+      const rowsFor = paneRows(spec);
+      chart.options.scales.x.min = xMin;
+      chart.options.scales.x.max = xMax;
+      if (spec.maLines) {
+        const values = rowsFor.map((p) => p.coins);
+        chart.data.datasets.forEach((ds, di) => {
+          const w = coinMa[di];
+          ds.label = w ? `${w}${coinMaText}` : "";
+          ds.hidden = !w;
+          // 窓が埋まるまで引かない。埋まるまでを手元の点だけの平均で描くと、左端では
+          // 3本が同じ点の平均になって重なり、窓の違いが見えない。
+          ds.data = w
+            ? movingAverage(values, w, true).map((v, j) => ({ x: rowsFor[j].x, y: v }))
+            : [];
+          // 窓が埋まる点が1つしか無いと線が引けず、段がまるごと空に見える。手元の履歴が
+          // その窓に足りていないだけなので、点で在ることだけは示す。
+          ds.pointRadius = ds.data.filter((q) => q.y != null).length > 1 ? 0 : 3;
+        });
+        chart.update();
+        return;
+      }
       let di = 0;
       spec.series.forEach((s) => {
-        const values = points.map((p) => s.value(p));
-        chart.data.datasets[di].data = values;
+        const values = rowsFor.map((p) => s.value(p));
+        chart.data.datasets[di].data = values.map((v, j) => ({ x: rowsFor[j].x, y: v }));
         // 点が隣と接し始めたら数珠つなぎの帯になって線の形が読めない。混んだら点を伏せ、
-        // 線そのもので推移を見せる(indexで拾うtooltip/crosshairは点が無くても効く)。
-        if (!s.bar) chart.data.datasets[di].pointRadius = points.length > 60 ? 0 : 3;
+        // 線そのもので推移を見せる(x値で拾うtooltip/crosshairは点が無くても効く)。
+        if (!s.bar) chart.data.datasets[di].pointRadius = rowsFor.length > 60 ? 0 : 3;
         di += 1;
         if (s.ma && opts.movingAvg) {
-          chart.data.datasets[di].data = movingAverage(values, window);
+          chart.data.datasets[di].data = movingAverage(values, window)
+            .map((v, j) => ({ x: rowsFor[j].x, y: v }));
           di += 1;
         }
       });
+      if (spec.daily) chart.options.scales.y.title.text = `${spec.title}/${view.coinUnit || "日"}`;
       chart.update();
     });
   }
 
   function clear() {
     points = [];
+    coinPoints = [];
     panes.forEach(({ chart }) => {
-      chart.data.labels = [];
       chart.data.datasets.forEach((ds) => { ds.data = []; });
       chart.update();
     });
@@ -1707,19 +1937,43 @@ function buildBattleVs(owner, battle) {
   return vs;
 }
 
-// 貢献を host(宛先配信者) ごとに束ねる。host_idが空の自陣Giftは自陣hostへ寄せる。
-// 全体監視tile・監視/履歴カードで同じグルーピングを共有する。
-function groupContribsByHost(battle, topo) {
-  const ownHostId = (topo.parts.find((p) => p.is_own) || {}).user_id;
+// 貢献を host(宛先配信者) ごとに束ねる。全体監視tile・監視/履歴カードで同じグルーピング
+// を共有する。
+//
+// host_idの無い貢献は __own__ / __opp__ へ寄せ、hostのカードには混ぜない。チーム戦の
+// armiesはチーム1つぶんの集約で「誰への貢献か」を名乗らないため、これを自陣hostへ寄せると
+// 味方hostを支えた人が自hostの貢献者として並ぶ(実例: BS 46,004の貢献者が味方のものなのに
+// 自hostのカードに出ていた)。宛先が確定するのは実測(自室のGift event / 相手Roomのlistener)
+// だけなので、判らない分は判らないまま別枠で出す。
+function groupContribsByHost(battle) {
   const byHost = new Map();
   (battle.contributions || []).forEach((c) => {
-    let key = c.host_id;
-    if (!key && c.side === "own") key = ownHostId;
-    if (!key) key = c.side === "own" ? "__own__" : "__opp__";
+    const key = c.host_id || (c.side === "own" ? "__own__" : "__opp__");
     if (!byHost.has(key)) byHost.set(key, []);
     byHost.get(key).push(c);
   });
   return byHost;
+}
+
+// このhostの実弾をどこまで拾えたか。battle.coin_coverage[host_id] は収集側が残す
+// {handle, attached_at, attempts, error}。相手/味方hostのコインはそのRoomへ繋いでいた
+// 間しか拾えず、繋げなかった分は後から取り戻せない(armiesはコインを持たない)。素性を
+// 出さないと欠測が「実弾0」として読まれる。
+function coinCoverageNote(battle, host) {
+  if (host.is_own) return null;
+  const cov = (battle.coin_coverage || {})[host.user_id];
+  if (!cov) return null;
+  if (!cov.attached_at) {
+    return { text: "実弾 未取得", title: cov.error || "相手Roomへ接続できませんでした" };
+  }
+  const late = cov.attached_at - (battle.start_time || 0);
+  if (late > 1) {
+    return {
+      text: `実弾 途中(${fmtDuration(late)}〜)`,
+      title: `相手Roomへ繋がったのがPK開始の${fmtDuration(late)}後です。それ以前のGiftは取得できていません`,
+    };
+  }
+  return null;
 }
 
 // BS(バトルスコア=PKポイント) と 実弾(コイン) の併記。未取得側は「—」。
@@ -1754,7 +2008,7 @@ function bsCellText(c) {
 
 // 1配信者(host)ぶんの貢献: ヘッダ(配信者 + BS/実弾合計 + 貢献者N人) + 送信者一覧。
 // 各送信者は 送信者 / BS(PKポイント) / 実弾(コイン) を列で縦揃えする。
-function buildBattleHostContrib(host, byHost, owner) {
+function buildBattleHostContrib(host, byHost, owner, battle) {
   const box = document.createElement("div");
   box.className = "bch-host " + (host.is_own ? "own" : "opp");
   const rows = (byHost.get(host.user_id) || []).slice().sort((a, b) => (b.diamonds || 0) - (a.diamonds || 0));
@@ -1764,7 +2018,14 @@ function buildBattleHostContrib(host, byHost, owner) {
   head.className = "bch-host-head";
   const score = document.createElement("span");
   score.className = "bch-host-score";
-  score.textContent = `BS ${fmtBs(host.score)} / 実弾 ${fmtBs(coinsSum)}`;
+  const note = coinCoverageNote(battle, host);
+  score.textContent = note
+    ? `BS ${fmtBs(host.score)} / ${note.text}`
+    : `BS ${fmtBs(host.score)} / 実弾 ${fmtBs(coinsSum)}`;
+  if (note) {
+    score.classList.add("bch-host-nocoin");
+    score.title = note.title;
+  }
   const cnt = document.createElement("span");
   cnt.className = "bch-host-cnt";
   cnt.textContent = `貢献者${rows.length}人`;
@@ -1774,10 +2035,17 @@ function buildBattleHostContrib(host, byHost, owner) {
   if (!rows.length) {
     const empty = document.createElement("div");
     empty.className = "bc-empty";
-    empty.textContent = "実弾Giftなし";
+    // 0件の意味は「送られなかった」と「拾えなかった」で違う。取り違えると欠測が実績になる。
+    empty.textContent = note ? note.title : "実弾Giftなし";
     box.appendChild(empty);
     return box;
   }
+  box.appendChild(buildBattleContribTable(rows));
+  return box;
+}
+
+// 送信者 / BS(PKポイント) / 実弾(コイン) の3列。hostのカードと宛先不明の枠で共有する。
+function buildBattleContribTable(rows) {
   const table = document.createElement("table");
   table.className = "ctab";
   const thead = document.createElement("thead");
@@ -1805,8 +2073,7 @@ function buildBattleHostContrib(host, byHost, owner) {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
-  box.appendChild(table);
-  return box;
+  return table;
 }
 
 // 貢献を配信者(host)ごとに表示。個人戦は自陣→相手hostの順、チーム戦はチーム→host。
@@ -1815,7 +2082,7 @@ function buildBattleContrib(battle, owner) {
   const wrap = document.createElement("div");
   wrap.className = "bcontrib-hosts";
   const topo = battleTopology(battle, owner);
-  const byHost = groupContribsByHost(battle, topo);
+  const byHost = groupContribsByHost(battle);
   if (topo.kind === "team") {
     topo.teams.forEach((team) => {
       const teamBox = document.createElement("div");
@@ -1827,16 +2094,45 @@ function buildBattleContrib(battle, owner) {
       team.members
         .slice()
         .sort((a, b) => (b.score || 0) - (a.score || 0))
-        .forEach((host) => teamBox.appendChild(buildBattleHostContrib(host, byHost, owner)));
+        .forEach((host) => teamBox.appendChild(buildBattleHostContrib(host, byHost, owner, battle)));
+      const unattributed = buildBattleUnattributed(byHost, team.own ? "__own__" : "__opp__");
+      if (unattributed) teamBox.appendChild(unattributed);
       wrap.appendChild(teamBox);
     });
   } else {
     topo.parts
       .slice()
       .sort((a, b) => (a.is_own === b.is_own ? (b.score || 0) - (a.score || 0) : a.is_own ? -1 : 1))
-      .forEach((host) => wrap.appendChild(buildBattleHostContrib(host, byHost, owner)));
+      .forEach((host) => wrap.appendChild(buildBattleHostContrib(host, byHost, owner, battle)));
+    ["__own__", "__opp__"].forEach((key) => {
+      const unattributed = buildBattleUnattributed(byHost, key);
+      if (unattributed) wrap.appendChild(unattributed);
+    });
   }
   return wrap;
+}
+
+// 宛先hostの判らない貢献。チーム戦のarmiesはチーム集約で誰への貢献かを名乗らないので、
+// 実測(自室のGift event / 相手Roomのlistener)で宛先が付かなかった分がここへ落ちる。
+// hostのカードへ勝手に寄せると、その人が支えていない配信者の貢献者として並ぶ。
+function buildBattleUnattributed(byHost, key) {
+  const rows = (byHost.get(key) || []).slice().sort((a, b) => effectiveBs(b) - effectiveBs(a));
+  if (!rows.length) return null;
+  const box = document.createElement("div");
+  box.className = "bch-host " + (key === "__own__" ? "own" : "opp");
+  const head = document.createElement("div");
+  head.className = "bch-host-head";
+  const label = document.createElement("span");
+  label.className = "bch-host-unattr";
+  label.textContent = "宛先不明（陣営の合計のみ）";
+  label.title = "チーム戦のスコア内訳はチーム単位で届くため、どの配信者への貢献かが判りません。";
+  const cnt = document.createElement("span");
+  cnt.className = "bch-host-cnt";
+  cnt.textContent = `貢献者${rows.length}人`;
+  head.append(label, cnt);
+  box.appendChild(head);
+  box.appendChild(buildBattleContribTable(rows));
+  return box;
 }
 
 // Battle中の自陣/敵陣スコアの推移を折れ線で描く。score_series([{t,own,opp}])は
@@ -2025,7 +2321,10 @@ function buildBattleCardInto(entry, battle, owner, ordinal) {
   card.className = "bcard";
   const body = document.createElement("div");
   body.className = "bbody";
-  const topo = battleTopology(battle, owner);
+  // 自陣がどちらかはownerで決まる。履歴のマージ表示は配信者を跨いでBattleを並べるので、
+  // 1つに固定できない — その場合はBattleごとに引く関数を受ける。
+  const host = typeof owner === "function" ? owner(battle) : owner;
+  const topo = battleTopology(battle, host);
   // 形式に応じてN分割したスコアバー(個人=参加者数, チーム=チーム数)。その下に
   // 形式別の内訳(チームbox/順位リスト/対戦表)を描く。
   body.appendChild(buildBattleScoreBar(topo));
@@ -2034,13 +2333,13 @@ function buildBattleCardInto(entry, battle, owner, ordinal) {
   } else if (topo.kind === "multi") {
     body.appendChild(buildBattleRanking(topo));
   } else {
-    body.appendChild(buildBattleVs(owner, battle));
+    body.appendChild(buildBattleVs(host, battle));
   }
   const chart = syncBattleScoreChart(entry, battle);
   if (chart) body.appendChild(chart);
   // 情報を一切持たない空mission(旧データの取りこぼしplaceholder)は描かない。
   (battle.bonus_missions || []).filter(isMeaningfulMission).forEach((m) => body.appendChild(buildBonusMission(m)));
-  body.appendChild(buildBattleContrib(battle, owner));
+  body.appendChild(buildBattleContrib(battle, host));
   // 再利用中のchart canvasは上のbodyへ移設済みのため、一括置換してもlive Chartは壊れない。
   card.replaceChildren(buildBattleHead(battle, ordinal), body);
 }
@@ -2058,6 +2357,13 @@ function battleSummaryText(battles) {
 // カード毎new Chart()はコスト大でcanvasリークの元)。
 const battleCardRegistry = new WeakMap();
 
+// 保持キー。session跨ぎで並べる(履歴のマージ表示)とbattle_idだけでは衝突しうる。
+// 衝突すると2戦が同じ要素を指し、並べ直しで1戦ぶん黙って消える。
+function battleCardKey(battle, index) {
+  const session = battle.session_id == null ? "" : battle.session_id;
+  return `${session}:${battle.battle_id || `#${index}`}`;
+}
+
 function renderBattleCards(container, battles, owner) {
   let reg = battleCardRegistry.get(container);
   if (!reg) {
@@ -2067,7 +2373,7 @@ function renderBattleCards(container, battles, owner) {
   const list = battles || [];
   const seen = new Set();
   list.forEach((b, i) => {
-    const key = String(b.battle_id || `#${i}`);
+    const key = battleCardKey(b, i);
     seen.add(key);
     let entry = reg.get(key);
     if (!entry) {
@@ -2084,8 +2390,7 @@ function renderBattleCards(container, battles, owner) {
   });
   // battles順にDOMを整列する(appendChildは既存nodeを移動するため過不足なく並ぶ)。
   list.forEach((b, i) => {
-    const key = String(b.battle_id || `#${i}`);
-    container.appendChild(reg.get(key).card);
+    container.appendChild(reg.get(battleCardKey(b, i)).card);
   });
 }
 
@@ -2620,6 +2925,87 @@ function initSegmented(id) {
   return root;
 }
 
+// ---- 目盛りの多い排他選択をbarで出す ----
+// 段が9つある再生速度をsegmented controlで並べると、pillだけで行の半分以上を占め、
+// 同じ行の他の操作を次の行へ押し出していた。段の意味が「大小」しかない群はbarで出す
+// ―― 幅は1/3以下で済み、今どのあたりかは摘みの位置で読める。
+// 呼び出し側のI/Fは initSegmented と同じ(.value / .selectedIndex / .options / change)
+// なので、置き換えはmarkupの差し替えだけで済む。
+//
+// markup:
+//   <span id="x" class="segbar" data-stops="0.25,0.5,1,2" data-value="1"
+//         data-revert="1" data-wheel="1" data-label="再生速度" data-unit="x"></span>
+// data-stops  … 段の値(この順に並ぶ)
+// data-revert … 数値表示をclickしたときに戻す値
+// data-wheel  … barの上のwheelで1段ずつ動かす
+function initSegBar(id) {
+  const root = document.getElementById(id);
+  const stops = (root.dataset.stops || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const unit = root.dataset.unit || "";
+  const indexOf = (value) => stops.indexOf(String(value));
+  let index = Math.max(0, indexOf(root.dataset.value ?? stops[0]));
+
+  const range = document.createElement("input");
+  range.type = "range";
+  range.className = "segbar-range";
+  range.min = "0";
+  range.max = String(Math.max(0, stops.length - 1));
+  range.step = "1";
+  if (root.dataset.label) range.setAttribute("aria-label", root.dataset.label);
+  // 今の値そのもの。barだけだと「だいたいこの辺」までしか読めず、1xに戻したいときに
+  // 摘みを目で当てる操作になる。
+  const out = document.createElement("button");
+  out.type = "button";
+  out.className = "segbar-out";
+  const revert = root.dataset.revert;
+  if (revert !== undefined) out.title = `${revert}${unit}へ戻す`;
+  root.append(range, out);
+
+  function paint() {
+    range.value = String(index);
+    out.textContent = `${stops[index] ?? ""}${unit}`;
+  }
+
+  function select(next, emit) {
+    const at = Math.min(stops.length - 1, Math.max(0, next));
+    if (at === index) return;
+    index = at;
+    paint();
+    if (emit) root.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // dragの途中でも音は変わってほしいので input で拾う(change はつまみを離した時だけ)。
+  range.addEventListener("input", () => select(Number(range.value), true));
+  out.addEventListener("click", () => {
+    if (revert === undefined) return;
+    select(indexOf(revert), true);
+  });
+  if (root.dataset.wheel === "1") {
+    root.addEventListener("wheel", (ev) => {
+      ev.preventDefault();
+      // 送る向きはsegmented controlの頃と同じ(下へ回すと次の段=速い側)。barにしたのを
+      // 機に反転させると、同じ操作が逆に効くようになる。
+      select(index + (ev.deltaY > 0 ? 1 : -1), true);
+    }, { passive: false });
+  }
+
+  // <select>と同じ読み書きI/F。setterはuser操作でないのでchangeを出さない。
+  Object.defineProperty(root, "value", {
+    get: () => stops[index],
+    set: (v) => { const i = indexOf(v); if (i >= 0) select(i, false); },
+  });
+  Object.defineProperty(root, "selectedIndex", {
+    get: () => index,
+    set: (i) => select(i, false),
+  });
+  Object.defineProperty(root, "options", {
+    get: () => stops.map((value) => ({ value, disabled: false })),
+  });
+
+  paint();
+  return root;
+}
+
 // ---- 表示設定の永続化 ----
 // 各画面は独立したHTML documentで、nav遷移はフルリロードになる。並べ替え・絞り込み・
 // 表示切替のようなuserが選んだ「見せ方」はlocalStorageへ残し、次に開いた時も同じ
@@ -2813,6 +3199,31 @@ function bindVideoError(video, currentRecordingId, show) {
     if (currentRecordingId() !== recordingId) return;
     show(text);
   });
+}
+
+// ---- HLSの再生listが古くなったとき ----
+// ts結合(pack)が走ると、録画dirの seg*.ts は pack*.ts へ束ねられ、元のsegmentはfileごと
+// 消える。hls.jsは終端済み(VOD)のplaylistを最初の1回しか読み直さないので、結合の最中に
+// 開いていたpageは消えたsegmentを指すlistを持ち続け、再生がそこへ届いた瞬間に404で止まる。
+// listを引き直せば直るが、hls.js自身は致命的なnetwork errorで読み込みを止めるだけなので、
+// そのpageでは以後ずっと同じ位置で止まり続ける(実測: 40:10 = seg01205.ts の開始位置)。
+function hlsPlaylistMayBeStale(data) {
+  return Boolean(data) && data.fatal === true && data.type === "networkError";
+}
+
+// 引き直しは1度きりにする。listを引き直しても直らない失敗(素材そのものが無い・serverが
+// 落ちている)で読み直し続けると、理由の出ないloopになる。読み込みが実際に進んだら
+// (fragmentが1本bufferへ入ったら)引き直しは効いたので、次の失敗はまた引き直してよい。
+function hlsReloadGate() {
+  let used = false;
+  return {
+    take() {
+      if (used) return false;
+      used = true;
+      return true;
+    },
+    reset() { used = false; },
+  };
 }
 
 function renderDiskBar(container, data) {

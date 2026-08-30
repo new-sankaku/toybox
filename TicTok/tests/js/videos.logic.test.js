@@ -142,7 +142,7 @@ describe("videos.js", () => {
     it("別の範囲・別の録画なら押せる", () => {
       win.setCut(100, 140);
       expect(doc.getElementById("add-mark").disabled).toBe(false);
-      expect(doc.getElementById("add-mark").textContent).toBe("見どころに記録（尺あり）");
+      expect(doc.getElementById("add-mark").textContent).toBe("見どころ記録（尺あり）");
       state().current = { recording_id: 2 };
       win.setCut(100, 130);
       expect(doc.getElementById("add-mark").disabled).toBe(false);
@@ -151,7 +151,7 @@ describe("videos.js", () => {
     // 点は尺を持たないので重複の判定に掛からない(同じ位置の点は別の覚え書きであり得る)。
     it("IN/OUTが無ければ点として記録すると名乗る", () => {
       win.setCut(null, null);
-      expect(doc.getElementById("add-mark").textContent).toBe("見どころに記録（点）");
+      expect(doc.getElementById("add-mark").textContent).toBe("見どころ記録（点）");
       expect(doc.getElementById("add-mark").disabled).toBe(false);
     });
 

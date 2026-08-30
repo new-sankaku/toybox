@@ -586,6 +586,64 @@ def test_voice_is_queued_even_when_the_disk_is_low(client, server, make_recordin
                        json={"kind": "voice", "unique_id": "xena"}).json()["total"] == 1
 
 
+# ---- 再生gain曲線(gain) ----
+# 無音skipの解析と同じ性質の種別。録画のfileを書き換えず、残すのはsidecarだけで、無ければ
+# その録画は音量が揃わないまま再生される。
+
+
+def test_gain_targets_recordings_without_the_curve(client, server, make_recording):
+    """済み判定はsidecarの実在だけ。曲線もDBに印を持たない(外で消えたり戻ったりする)。"""
+    from tictok.media.loudness import gain_curve_path
+
+    make_recording(unique_id="gina")
+    _, _, done_path = make_recording(unique_id="gina")
+    target = gain_curve_path(done_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("{}", encoding="utf-8")
+    server.fsfacts._fs_state_cache.clear()
+    server.fsfacts._fs_bulk_cache.clear()
+    server.fsfacts._bulk_status_cache.clear()
+
+    body = client.get("/api/bulk/estimate",
+                      params={"kind": "gain", "unique_id": "gina"}).json()
+    assert body["recordings"] == 1
+    assert body["skipped"]["done"] == 1
+
+
+def test_gain_is_queued_like_the_other_media_jobs(client, server, make_recording):
+    _, recording_id, _ = make_recording(unique_id="greta")
+    body = client.post("/api/bulk/queue",
+                       json={"kind": "gain", "unique_id": "greta"}).json()
+    assert body["total"] == 1
+    jobs = [j for j in server.runtime.storage.list_media_jobs(50)
+            if j["recording_id"] == recording_id]
+    assert [j["kind"] for j in jobs] == ["gain"]
+
+
+def test_gain_is_queued_even_when_the_disk_is_low(client, server, make_recording,
+                                                  monkeypatch):
+    """残すのは1本あたり数百kB〜1MB程度のsidecarだけ。空き容量で断る理由が無い。"""
+    def _refuse(*args, **kwargs):
+        raise AssertionError("出力を作らない種別で空き容量を判定してはならない")
+
+    monkeypatch.setattr(server.disk, "_require_disk_space", _refuse)
+    make_recording(unique_id="gwen")
+    assert client.post("/api/bulk/queue",
+                       json={"kind": "gain", "unique_id": "gwen"}).json()["total"] == 1
+
+
+def test_gain_has_a_column_in_the_bulk_matrix(client, server, make_recording):
+    """一括画面の表はserverが返す種別で列を作る。BULK_KINDSに無いと、投入APIが弾く前に
+    そもそも押す場所が無い(sweepだけが作る状態になり、待っている録画を人が拾えない)。"""
+    make_recording(unique_id="gale")
+    server.fsfacts._bulk_status_cache.clear()
+    body = client.get("/api/bulk/status").json()
+    assert "gain" in body["kinds"]
+    entry = next(s for s in body["streamers"] if s["unique_id"] == "gale")
+    assert entry["targets"]["gain"] == 1
+    assert server.routes.bulk.BULK_KIND_TITLES["gain"] == "再生gain曲線"
+
+
 def test_transcribe_targets_recordings_without_a_transcript(client, server,
                                                             make_recording):
     """済み判定はtranscripts表だけ。文字起こしはfileを作らないので、filesystemからは判別できない。"""

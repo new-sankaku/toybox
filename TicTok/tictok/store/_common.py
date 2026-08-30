@@ -31,6 +31,20 @@ logger = logging.getLogger("tictok.storage")
 # 重複判定(videos.jsのFRAME_STEP_SECONDS)と同じ幅にしてある。
 CUT_SAME_RANGE_TOLERANCE = 1.0 / 30.0
 
+# 見どころの出所。誰がその行を置いたかであって、良し悪しでも進み具合でもない。
+#   manual  人が押した(既定)
+#   auto    shortの自動生成が範囲を書き戻した
+#   pick    切り抜き候補 — 章立てのうち「ここは切り出す価値がある」と推した範囲
+# 画面はこの値だけを根拠に色と名乗りを決める(static/videos.jsのMARK_ORIGIN_LABELS)。
+# 増やすときは画面側の対応も同時に足すこと ―― 知らない値は名乗りが「—」になり、
+# 色の付かない行として黙って混ざる。
+#
+# **章立てそのものはここへ入れない。** 目次は録画1本に対する1つの成果物で、置き場は
+# ai_analysis(kind=chapters)である(書き出し・再生画面の目次・切り出し範囲の章clampが
+# すべてそちらを読む)。見どころへ入るのは、その目次から選ばれて「切り出す素材」になった
+# 範囲だけで、それが pick である。
+BOOKMARK_ORIGINS = ("manual", "auto", "pick")
+
 # events / viewer_samples のINSERT。batch(executemany)と1行隔離(同一SQLを1行ずつ)で同じ
 # 列順を使うため定数化する。列順はbuffer済みtupleおよびjournal記録のrowと厳密に一致させること。
 #
@@ -55,6 +69,14 @@ _EVENTS_COLUMNS = (
     # 未確定なため — 解釈が定まったものだけ後から列へ昇格させる。中身の規約は
     # collector._extra_payload にあり、NULLは「計装前で未計測」を意味する。
     "extra",
+    # TikTokがmessage 1件ごとに振る一意のid(base_message.message_id)。接続のたびに
+    # 届き直す遡り分を判別する唯一の鍵で、除去そのものは受信時に済ませている
+    # (tictok/collect/dedup.py)。ここに残すのはDB側の一意制約の鍵にするためと、
+    # 「重複が起きたか」を後から確かめられるようにするため。collector自身が書く
+    # system eventと、計装前の既存行はNULL。
+    # **列は必ず末尾へ足すこと。** journalは位置固定の行を運ぶので、途中に挟むと
+    # 復元時に旧journalの値が1つずれた列へ入る(_iter_journal_rowsの幅の正規化参照)。
+    "message_id",
 )
 _VIEWERS_INSERT_SQL = (
     "INSERT INTO viewer_samples (session_id, time, create_time, viewers, total_viewers, anonymous)"
@@ -141,10 +163,24 @@ def _events_insert_columns(phase: int) -> tuple:
 
 
 def _events_insert_sql(phase: int) -> str:
-    """段階に応じたevents INSERTのSQL。値tupleの形は _events_insert_columns と対。"""
+    """段階に応じたevents INSERTのSQL。値tupleの形は _events_insert_columns と対。
+
+    末尾の ON CONFLICT は接続時の遡りの二重記録に対する**耐久側の防波堤**である。第一の
+    防波堤は受信側(tictok/collect/dedup.py)で、そちらは統計とbucketごと落とすのでこの
+    経路まで届かない。ここが効くのはprocessが落ちて記憶を失った直後だけだが、その窓こそ
+    再接続が集中する場面なので塞いでおく。
+
+    衝突の対象を ``idx_events_message`` の3列に限定してあるのが要点である。IntegrityError
+    にしてしまうと、writerのbatch INSERTが失敗して隔離経路(_write_isolating_locked)へ
+    落ち、意図した重複がdead-letterへ「復旧が必要なdata喪失」として積まれる。DO NOTHING
+    なら黙って捨てられるが、**FK違反やNOT NULL違反はこれまで通り送出される** — OR IGNORE
+    だと孤児eventのFK違反まで飲み込み、poison-pillの検知が効かなくなる。
+    """
     columns = _events_insert_columns(phase)
     return (f"INSERT INTO events ({', '.join(columns)})"
-            f" VALUES ({', '.join('?' * len(columns))})")
+            f" VALUES ({', '.join('?' * len(columns))})"
+            f" ON CONFLICT (session_id, kind, message_id) WHERE message_id IS NOT NULL"
+            f" DO NOTHING")
 
 
 def _interned_event_positions() -> tuple:

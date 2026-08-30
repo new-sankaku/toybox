@@ -17,6 +17,7 @@ from tictok.core import perf
 from tictok.core import layout
 from tictok.record.recorder import sidecar_dir
 from tictok.media.thumbnails import thumbnail_artifact_paths
+from tictok.media.loudness import gain_artifact_paths
 from tictok.media.voice import voice_artifact_paths
 from tictok.media.waveform import waveform_artifact_paths
 from tictok.record import hls_pack
@@ -194,6 +195,7 @@ _SIDECAR_ARTIFACTS = {
     "waveform_done": waveform_artifact_paths,
     "sprite_done": thumbnail_artifact_paths,
     "voice_done": voice_artifact_paths,
+    "gain_done": gain_artifact_paths,
 }
 
 # sidecarを作るjobの種別 → その済みを表すfact名。sweepと一括が同じ対応を別々に持っていた
@@ -203,6 +205,18 @@ SIDECAR_JOB_FACTS = {
     "waveform": "waveform_done",
     "sprite": "sprite_done",
     "voice": "voice_done",
+    "gain": "gain_done",
+}
+
+# sidecarを作るjobの種別 → 自動生成の本数を決める設定key。同じ理由で1箇所に置く: sweepの
+# 定期投入(startup.SWEEP_LIMIT_SETTINGS)と、ts結合の完了に続けて積む経路
+# (media_jobs._enqueue_sidecars_after_pack)が同じ対応を読む。0はその種別の自動生成を
+# 行わない指定なので、両方の経路が同じように止まる必要がある。
+SIDECAR_SWEEP_SETTINGS = {
+    "waveform": "waveform_sweep_per_start",
+    "sprite": "sprite_sweep_per_start",
+    "voice": "voice_sweep_per_start",
+    "gain": "gain_sweep_per_start",
 }
 
 
@@ -413,12 +427,12 @@ def _bulk_hls_batch(recordings: list, facts_by_id: dict) -> None:
 # 一括画面の集計は録画ごとのfile確認を伴うため、pollのたびに走らせない。cacheは要求種別の
 # 組ごとに持つ(reprocessを含む集計と含まない集計は別物)。
 _BULK_STATUS_TTL_SECONDS = 20.0
-# 上限件数。keyは要求種別を並べた文字列なので、正当なkeyは BULK_KINDS(9種)の空でない
-# 部分集合ぶん = 511通りしかない。それでも天井が要るのは、keyが要求文字列から作られていて
+# 上限件数。keyは要求種別を並べた文字列なので、正当なkeyは BULK_KINDS(10種)の空でない
+# 部分集合ぶん = 1023通りしかない。それでも天井が要るのは、keyが要求文字列から作られていて
 # ``?kinds=overlay,overlay,...`` のような重複が別keyになるため — 正当な種別だけを並べても
-# 長さの数だけkeyが増える。511の2倍を上限にすれば、通常の利用で捨てることは無く、
+# 長さの数だけkeyが増える。1023の2倍を上限にすれば、通常の利用で捨てることは無く、
 # 重複による増殖だけが頭打ちになる。1 entryは実測4,365 byte(配信者3名ぶんの集計)。
 # **種別を1つ足すと正当なkeyの数は倍になる**ので、ここも一緒に上げる
 # (test_bulk_status_cache_cap_clears_the_legitimate_key_space が見張っている)。
-_BULK_STATUS_CACHE_MAX = 1024
+_BULK_STATUS_CACHE_MAX = 2048
 _bulk_status_cache: dict = _BoundedCache(_BULK_STATUS_CACHE_MAX)

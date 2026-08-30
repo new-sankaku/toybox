@@ -139,10 +139,10 @@ describe("画面を切り替えても表示設定が残る", () => {
   // 折り畳みはcheckbox/selectではなく見出しbuttonなので、survivesNavigationの型に載らない。
   // 「畳んだ状態で戻ってくるか」を、classとaria-expandedの両方で見る(片方だけを直すと、
   // 見た目は畳まれているのに支援技術には開いていると名乗る)。
-  it("配信者動画: 文字起こし・コメントの折り畳みが残る", async () => {
+  it("配信者動画: 文字起こし・章立て・コメントの折り畳みが残る", async () => {
     const store = sharedStorage();
     const first = await visit(store, "videos", "/videos");
-    ["transcript-fold", "comment-fold"].forEach((id) => {
+    ["transcript-fold", "chapter-fold", "comment-fold"].forEach((id) => {
       first.document.getElementById(id).dispatchEvent(
         new first.win.MouseEvent("click", { bubbles: true }),
       );
@@ -150,7 +150,8 @@ describe("画面を切り替えても表示設定が残る", () => {
 
     await visit(store, "capacity", "/capacity");
     const back = await visit(store, "videos", "/videos");
-    [["transcript-block", "transcript-fold"], ["comment-block", "comment-fold"]]
+    [["transcript-block", "transcript-fold"], ["chapter-block", "chapter-fold"],
+     ["comment-block", "comment-fold"]]
       .forEach(([block, button]) => {
         expect(
           back.document.getElementById(block).classList.contains("vd-block-folded"),

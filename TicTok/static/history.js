@@ -36,6 +36,15 @@ const flt = {
   sort: document.getElementById("flt-sort"),
 };
 
+// ---- マージ表示の選択 ----
+// checkを付けたSessionを1つの詳細としてまとめて見る。合算はserver側(GROUP BY)でしか
+// 行わない — client側で各Sessionの結果を足すと、top100で切られたギフターが落ち、
+// 改名したuserが別人に割れる(tictok/store/sessions.py の sessions_summary を参照)。
+const mergeSelected = new Set();
+// マージ表示中のSession id列(表示していなければnull)。単体詳細のcurrentSessionIdとは
+// 排他で、どちらか一方だけがnull以外になる。
+let currentMergeIds = null;
+
 // ---- KPI bar ----
 function renderKpi(totals, streamerCount, recordingCount) {
   const bar = document.getElementById("kpi-bar");
@@ -101,6 +110,9 @@ async function loadSessions() {
   sessionsError = null;
   allSessions = data.sessions || [];
   activeIds = new Set(data.active_session_ids || []);
+  // 消えたSessionを選択に残さない。残すとマージ要求がそのidで404になる。
+  const alive = new Set(allSessions.map((s) => s.id));
+  mergeSelected.forEach((id) => { if (!alive.has(id)) mergeSelected.delete(id); });
   renderTable();
 }
 
@@ -426,6 +438,7 @@ function actionCells(session) {
     if (!ok) return;
     try {
       await apiSend("DELETE", `/api/sessions/${session.id}`);
+      mergeSelected.delete(session.id);
       if (currentSessionId === session.id) closeDetail();
       await Promise.all([loadSessions(), loadKpi()]);
     } catch (err) {
@@ -528,6 +541,11 @@ let sessionRowColumns = -1;
 function buildSessionRow(s) {
   const tr = document.createElement("tr");
   tr.dataset.sessionId = String(s.id);
+  // 行を作り直しても開いているSessionの印は残す(renderTableは並びが変わると全行を作り直す)。
+  if (currentSessionId === s.id) tr.classList.add("sel");
+  // dockは一覧と並んで出ているので、行そのものが詳細への入口になる。Button/入力欄は
+  // それぞれstopPropagationしており、ここへは届かない。
+  tr.addEventListener("click", () => showDetail(s.id));
   const nameTd = document.createElement("td");
   nameTd.appendChild(sessionNameCell(s));
   const durationTd = textTd(sessionDurationText(s));
@@ -537,13 +555,15 @@ function buildSessionRow(s) {
   const note = noteTd(s);
   const { lead, rest } = actionCells(s);
   const actionTds = [...lead, ...rest];
+  const selTd = mergeTd(s);
   [
-    textTd(`#${sessionNo(s.id)}`), ...lead, nameTd, textTd(fmtDateTime(s.started_at)),
+    selTd, textTd(`#${sessionNo(s.id)}`), ...lead, nameTd, textTd(fmtDateTime(s.started_at)),
     durationTd, statusTd, ...numTds, note, ...rest,
   ].forEach((td) => tr.appendChild(td));
   return {
     tr, nameTd, durationTd, statusTd, numTds, actionTds,
     noteInput: note.querySelector(".note-inline"),
+    mergeInput: selTd.querySelector("input"),
     nameSig: sessionNameSig(s), actionSig: sessionActionSig(s),
   };
 }
@@ -573,6 +593,8 @@ function patchSessionRow(record, s) {
     const note = s.note || "";
     if (record.noteInput.value !== note) record.noteInput.value = note;
   }
+  // 選択の正はmergeSelected。行を作り直さない更新でも、選択解除や全選択と食い違わせない。
+  if (record.mergeInput) record.mergeInput.checked = mergeSelected.has(s.id);
   const actionSig = sessionActionSig(s);
   if (record.actionSig !== actionSig) {
     const { lead, rest } = actionCells(s);
@@ -587,6 +609,7 @@ function renderTable() {
   const tbody = document.getElementById("session-rows");
   const rows = filteredSessions();
   syncSortHeaders();
+  syncMergeControls(rows);
   // 操作Buttonは1列ずつ独立tdなので、header操作thをその列数だけ横結合して整合させる。
   // 先頭群(詳細/焼き込み出力)は設定に依らず固定なのでmarkupのcolspanのまま。
   const opTh = document.getElementById("op-th");
@@ -630,6 +653,9 @@ function renderTable() {
     fragment.appendChild(record.tr);
   });
   tbody.appendChild(fragment);
+  // 作り直した行はscroll位置を失う。dockで一覧が数行に畳まれている間は、開いている
+  // Sessionが帯の外へ出たままになるので連れ戻す。
+  if (currentSessionId !== null) markSelectedRow(currentSessionId);
 }
 
 function textTd(text) {
@@ -643,6 +669,43 @@ function numTd(value) {
   td.className = "n";
   td.textContent = fmtNum(value);
   return td;
+}
+
+// 行頭の選択check。マージ表示の対象を選ぶだけの列で、行clickでの詳細表示とは別の操作
+// なのでclickは行へ伝えない。
+function mergeTd(session) {
+  const sessionId = session.id;
+  const td = document.createElement("td");
+  td.className = "sel-cell";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = mergeSelected.has(sessionId);
+  input.title = "マージ表示の対象に加えます（2件以上でまとめて表示できます）。";
+  input.setAttribute("aria-label", `Session #${sessionNo(sessionId)} をマージ表示の対象にする`);
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("change", () => {
+    if (input.checked) mergeSelected.add(sessionId);
+    else mergeSelected.delete(sessionId);
+    syncMergeControls();
+  });
+  td.appendChild(input);
+  return td;
+}
+
+// 選択数に応じて操作帯を合わせる。マージは2件以上でしか意味を持たないので1件では押せない。
+// rowsは今の絞込結果(renderTableが既に持っているものを渡し、二度並べ替えない)。
+function syncMergeControls(rows) {
+  const open = document.getElementById("merge-open");
+  const clear = document.getElementById("merge-clear");
+  const selall = document.getElementById("merge-selall");
+  const count = mergeSelected.size;
+  open.textContent = count ? `選択をマージ表示 (${count})` : "選択をマージ表示";
+  open.disabled = count < 2;
+  clear.classList.toggle("hidden", count === 0);
+  const visible = rows || filteredSessions();
+  const shown = visible.reduce((n, s) => n + (mergeSelected.has(s.id) ? 1 : 0), 0);
+  selall.checked = visible.length > 0 && shown === visible.length;
+  selall.indeterminate = shown > 0 && shown < visible.length;
 }
 
 // Memoは検索対象(filteredSessionsがs.noteを見る)なのに、絞り込んだ結果の一覧では
@@ -693,13 +756,17 @@ async function showDetail(sessionId, fromHistory) {
     return;
   }
   const session = data.session;
-  const wasClosed = currentSessionId === null;
+  const wasClosed = currentSessionId === null && currentMergeIds === null;
   currentSessionId = sessionId;
   currentSessionUid = session.unique_id;
+  currentMergeIds = null;
+  // Timeline区画はchart更新より前に出す。display:noneのまま更新させると、Chart.jsが
+  // 幅0で組んだ状態から描き直す機会を待つことになる(マージ表示から単体へ移る経路)。
+  document.getElementById("detail-dock").classList.remove("merged");
   // 開いている詳細をURLに出す。?session= のdeep linkは元々あるのに、画面内で
   // 開いたときだけURLが動かず、戻るButtonも共有もbookmarkも効かなかった。
   // 履歴操作/起動時の復元はURLが既に正しいので、積まずに置き換えるだけにする。
-  syncDetailUrl(sessionId, wasClosed && !fromHistory);
+  syncDockUrl(`session=${sessionId}`, wasClosed && !fromHistory);
 
   document.getElementById("detail-title").textContent =
     `Session #${sessionNo(session.id)} — @${session.unique_id} (${fmtDateTime(session.started_at)})`;
@@ -725,9 +792,154 @@ async function showDetail(sessionId, fromHistory) {
   renderBattles(data.battles || [], data.owner || { unique_id: session.unique_id, nickname: session.unique_id });
   detailChart.update(data.timeline, data.battles || []);
 
-  const summary = data.summary || {};
+  renderSummaryTables(data.summary || {});
+
+  renderRecordings(data.recordings || []);
+  openDock(false);
+  markSelectedRow(sessionId);
+  loadCollabs(sessionId);
+}
+
+// ---- 詳細のカテゴリ(左の縦pane) ----
+// 表示するのは常に1カテゴリだけ。85%の領域を段で分け合って各段に内側scrollerを置くと、
+// wheelを始める位置がほぼ内側になり、外側へ手が届かなくなる。「1つの領域にscrollerは
+// 1つ、入れ子にするなら外は転がさない」を構造で守るための形(style.cssの.detail-grid参照)。
+const DETAIL_CATEGORY_PREF = "tictok.history.detailcat";
+const DETAIL_CATEGORIES = ["gift", "battle", "collab", "rec", "memo", "ai", "timeline"];
+// マージ表示では出せないカテゴリ。合算できない値をマージの見出しの下に置かないため
+// (Timeline=絶対時刻の軸が別日で繋がらない / AI=保存済みの文章は足せない /
+//  Memo=どのSessionへ書くか決まらない)。
+const MERGED_HIDDEN_CATEGORIES = new Set(["timeline", "ai", "memo"]);
+let detailCategory = "gift";
+
+function detailTabs() {
+  return Array.from(document.querySelectorAll("#detail-rail .dk-tab"));
+}
+
+// 選べるカテゴリか。可否の根拠はMERGED_HIDDEN_CATEGORIESの1箇所だけに置く
+// (CSSの見え方から判定すると、畳んだはずのカテゴリを開いたままにできてしまう)。
+function detailCategoryAvailable(cat) {
+  if (!DETAIL_CATEGORIES.includes(cat)) return false;
+  const merged = document.getElementById("detail-dock").classList.contains("merged");
+  return !(merged && MERGED_HIDDEN_CATEGORIES.has(cat));
+}
+
+function setDetailCategory(cat, remember) {
+  if (!detailCategoryAvailable(cat)) cat = "gift";
+  detailCategory = cat;
+  detailTabs().forEach((tab) => {
+    const on = tab.dataset.cat === cat;
+    tab.setAttribute("aria-current", on ? "true" : "false");
+    tab.classList.toggle("hidden", !detailCategoryAvailable(tab.dataset.cat));
+  });
+  let shown = null;
+  document.querySelectorAll("#detail-dock .dk-pane").forEach((pane) => {
+    const on = pane.dataset.cat === cat;
+    pane.classList.toggle("on", on);
+    if (on) shown = pane;
+  });
+  resizeChartsIn(shown);
+  if (remember !== false) prefSet(DETAIL_CATEGORY_PREF, cat);
+}
+
+// display:noneのcanvasは幅0のまま組まれる。Chart.jsのresize観測だけに任せると
+// 0×0から戻らないことがあるので、表に出た瞬間に測り直させる(Timelineとscore推移)。
+function resizeChartsIn(pane) {
+  if (!pane || typeof Chart === "undefined" || typeof Chart.getChart !== "function") return;
+  // 表示切替のlayoutをここで確定させてから測り直させる。rAFに逃がしてはならない —
+  // 背面tabではrAFが回らず、戻ってきた時にchartが0×0のままになる。
+  void pane.offsetHeight;
+  pane.querySelectorAll("canvas").forEach((canvas) => {
+    const chart = Chart.getChart(canvas);
+    if (chart) chart.resize();
+  });
+}
+
+// カテゴリの中に何件あるかを縦paneへ出す。開かずに中身の有無が分かる。
+// 0件も「0」として出す — 空欄だと「まだ読んでいない」と見分けが付かない。
+function setRailCount(cat, count) {
+  const tab = document.querySelector(`#detail-rail .dk-tab[data-cat="${cat}"] .dk-n`);
+  if (tab) tab.textContent = fmtNum(count);
+}
+
+// dockを開く。mergedはマージ表示かどうかで、合算できない区画(Session Timeline・
+// AIコメント分析・Memo)をその間だけ畳む。
+function openDock(merged) {
+  const dock = document.getElementById("detail-dock");
+  dock.classList.toggle("merged", Boolean(merged));
+  dock.classList.remove("hidden");
+  // 畳んだカテゴリを開いたままにしない。マージへ移った時は選び直す。
+  setDetailCategory(detailCategory, false);
+  // 一覧を畳むのはdockが開いている間だけ。閉じている間は一覧が画面いっぱいに戻る。
+  document.body.classList.add("detail-docked");
+  focusModalOpen(dock, document.getElementById("detail-close"));
+}
+
+// ---- マージ表示 ----
+// 選択したSessionを1つの詳細として開く。合算はserver側が済ませてあり、ここは並べるだけ。
+// Session Timelineは出さない — bucketは絶対時刻を持つので、別日のSessionを1本の軸へ
+// 並べても大半が空白になる。平均同接も同じ理由で出さない(階段保持積分をやり直さないと
+// 出せない値で、Sessionごとの平均を平均すると長さの違うSessionが同じ重みで混ざる)。
+async function showMerged(ids, fromHistory) {
+  const list = [...new Set(ids)].filter((id) => Number.isFinite(id) && id > 0).sort((a, b) => a - b);
+  if (list.length < 2) {
+    showToast("マージ表示は2件以上のSessionを選んでください。", "error", { title: "マージ表示" });
+    return;
+  }
+  const query = `ids=${list.join(",")}`;
+  let data;
+  try {
+    data = await apiSend("GET", `/api/sessions/merged?${query}`);
+  } catch (err) {
+    showToast(["マージ表示を取得できませんでした。", errorDetailText(err)], "error",
+      { title: `${list.length} Sessionのマージ表示` });
+    return;
+  }
+  const wasClosed = currentSessionId === null && currentMergeIds === null;
+  currentSessionId = null;
+  currentSessionUid = null;
+  currentMergeIds = list;
+  syncDockUrl(`merge=${list.join(",")}`, wasClosed && !fromHistory);
+
+  const sessions = data.sessions || [];
+  const stats = data.stats || {};
+  const handles = [...new Set(sessions.map((s) => `@${s.unique_id}`))];
+  const who = handles.length <= 3
+    ? handles.join(", ")
+    : `${handles.slice(0, 3).join(", ")} ほか${handles.length - 3}人`;
+  document.getElementById("detail-title").textContent =
+    `${fmtNum(sessions.length)} Session マージ — ${who}`;
+  document.getElementById("detail-csv").href = `/api/sessions/merged/export.csv?${query}`;
+  document.getElementById("detail-json").href = `/api/sessions/merged/export.json?${query}`;
+  renderChips("detail-totals", [
+    ["Session数", fmtNum(sessions.length)],
+    ["配信者数", fmtNum(handles.length)],
+    ["収集時間合計", fmtDuration(stats.duration || 0)],
+    ["Gift合計", fmtNum(stats.gifts)],
+    ["コイン合計", fmtNum(stats.diamonds)],
+    ["コメント合計", fmtNum(stats.comments)],
+    ["Like合計", fmtNum(stats.likes_total)],
+    // 同時に居た人数は足し算にならない。合算ではなく各Sessionの最大値であることを名乗る。
+    ["最大同接(最大のSession)", fmtNum(stats.viewers_peak)],
+    ["Battle回数", fmtNum(stats.battles)],
+  ]);
+
+  // 自陣はSessionごとに違いうる(配信者を跨いだ選択)。Battleごとにその配信者を引く。
+  renderBattles(data.battles || [], (battle) => battle.owner || { unique_id: "", nickname: "" });
+  renderSummaryTables(data.summary || {});
+  renderCollabRows(data.collabs || []);
+  renderRecordings(data.recordings || []);
+  openDock(true);
+  markSelectedRow(null);
+}
+
+// 貢献ranking(UserごとのGift・Gift種類別)。単体のSession詳細もマージ表示も同じ表を
+// 使う。合算はserver側のGROUP BYが済ませてあり、ここは並べるだけ
+// (client側で足してはならない理由はstorage.sessions_summaryのdocstringにある)。
+function renderSummaryTables(summary) {
   // gift_idごとのicon URL。serverが出せるgiftだけが載る(載らないgiftは名前だけで並ぶ)。
   const giftIcons = summary.gift_icons || {};
+  setRailCount("gift", (summary.users || []).length);
   renderTableRows(
     "user-ranking",
     "user-ranking-empty",
@@ -757,12 +969,16 @@ async function showDetail(sessionId, fromHistory) {
     ],
     [0, 2, 3],
   );
+}
 
-  renderRecordings(data.recordings || []);
-  const detailModal = document.getElementById("detail-modal");
-  detailModal.classList.remove("hidden");
-  focusModalOpen(detailModal, document.getElementById("detail-close"));
-  loadCollabs(sessionId);
+// 開いているSessionの行に印を付け、畳んだ帯の中へscrollして見せる。dockは一覧を
+// 数行まで押し込むので、印だけ付けても選択行が帯の外にあると何も見えない。
+function markSelectedRow(sessionId) {
+  sessionRows.forEach((record, id) => {
+    record.tr.classList.toggle("sel", id === sessionId);
+  });
+  const record = sessionId === null ? null : sessionRows.get(sessionId);
+  if (record) record.tr.scrollIntoView({ block: "nearest" });
 }
 
 // ---- コラボ(非BattleのLinkMic)区間 ----
@@ -784,7 +1000,13 @@ async function loadCollabs(sessionId) {
     return;
   }
   if (currentSessionId !== sessionId) return;
-  const collabs = data.collabs || [];
+  renderCollabRows(data.collabs || []);
+}
+
+// コラボ区間の表。単体詳細(loadCollabs)とマージ表示(まとめて受け取る)で共用する。
+function renderCollabRows(collabs) {
+  const empty = document.getElementById("collab-empty");
+  setRailCount("collab", collabs.length);
   renderTableRows(
     "collab-rows",
     "collab-empty",
@@ -801,7 +1023,9 @@ async function loadCollabs(sessionId) {
     ],
     [0, 4],
   );
+  const summary = document.getElementById("collab-summary");
   if (!collabs.length) {
+    summary.textContent = "";
     setListState(empty, "empty");
     return;
   }
@@ -813,6 +1037,7 @@ function renderBattles(battles, owner) {
   const summary = document.getElementById("battle-summary");
   const cards = document.getElementById("battle-cards");
   const empty = document.getElementById("battle-empty");
+  setRailCount("battle", battles.length);
   if (!battles.length) {
     summary.textContent = "";
     // 空でもrenderBattleCards経由でclearし、保持中のChart instanceを破棄する。
@@ -826,23 +1051,51 @@ function renderBattles(battles, owner) {
 }
 
 function closeDetail(fromPopState) {
-  const detailModal = document.getElementById("detail-modal");
-  detailModal.classList.add("hidden");
-  focusModalClose(detailModal);
+  const detailDock = document.getElementById("detail-dock");
+  detailDock.classList.add("hidden");
+  detailDock.classList.remove("merged");
+  // マージ中に畳んだカテゴリをそのまま畳んだ状態で残さない。
+  setDetailCategory(detailCategory, false);
+  document.body.classList.remove("detail-docked");
+  focusModalClose(detailDock);
+  markSelectedRow(null);
   currentSessionId = null;
   currentSessionUid = null;
+  currentMergeIds = null;
   // 戻るButton由来の閉じるでpushBackすると履歴が二重に積まれる。
-  if (!fromPopState && new URLSearchParams(location.search).get("session")) {
+  const params = new URLSearchParams(location.search);
+  if (!fromPopState && (params.get("session") || params.get("merge"))) {
     history.pushState({}, "", location.pathname);
   }
 }
 
 // 詳細を開いた/切り替えたときのURL反映。開く操作は履歴を1段積んで戻るButtonで
 // 閉じられるようにし、別Sessionへの切り替えは積まずに置き換える。
-function syncDetailUrl(sessionId, pushNew) {
-  const url = `${location.pathname}?session=${sessionId}`;
-  if (pushNew) history.pushState({ session: sessionId }, "", url);
-  else history.replaceState({ session: sessionId }, "", url);
+// queryは "session=12" か "merge=1,2,3"。
+function syncDockUrl(query, pushNew) {
+  const url = `${location.pathname}?${query}`;
+  if (pushNew) history.pushState({ dock: query }, "", url);
+  else history.replaceState({ dock: query }, "", url);
+}
+
+// URLが指しているものを開く。?merge= を先に見るのは、両方在るときに指定が新しい方
+// (最後にsyncDockUrlが書いた方)を選ぶのではなく、常に同じ解釈にするため。
+function openDockFromUrl(fromHistory) {
+  const params = new URLSearchParams(location.search);
+  const merge = params.get("merge");
+  if (merge) {
+    const ids = merge.split(",").map(Number).filter((n) => Number.isFinite(n) && n > 0);
+    if (ids.length >= 2) {
+      showMerged(ids, fromHistory);
+      return true;
+    }
+  }
+  const wanted = Number(params.get("session"));
+  if (wanted) {
+    showDetail(wanted, fromHistory);
+    return true;
+  }
+  return false;
 }
 
 // 収集中Sessionの詳細を開いている間、Battleカードだけをliveで貼り替える。
@@ -1245,6 +1498,7 @@ function recordingActions(rec) {
 }
 
 function renderRecordings(recordings) {
+  setRailCount("rec", recordings.length);
   renderTableRows(
     "recording-list",
     "recording-list-empty",
@@ -1871,11 +2125,30 @@ document.getElementById("transcript-modal").addEventListener("click", (e) => {
   if (e.target.id === "transcript-modal") closeTranscript();
 });
 document.getElementById("transcript-video").addEventListener("timeupdate", highlightActiveSegment);
-document.getElementById("detail-close").addEventListener("click", closeDetail);
-document.getElementById("detail-modal").addEventListener("click", (e) => {
-  if (e.target.id === "detail-modal") closeDetail();
+// closeDetailの引数はfromPopState。listenerへ直接渡すとMouseEventがそこへ入り、
+// 「戻る由来」と誤認してURLの?session=を消し損ねる。
+document.getElementById("detail-close").addEventListener("click", () => closeDetail());
+document.getElementById("detail-rail").addEventListener("click", (e) => {
+  const tab = e.target.closest(".dk-tab");
+  if (tab) setDetailCategory(tab.dataset.cat);
 });
+// 前回見ていたカテゴリで開く。Sessionを渡り歩くたびにGiftへ戻ると、同じ区画を
+// 見比べる操作が毎回2手になる。
+setDetailCategory(prefGet(DETAIL_CATEGORY_PREF) || "gift", false);
 document.getElementById("export-csv").addEventListener("click", exportVisibleCsv);
+document.getElementById("merge-open").addEventListener("click", () => showMerged([...mergeSelected]));
+document.getElementById("merge-clear").addEventListener("click", () => {
+  mergeSelected.clear();
+  renderTable();
+});
+document.getElementById("merge-selall").addEventListener("change", (e) => {
+  // 対象は「表示中」だけ。絞込で見えていないSessionまで巻き込むと、押した本人には
+  // 何を選んだのか分からない選択になる(配信者削除の全選択と同じ扱い)。
+  const visible = filteredSessions();
+  if (e.target.checked) visible.forEach((s) => mergeSelected.add(s.id));
+  else visible.forEach((s) => mergeSelected.delete(s.id));
+  renderTable();
+});
 // 検索は1キーストロークごとにtbody全再構築が走るため~200msデバウンスする。
 // period/status/sortは離散的な選択のため即時反映でよい。
 // 検索語は1回限りの入力なので残さない(period/status/並びは次に開いた時も同じ見え方で始める)。
@@ -1965,16 +2238,22 @@ loadUpscaleStatus();
 loadKpi();
 // Session一覧を先に読む。詳細modalは表示名を一覧から補うため、一覧が入ってから開く。
 loadSessions().then(() => {
-  // 横断jump(Ctrl+K)や他画面からの ?session= 指定でその詳細を開く。
-  const wanted = Number(new URLSearchParams(location.search).get("session"));
-  if (wanted) showDetail(wanted, true);
+  // 横断jump(Ctrl+K)や他画面からの ?session= / ?merge= 指定でそれを開く。
+  openDockFromUrl(true);
 });
 // 戻る/進むでmodalの開閉を追従させる。URLが状態を持つ以上、browserの履歴操作が
 // 効かないと「戻ったのに閉じない」ことになる。
 window.addEventListener("popstate", () => {
-  const wanted = Number(new URLSearchParams(location.search).get("session"));
-  if (wanted && wanted !== currentSessionId) showDetail(wanted, true);
-  else if (!wanted && currentSessionId !== null) closeDetail(true);
+  const params = new URLSearchParams(location.search);
+  const merge = params.get("merge");
+  const wanted = Number(params.get("session"));
+  if (merge) {
+    if (merge !== (currentMergeIds || []).join(",")) openDockFromUrl(true);
+  } else if (wanted) {
+    if (wanted !== currentSessionId) showDetail(wanted, true);
+  } else if (currentSessionId !== null || currentMergeIds !== null) {
+    closeDetail(true);
+  }
 });
 connectWS(handleMessage);
 // KPI帯は全sessionの通算集計で、warmでも毎回0.35秒かかる。開きっぱなしにする画面なので、

@@ -121,6 +121,65 @@ describe("videos.js のPK・ギフトpanel", () => {
     });
   });
 
+  describe("PK後の勝利(罰ゲーム)時間", () => {
+    // serverが決めた窓(punish_end)まで同じ戦を出し続ける。TikTokはPKが終わると勝敗の
+    // 演出に入り、その間もギフトは飛ぶので、終了と同時に空にすると誰が投げたのか読めない。
+    const PUNISHED = { ...BATTLE, punish_end: 380, punish_measured: true, settled_at: 200 };
+
+    it("PKが終わってもその戦を出し続ける(勝利時間の終わりまで)", () => {
+      render({ battles: [PUNISHED], now: 300 });
+      expect(nowText()).toContain("PK 2戦目");
+      expect(nowText()).not.toContain("PK中ではありません");
+      expect(nowText()).toContain("勝利時間");
+    });
+
+    it("勝利時間が終われば普段どおりPK外になる", () => {
+      render({ battles: [PUNISHED], now: 390 });
+      expect(nowText()).toContain("PK中ではありません");
+    });
+
+    it("窓を実測できていない戦は目安だと名乗る", () => {
+      render({ battles: [{ ...PUNISHED, punish_measured: false }], now: 300 });
+      expect(nowText()).toContain("勝利時間（目安）");
+    });
+
+    it("勝利時間のバーは確定scoreで止める(PK後のroster解体で0対0へ潰さない)", () => {
+      const teardown = {
+        ...PUNISHED,
+        series: [...BATTLE.series, { t: 260, own: 0, opp: 0, parts: PARTS(0, 0) }],
+      };
+      render({ battles: [teardown], now: 300 });
+      expect(segments().map((s) => s.textContent)).toEqual(["400", "300"]);
+    });
+
+    it("勝利時間に飛んだギフトも同じ欄へ流す(別枠で数え、行の地も分ける)", () => {
+      render({
+        battles: [PUNISHED],
+        gifts: [gift(120, "PK中", 2, 90), { ...gift(250, "演出中", null, 500), punish: 2 }],
+        now: 300,
+      });
+      expect(giftTexts()).toHaveLength(2);
+      expect(giftTexts()[1]).toContain("演出中");
+      expect(giftRows()[1].classList.contains("vd-gift-punish")).toBe(true);
+      expect(giftRows()[0].classList.contains("vd-gift-punish")).toBe(false);
+      const head = doc.getElementById("pk-gift-head").textContent;
+      // PKの貢献(90コイン)と勝利時間(500コイン)を混ぜない。
+      expect(head).toContain("1 / 1件");
+      expect(head).toContain("90 / 90 コイン");
+      expect(head).toContain("勝利時間 1 / 1件 500 / 500 コイン");
+    });
+
+    it("勝利時間のギフトが無ければ、その枠は出さない(0件と出すと取りこぼしと紛れる)", () => {
+      render({ battles: [PUNISHED], gifts: [gift(120, "PK中", 2)], now: 300 });
+      expect(doc.querySelector(".vd-pk-punish-sum").hidden).toBe(true);
+    });
+
+    it("PK中は勝利時間の名乗りを出さない", () => {
+      render({ battles: [PUNISHED], now: 150 });
+      expect(doc.querySelector(".vd-pk-phase").hidden).toBe(true);
+    });
+  });
+
   describe("スコアバー", () => {
     it("再生位置での値で分割する(確定scoreではない)", () => {
       render({ battles: [BATTLE], now: 150 });

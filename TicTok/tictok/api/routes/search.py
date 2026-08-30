@@ -16,6 +16,7 @@ from tictok.core.config import get_job_progress_min_interval_seconds
 from tictok.record.transcription import stt_available, stt_status
 from tictok.search import indexer, semantic
 from tictok.core.progress import IntervalGate
+from tictok.store._common import BOOKMARK_ORIGINS
 from fastapi import APIRouter
 from tictok.api import files
 from tictok.api import media_jobs
@@ -53,6 +54,30 @@ async def search_api(q: str, sources: str = "stt,comment", unique_ids: str = "",
         runtime.storage.search_scenes, q, wanted, ids, since, until, order,
         max(1, min(limit, 500)), max(0, offset))
     return result
+
+
+@router.get("/api/search/hits")
+async def search_hits_api(ids: str) -> dict:
+    """id指定でsearch_hitsの行を引く。意味検索のpassageを文へ開くのに使う。
+
+    passageは約25秒ぶんの発話・コメントを束ねた窓で、行そのものへ飛ぶと当たった文の
+    十数秒手前から始まる。画面はpassageの本文を1文ずつ押せるようにし、押された文のidだけを
+    ここへ引きに来る。秒はindexの写しではなくDBから引くので、文字起こしのやり直しで
+    位置が動いていても最新の値が返る。"""
+    wanted = []
+    for token in ids.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if not token.lstrip("-").isdigit():
+            raise HTTPException(status_code=400, detail=f"idは整数で指定してください: {token}")
+        wanted.append(int(token))
+    if not wanted:
+        raise HTTPException(status_code=400, detail="idを1つ以上指定してください。")
+    if len(wanted) > 500:
+        raise HTTPException(status_code=400, detail="一度に引けるidは500件までです。")
+    items = await asyncio.to_thread(runtime.storage.search_hit_rows, wanted)
+    return {"items": items}
 
 
 # 笑い声の一覧で受け付ける並び。ここに無い値は 'time' として扱う(SQLへ素通しさせない)。
@@ -233,6 +258,9 @@ class BookmarkRequest(BaseModel):
     memo: str = ""
     source_hit_id: Optional[int] = None
     group_id: Optional[int] = None
+    # 誰が置いた行かを、置く側が名乗る。既定が manual なのは、この経路を叩くのが
+    # 画面の「見どころに記録」だからである。
+    origin: str = "manual"
 
 
 class BookmarkPatchRequest(BaseModel):
@@ -298,10 +326,14 @@ async def add_bookmark_api(payload: BookmarkRequest) -> dict:
         raise HTTPException(status_code=400, detail="終了位置は開始位置より後にしてください。")
     if payload.group_id is not None:
         await _require_group(payload.group_id)
+    if payload.origin not in BOOKMARK_ORIGINS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"出所は {'/'.join(BOOKMARK_ORIGINS)} のいずれかにしてください。")
     return await asyncio.to_thread(
         runtime.storage.add_bookmark, payload.recording_id, recording["unique_id"],
         payload.start, payload.end, payload.memo, payload.source_hit_id,
-        payload.group_id)
+        payload.group_id, payload.origin)
 
 
 class LiveBookmarkRequest(BaseModel):
@@ -436,6 +468,9 @@ async def semantic_search_api(q: str, sources: str = "stt,comment", unique_ids: 
     for match in matches:
         items.append({
             "id": match["id"],
+            # passageを組んでいる文のid。画面はこれで本文の各行を押せるようにし、押された
+            # 文の秒を /api/search/hits から引く(行そのものへ飛ぶとpassageの頭に着地する)。
+            "hit_ids": match["hit_ids"],
             "source": match["source"],
             "recording_id": match["recording_id"],
             "session_id": match["session_id"],
@@ -488,12 +523,15 @@ def _spawn_progress(loop, coro) -> None:
     task.add_done_callback(_progress_tasks.discard)
 
 
-async def _run_semantic_build() -> None:
+async def _run_semantic_build() -> bool:
     """意味検索indexの構築本体。requestとは切り離してbackgroundで走る。
 
     進捗はjob台帳(意味検索index)とWSのsemantic_indexで届くので、呼び出し側が結果を
     待つ必要はない。例外はここで畳む: 誰もawaitしないtaskの外へ投げても
-    「Task exception was never retrieved」が残るだけで、userには何も伝わらない。"""
+    「Task exception was never retrieved」が残るだけで、userには何も伝わらない。
+
+    戻り値(完走したか)を読むのは自動起動の側だけで、失敗した相手へ何度も起こしに行かない
+    ための材料である(``start_build_if_pending``)。人が押した経路は結果をWSで受け取る。"""
     loop = asyncio.get_running_loop()
     # 埋め込みは数十万passageを数千batchに分けて回す。build_indexは件数入りの
     # stage="embed" を出しているのに、以前は stage=="start" 以外を全て捨てており、
@@ -533,7 +571,7 @@ async def _run_semantic_build() -> None:
             result = await semantic.build_index(runtime.storage, on_progress=on_progress)
     except semantic.SemanticBusy:
         # 入口の判定をすり抜けた競合。もう1本が同じ仕事をしているので、失敗ではない。
-        return
+        return True
     except semantic.SemanticError as exc:
         outcome, message = "failed", str(exc)
     except Exception as exc:
@@ -549,6 +587,7 @@ async def _run_semantic_build() -> None:
         # errorも必ず載せる: 応答を待たなくなった以上、失敗をrequestで返す経路はもう無い。
         # ここで配らないと、buildが死んでも画面には「開始しました」が残り続ける。
         await _broadcast_semantic_status(result, message)
+    return outcome == "completed"
 
 
 @router.post("/api/search/semantic/build", status_code=202)
@@ -569,6 +608,49 @@ async def semantic_build_api() -> dict:
     runtime._semantic_build_tasks.add(task)
     task.add_done_callback(runtime._semantic_build_tasks.discard)
     return {"started": True}
+
+
+# 自動で起こしたbuildが失敗した後、次に自動で試みるまで空ける時間。埋め込みserverが
+# 落ちていれば何度起こしても同じ所で失敗し、台帳が同じ失敗の行で埋まるだけで、直せるのは
+# 人しかいない。sweepの周期(既定30分)より粗くする。人が押す「indexを更新」はこの待ちを
+# 見ない(押した本人はその場で結果を要求している)。
+AUTO_BUILD_RETRY_SECONDS = 3600.0
+_auto_retry_at = 0.0
+
+
+def _remember_auto_outcome(task) -> None:
+    """自動で起こしたbuildの結末を覚える。完走しなかった回だけ次を遅らせる。
+
+    ``cancelled()`` を先に見るのは、取り消し済みtaskへ ``exception()`` を訊くと
+    CancelledErrorが飛ぶため(callbackの中なので、飛ばすと誰も受け取らない)。"""
+    global _auto_retry_at
+    if task.cancelled() or task.exception() is not None or not task.result():
+        _auto_retry_at = time.time() + AUTO_BUILD_RETRY_SECONDS
+
+
+async def start_build_if_pending() -> int:
+    """indexに未反映のgroupが残っていれば構築を1本起こし、その件数を返す(起こさなければ0)。
+
+    sweep(``api.startup``)から呼ぶ自動経路。起こし方を人が押す経路と同じ
+    ``_run_semantic_build`` に揃えるのは、差分判定・job台帳・進捗のWS・競合の弾きを
+    そちらが全部持っているからで、自動でもJob画面には同じ1行が出る。別の作り方は持たない。
+
+    埋め込みserverが無効・未設定なら何もしない(意味検索そのものが使えない状態で、
+    indexだけ作っても行き先が無い)。到達性はここでは確かめない — 確かめるにはHTTPを
+    1本投げることになり、それはbuildが最初のbatchでやることそのものである。"""
+    if not semantic.semantic_available() or semantic.build_running():
+        return 0
+    if time.time() < _auto_retry_at:
+        return 0
+    # search_hitsの全groupとindexed表の突き合わせ。件数に比例するのでloopの外(別thread)へ。
+    pending = await asyncio.to_thread(semantic.pending_groups, runtime.storage)
+    if not pending:
+        return 0
+    task = asyncio.create_task(_run_semantic_build())
+    runtime._semantic_build_tasks.add(task)
+    task.add_done_callback(runtime._semantic_build_tasks.discard)
+    task.add_done_callback(_remember_auto_outcome)
+    return pending
 
 
 @router.post("/api/transcribe/queue")

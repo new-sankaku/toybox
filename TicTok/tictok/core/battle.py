@@ -97,6 +97,32 @@ def battle_sides(participants) -> list:
     return [(tuple(g["ids"]), g["own"]) for g in ordered]
 
 
+def opponent_hosts(battle: dict) -> list:
+    """opponents から味方(自陣side)のhostを外して返す。
+
+    収集時の ``_capture_opponents`` は anchor_info に載る「自分以外のhost」を全員
+    opponents へ入れる。anchor_infoは陣営を名乗らないので、その時点では味方と相手を
+    区別できないため。チーム戦・コラボPKではこれで**味方が相手として記録される**:
+    配信者profileの対戦相手ranking・履歴カードの「vs」・users表の対戦履歴が、味方を
+    相手として数えていた(実data 1,533戦のうちチーム戦の大半が該当)。
+
+    陣営が確定するのは participants(team armies由来のside/is_own)なので、読み出し時に
+    そちらで濾す。participantsが陣営を持たない古い記録は判定材料が無いので触らない
+    (味方かどうか判らないhostを相手から落とすと、本物の相手まで消える)。
+    """
+    parts = battle.get("participants") or []
+    own_ids = {
+        str(p.get("user_id") or "")
+        for p in parts
+        if p.get("is_own") or p.get("side") == "own"
+    }
+    own_ids.discard("")
+    stored = battle.get("opponents") or []
+    if not own_ids:
+        return stored
+    return [o for o in stored if str(o.get("user_id") or "") not in own_ids]
+
+
 def result_from_scores(own: int, opp: int) -> str:
     """2極scoreから勝敗label。oppは常に「最も強い敵陣営のscore」(合計ではない)。"""
     return "win" if own > opp else "lose" if own < opp else "draw"
@@ -159,7 +185,8 @@ def annotate_result(battle: dict) -> dict:
 
     result と2極score(own_score/opp_score)を確定時点の値へ置き換え、元dataは
     *_reported に残す。resultだけ差し替えるとscoreと矛盾した表示(loseなのに自陣が
-    大差でリードして見える)になるため、両方まとめて確定時点へ揃える。
+    大差でリードして見える)になるため、両方まとめて確定時点へ揃える。あわせて
+    opponents から味方を外す(opponent_hosts)。
 
     DBへ書き戻す経路(collector._battle_public → storage.save_battles)ではこれを
     呼ばないこと: 保存dataは TikTok から届いたままにしておき、判定は読み出しのたびに行う。
@@ -179,6 +206,9 @@ def annotate_result(battle: dict) -> dict:
     if resolved["basis"] == BATTLE_RESULT_SETTLED:
         battle["own_score"] = resolved["own"]
         battle["opp_score"] = resolved["opp"]
+    # 味方が相手として記録されている分をここで落とす(opponent_hosts参照)。判定と同じく
+    # 保存dataは触らず読み出し側で揃えるので、既存recordにも遡って効く。
+    battle["opponents"] = opponent_hosts(battle)
     return battle
 
 
@@ -214,3 +244,42 @@ def gift_window_end(battle: dict, starts: list, fallback_duration: float) -> Opt
     if battle.get("ongoing"):
         return None
     return next((s for s in starts if s > start), None) or start + fallback_duration
+
+
+# PK終了後の「勝利(罰ゲーム)時間」の上限(秒)。
+#
+# TikTokはPKが終わると勝敗の演出に入り、その間もギフトは飛び続ける。終わりの合図は
+# ``WebcastLinkMicBattlePunishFinish``(collectorが punish_end_time へ記録)で、実測
+# 1,076件の内訳は
+#   時間切れ(REASON_TIME_UP) 691件: end_timeの+180.2〜181.7秒(中央値180.7)に集中
+#   途中終了(REASON_CUT_SHORT) 385件: +6.1〜180.1秒(中央値99.1)
+# で、上限は180秒である。合図が届かなかった戦(実測877件)は、その92%が180秒以内に次のPKが
+# 始まっており(次戦までの間隔の中央値96秒)、演出が次のPKで打ち切られた分である。
+#
+# 勝敗の定義(BATTLE_SETTLE_GRACE_SECONDS)と同じくTikTok側の仕様で、userが調整する運用値
+# ではないので設定には出さない。
+BATTLE_PUNISH_MAX_SECONDS = 180.0
+
+
+def punish_window_end(battle: dict, starts: list) -> Optional[float]:
+    """PK終了後の勝利(罰ゲーム)時間の終端。startsは同一sessionの全Battle開始時刻(昇順)。
+
+    終わりの合図(punish_end_time)が録れていればそれが実測値。無ければ**次のBattleの開始**
+    と ``end_time + BATTLE_PUNISH_MAX_SECONDS`` の早い方で閉じる(合図が届かない戦は次のPKが
+    始まって演出が打ち切られた分なので、次戦の開始が実際の終わりに当たる)。
+
+    終了していないBattle(進行中)と不成立のBattleはNone: 勝利時間そのものが無い。
+    貢献集計のgift窓(gift_window_end)はこれとは別で、**PK中に飛んだ分だけ**で閉じたままに
+    する — 勝利時間のギフトはスコアに入らないので、貢献へ混ぜてはならない。
+    """
+    end = battle.get("end_time")
+    if end is None or battle.get("aborted"):
+        return None
+    limit = end + BATTLE_PUNISH_MAX_SECONDS
+    following = next((s for s in starts if s > end), None)
+    if following is not None:
+        limit = min(limit, following)
+    recorded = battle.get("punish_end_time")
+    if recorded is None:
+        return limit
+    return max(end, min(float(recorded), limit))

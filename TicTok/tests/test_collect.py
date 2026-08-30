@@ -1,7 +1,9 @@
 import asyncio
 import json
+import time
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -29,6 +31,8 @@ from TikTokLive.proto import (
 from TikTokLive.events import CommentEvent, LikeEvent, SocialEvent
 
 from tictok.collect import collector as C
+from tictok.collect import dedup
+from tictok.collect import live_resolver as LR
 from tictok.collect.live_resolver import LiveResolveBlocked, interpret_live_state
 from tictok.collect.proto_dict import safe_event_to_dict, to_plain
 
@@ -145,6 +149,174 @@ def test_interpret_live_state_missing_live_room_is_user_not_found():
 def test_interpret_live_state_room_id(data, expected):
     # status==4はofflineなのでroomIdが残っていてもliveと誤認しない。
     assert interpret_live_state(data, "someone") == expected
+
+
+# ---------------- 監視loopの異常終了 ----------------
+
+
+@pytest.mark.asyncio
+async def test_watch_loop_crash_is_reported_not_silent(collector, monkeypatch):
+    # watch loopが落ちても誰も拾い直さない。「待機中」を名乗ったまま黙って止まると
+    # 気づけないので、状態をerrorへ落として理由を画面とlogに出す。
+    async def boom(*args, **kwargs):
+        raise RuntimeError("watch loop exploded")
+
+    monkeypatch.setattr(collector, "_wait_for_live_start", boom)
+    await collector._run()
+    assert collector.state == C.STATE_ERROR
+    assert "RuntimeError" in (collector.error_message or "")
+
+
+# ---------------- live_resolver の browser 監視 ----------------
+
+_LIVE_SIGI = {"sigi": True, "liveRoom": True, "status": 2, "roomId": "7300000000000000000"}
+
+
+class _FakePage:
+    def __init__(self, data):
+        self._data = data
+        self.closed = False
+
+    async def goto(self, *args, **kwargs):
+        return None
+
+    async def wait_for_selector(self, *args, **kwargs):
+        return None
+
+    async def evaluate(self, *args, **kwargs):
+        return self._data
+
+    async def close(self):
+        self.closed = True
+
+
+class _FakeContext:
+    """``fails`` 回だけ new_page が driver 切断と同じ形で落ちる context。"""
+
+    def __init__(self, fails=0, data=None):
+        self.fails = fails
+        self.data = data if data is not None else _LIVE_SIGI
+        self.opened = 0
+
+    async def new_page(self):
+        self.opened += 1
+        if self.fails > 0:
+            self.fails -= 1
+            raise Exception("Connection closed while reading from the driver")
+        return _FakePage(self.data)
+
+    async def close(self):
+        return None
+
+
+class _FakeBrowser:
+    def is_connected(self):
+        return True
+
+    async def close(self):
+        return None
+
+
+class _SupervisedResolver(LR.BrowserLiveResolver):
+    """実 playwright を起こさずに監視の振る舞いだけを見る。"""
+
+    def __init__(self, contexts):
+        super().__init__(None)
+        self._pending = list(contexts)
+        self.launches = 0
+
+    async def _launch(self):
+        self._last_launch_at = time.monotonic()
+        self.launches += 1
+        self._browser = _FakeBrowser()
+        self._context = self._pending.pop(0)
+        self._failures = 0
+
+    async def _teardown(self):
+        self._context = self._browser = self._playwright = None
+
+
+@pytest.mark.asyncio
+async def test_resolver_rebuilds_browser_after_consecutive_failures(monkeypatch):
+    # driver process が死ぬと以後の呼び出しは永久に同じ例外を返す。
+    # 連続失敗で browser を作り直し、live 検出が自力で戻ること。
+    monkeypatch.setenv("TICTOK_RESOLVER_RESTART_AFTER_FAILURES", "2")
+    monkeypatch.setenv("TICTOK_RESOLVER_RESTART_COOLDOWN_SECONDS", "0")
+    dead = _FakeContext(fails=99)
+    healthy = _FakeContext(fails=0)
+    resolver = _SupervisedResolver([dead, healthy])
+    await resolver.start()
+    assert resolver.launches == 1
+
+    for _ in range(2):
+        with pytest.raises(LiveResolveBlocked):
+            await resolver.resolve("someone")
+    assert resolver.launches == 1
+
+    resolution = await resolver.resolve("someone")
+    assert resolution.room_id == 7300000000000000000
+    assert resolver.launches == 2
+    assert healthy.opened == 1
+
+
+class _HangingContext:
+    """new_page が返ってこない context。driverが死なずに固まる型。"""
+
+    async def new_page(self):
+        await asyncio.Event().wait()
+
+    async def close(self):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_resolver_gives_up_when_browser_never_answers(monkeypatch):
+    # playwrightのnew_page/evaluate/closeにはtimeoutが無い。ここで切らないとlockを
+    # 握ったまま止まり、全監視のlive検出がlog1行も残さずに停止する。
+    monkeypatch.setenv("TICTOK_RESOLVER_TIMEOUT_MS", "30")
+    monkeypatch.setenv("TICTOK_RESOLVER_RESTART_AFTER_FAILURES", "1")
+    monkeypatch.setenv("TICTOK_RESOLVER_RESTART_COOLDOWN_SECONDS", "0")
+    resolver = _SupervisedResolver([_HangingContext(), _FakeContext(fails=0)])
+    await resolver.start()
+    with pytest.raises(LiveResolveBlocked) as blocked:
+        await asyncio.wait_for(resolver.resolve("someone"), timeout=5)
+    assert "unresponsive" in str(blocked.value)
+    # 固まったbrowserは次のprobeで作り直され、検出が戻る。
+    assert (await resolver.resolve("someone")).room_id == 7300000000000000000
+    assert resolver.launches == 2
+
+
+@pytest.mark.asyncio
+async def test_resolver_restart_waits_for_cooldown(monkeypatch):
+    # 起動そのものが壊れている間、probe ごとに chromium を起こさない。
+    monkeypatch.setenv("TICTOK_RESOLVER_RESTART_AFTER_FAILURES", "1")
+    monkeypatch.setenv("TICTOK_RESOLVER_RESTART_COOLDOWN_SECONDS", "300")
+    resolver = _SupervisedResolver([_FakeContext(fails=99), _FakeContext(fails=0)])
+    await resolver.start()
+    with pytest.raises(LiveResolveBlocked):
+        await resolver.resolve("someone")
+    with pytest.raises(LiveResolveBlocked) as pending:
+        await resolver.resolve("someone")
+    assert "cooldown" in str(pending.value)
+    assert resolver.launches == 1
+
+
+@pytest.mark.asyncio
+async def test_resolver_success_clears_failure_streak(monkeypatch):
+    # 単発の navigation 失敗で browser を捨てない（WAF通過済の context を失う）。
+    monkeypatch.setenv("TICTOK_RESOLVER_RESTART_AFTER_FAILURES", "2")
+    monkeypatch.setenv("TICTOK_RESOLVER_RESTART_COOLDOWN_SECONDS", "0")
+    flaky = _FakeContext(fails=1)
+    resolver = _SupervisedResolver([flaky, _FakeContext(fails=0)])
+    await resolver.start()
+    with pytest.raises(LiveResolveBlocked):
+        await resolver.resolve("someone")
+    assert (await resolver.resolve("someone")).room_id == 7300000000000000000
+    # 成功で連続が切れているので、次の1回の失敗では閾値(2)に届かない。
+    flaky.fails = 1
+    with pytest.raises(LiveResolveBlocked):
+        await resolver.resolve("someone")
+    assert resolver.launches == 1
 
 
 # ---------------- 小さな正規化 helper ----------------
@@ -388,13 +560,56 @@ async def test_opponent_gift_uses_the_payload_identity_key(collector, monkeypatc
         return None
 
     monkeypatch.setattr(collector, "_broadcast_battles", _noop)
-    rec = {"contributions": {}}
+    rec = {"contributions": {}, "participants": {"h2": {"user_id": "h2", "side": "opp"}}}
     collector._battles[1] = rec
-    await collector._on_opponent_gift(1, "h2", C._user_payload(ExtendedUser()), 10)
-    await collector._on_opponent_gift(1, "h2", C._user_payload(ExtendedUser()), 20)
+    await collector._on_opponent_gift("h2", C._user_payload(ExtendedUser()), 10)
+    await collector._on_opponent_gift("h2", C._user_payload(ExtendedUser()), 20)
     assert rec["contributions"] == {}
-    await collector._on_opponent_gift(1, "h2", C._user_payload(ExtendedUser(username="rival")), 30)
+    await collector._on_opponent_gift("h2", C._user_payload(ExtendedUser(username="rival")), 30)
     assert set(rec["contributions"]) == {"rival"}
+
+
+@pytest.mark.asyncio
+async def test_peer_gift_lands_on_the_battle_that_peer_is_fighting(collector, monkeypatch):
+    """listenerはPKの外(コラボ中)でも生きているので、Gift の宛先は「そのhostが今戦って
+    いる進行中のBattle」に限る。終わったPKや、その相手が居ないPKへ入れない。"""
+    async def _noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(collector, "_broadcast_battles", _noop)
+    done = {"contributions": {}, "action": C.BATTLE_ACTION_FINISH,
+            "participants": {"h2": {"user_id": "h2", "side": "opp"}}}
+    live = {"contributions": {}, "action": None,
+            "participants": {"h2": {"user_id": "h2", "side": "opp"}}}
+    collector._battles[1] = done
+    collector._battles[2] = live
+    await collector._on_opponent_gift("h2", C._user_payload(ExtendedUser(username="rival")), 30)
+    assert done["contributions"] == {}
+    assert live["contributions"]["rival"]["diamonds"] == 30
+
+    # 進行中のPKにそのhostが居なければ、どこにも入れない(コラボ中の通常Gift)。
+    other = {"contributions": {}, "action": None,
+             "participants": {"h9": {"user_id": "h9", "side": "opp"}}}
+    collector._battles.clear()
+    collector._battles[3] = other
+    await collector._on_opponent_gift("h2", C._user_payload(ExtendedUser(username="rival")), 30)
+    assert other["contributions"] == {}
+
+
+@pytest.mark.asyncio
+async def test_peer_gift_takes_the_side_from_participants(collector, monkeypatch):
+    """味方hostのRoomも張る。拾った実弾を"opp"に決め打つと、味方の貢献が敵陣として
+    記録され、配信者profileの敵陣集計が味方を数える。"""
+    async def _noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(collector, "_broadcast_battles", _noop)
+    rec = {"contributions": {}, "action": None,
+           "participants": {"mate": {"user_id": "mate", "side": "own", "is_own": False}}}
+    collector._battles[1] = rec
+    await collector._on_opponent_gift("mate", C._user_payload(ExtendedUser(username="fan")), 40)
+    assert rec["contributions"]["fan"]["side"] == "own"
+    assert rec["contributions"]["fan"]["host_id"] == "mate"
 
 
 def test_user_payload_takes_member_level_from_the_fans_badge_when_fans_club_is_empty():
@@ -672,6 +887,38 @@ async def test_battle_extras_are_not_erased_by_a_later_event(collector):
 
 
 @pytest.mark.asyncio
+async def test_punish_finish_records_the_end_of_the_victory_time(collector):
+    """PK後の勝利(罰ゲーム)時間の終わりは、この event でしか判らない(battle settingが持つのは
+    PK本体のstart/end/durationだけ)。時刻はserver時計(create_time)で採る — end_timeも
+    server時計なので、受信時刻で埋めると窓の長さに受信遅延が混ざる。"""
+    await collector._on_battle(SimpleNamespace(
+        battle_id=77, action=None, anchor_info=None,
+        battle_setting=SimpleNamespace(start_time_ms=1_783_156_030_000, duration=300,
+                                       end_time_ms=1_783_156_335_000),
+    ))
+    await collector._on_punish_finish(SimpleNamespace(
+        battle_id=77, reason=1,
+        base_message=SimpleNamespace(create_time=1_783_156_515_000),
+    ))
+
+    rec = collector._battles[77]
+    # PK終了(…335)の180秒後。
+    assert rec["punish_end_time"] == 1_783_156_515.0
+    assert rec["punish_reason"] == 1
+
+
+@pytest.mark.asyncio
+async def test_punish_finish_of_an_unknown_battle_does_not_create_a_record(collector):
+    """接続前に始まったPKの分は突合先が無い。空のBattleを作ると、1戦も無い録画にPKが
+    生えることになる。"""
+    await collector._on_punish_finish(SimpleNamespace(
+        battle_id=88, reason=None,
+        base_message=SimpleNamespace(create_time=1_783_156_515_000),
+    ))
+    assert 88 not in collector._battles
+
+
+@pytest.mark.asyncio
 async def test_item_cards_other_than_the_glove_are_kept_and_deduped(collector):
     """グローブ以外の道具cardは1件も残していなかった。同じcardは複数回届くので畳む。"""
     event = SimpleNamespace(
@@ -760,6 +1007,38 @@ async def test_repeated_sign_failures_on_one_room_stop_the_reconnect_loop(collec
     outcome, reason = await _connect_raising(collector, exc)
     assert outcome == "unsigned"
     assert "署名" in reason
+
+
+@pytest.mark.asyncio
+async def test_signer_timeouts_count_as_sign_failures_not_as_tiktok_network_errors(collector, caplog):
+    """署名要求のtimeoutは「TikTokとの通信」ではなくsign server側の失敗。署名失敗として
+    数えなければ、署名が通らないまま撃ち続けるroomがroom単位の保留へ落ちない。"""
+    threshold = collector._settings.get("sign_block_attempts")
+
+    with caplog.at_level("WARNING", logger="tictok.collector"):
+        for attempt in range(1, threshold):
+            outcome, reason = await _connect_raising(collector, _signer_timeout())
+            assert outcome == "transient" and "sign server" in reason, f"{attempt}回目"
+        outcome, _reason = await _connect_raising(collector, _signer_timeout())
+
+    assert outcome == "unsigned"
+    assert collector._sign_failures == threshold
+    events = [r.event for r in caplog.records if r.name == "tictok.collector"]
+    assert "collector.network_error_raised" not in events
+    assert all(r.exc_info is None for r in caplog.records if r.name == "tictok.collector")
+
+
+@pytest.mark.asyncio
+async def test_tiktok_side_network_errors_stay_network_errors(collector, caplog):
+    """signer以外への通信断はsign serverの失敗ではない。署名失敗として数えない。"""
+    with caplog.at_level("WARNING", logger="tictok.collector"):
+        outcome, _reason = await _connect_raising(
+            collector, _signer_timeout("https://www.tiktok.com/x")
+        )
+    assert outcome == "transient"
+    assert collector._sign_failures == 0
+    assert [r.event for r in caplog.records
+            if r.name == "tictok.collector"] == ["collector.network_error_raised"]
 
 
 @pytest.mark.asyncio
@@ -983,6 +1262,42 @@ def test_sign_server_outage_does_not_hide_entitlement_or_unrelated_failures():
     assert C.sign_server_outage(RuntimeError("unrelated")) is None
 
 
+def _signer_timeout(url="https://tiktok.eulerstream.com/webcast/fetch/?room_id=1"):
+    """署名要求(timeout=15秒)が応答を待ち切れずに落ちた形。TikTokLiveがSignAPIErrorへ
+    包むのはConnectErrorだけなので、これは生のhttpx例外のまま上がってくる。"""
+    import httpx
+    return httpx.ReadTimeout("", request=httpx.Request("GET", url))
+
+
+def test_sign_server_outage_names_a_timeout_against_the_signer():
+    """署名要求のReadTimeoutは5xxと同じsign server側の失敗。分類できないままだと、
+    httpx/httpcore内部で終わるStack Traceとして積まれる(実測44件)。"""
+    outage = C.sign_server_outage(_signer_timeout())
+    assert outage is not None
+    assert "sign server" in outage["reason"] and "ReadTimeout" in outage["reason"]
+    assert outage["ctx"]["sign_request_path"] == "/webcast/fetch/"
+    assert outage["retry_after"] is None
+
+
+def test_sign_server_outage_does_not_claim_unaddressed_or_tiktok_side_timeouts():
+    """宛先が signer でない通信断まで吸わせない(TikTok宛の通信断はsign serverの失敗
+    ではない)。宛先が判らないものも断定しない。"""
+    import httpx
+    assert C.sign_server_outage(_signer_timeout("https://www.tiktok.com/x")) is None
+    assert C.sign_server_outage(httpx.ReadTimeout("no request attached")) is None
+
+
+def test_expected_transient_names_route_and_websocket_interruptions_only():
+    from websockets.exceptions import ConnectionClosedError
+
+    transient = C.expected_transient(_signer_timeout("https://www.tiktok.com/x"))
+    assert transient["ctx"]["request_host"] == "www.tiktok.com"
+    closed = C.expected_transient(ConnectionClosedError(None, None))
+    assert "websocket" in closed["reason"]
+    # 分類できない失敗はNone=Stack Trace経路のまま(未知の失敗を外部要因へ吸わせない)。
+    assert C.expected_transient(RuntimeError("unrelated")) is None
+
+
 @pytest.mark.asyncio
 async def test_opponent_listener_logs_sign_outage_without_a_traceback(caplog, monkeypatch):
     from TikTokLive.client.errors import SignAPIError
@@ -996,7 +1311,7 @@ async def test_opponent_listener_logs_sign_outage_without_a_traceback(caplog, mo
             return None
 
     listener = C.OpponentRoomListener(
-        "rina__0910", "123", "battle-1", _Resolver(), _Gate(), None
+        "rina__0910", "123", _Resolver(), _Gate(), None
     )
     with caplog.at_level("WARNING", logger="tictok.collector"):
         await listener._run()
@@ -1004,9 +1319,427 @@ async def test_opponent_listener_logs_sign_outage_without_a_traceback(caplog, mo
     records = [r for r in caplog.records if r.event == "collector.opponent_listener_sign_unavailable"]
     assert len(records) == 1
     assert records[0].exc_info is None
-    assert "対処不要" in records[0].getMessage()
-    assert records[0].ctx["battle_id"] == "battle-1"
+    # 5xxを「一時障害」と名乗らない(実測112分に散る個別失敗で、原因は未確認)。
+    assert "一時障害" not in records[0].getMessage()
+    assert "接続できませんでした" in records[0].getMessage()
+    assert records[0].ctx["opp_host_id"] == "123"
     assert records[0].ctx["sign_status"] == 500
+    # retry_seconds=0(既定の引数)は「1回で諦める」。撃ち切ったことを名乗る。
+    assert records[0].ctx["retry_in_seconds"] == 0
+    assert listener.coverage()["attached_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_opponent_listener_logs_expected_interruptions_without_a_traceback(caplog):
+    """相手Roomのwebsocket切断・通信断はこちらのcodeでは直せず、Stack Traceはhttpxと
+    websocketsの内部で終わる(実測: Stack Trace 113件のうち86件がこの2種)。1行で残す。"""
+    from websockets.exceptions import ConnectionClosedError
+
+    class _Resolver:
+        async def resolve(self, _handle):
+            raise ConnectionClosedError(None, None)
+
+    class _Gate:
+        async def acquire(self, priority=False):
+            return None
+
+    listener = C.OpponentRoomListener("rina__0910", "123", _Resolver(), _Gate(), None)
+    with caplog.at_level("WARNING", logger="tictok.collector"):
+        await listener._run()
+
+    records = [r for r in caplog.records if r.event == "collector.opponent_listener_transient"]
+    assert len(records) == 1
+    assert records[0].exc_info is None
+    assert "websocket" in records[0].getMessage()
+    assert records[0].ctx["opp_unique_id"] == "rina__0910"
+    assert not [r for r in caplog.records if r.event == "collector.opponent_listener_failed"]
+
+
+@pytest.mark.asyncio
+async def test_peer_listener_retries_after_a_sign_failure(caplog):
+    """sign serverの5xxは時刻を変えれば通る(実測: 500を受けた80 hostのうち66 hostは別の
+    PKで取得できている)。1回で諦めるとPKの残り時間を丸ごと捨てる。"""
+    from TikTokLive.client.errors import SignAPIError
+
+    class _Resolver:
+        def __init__(self):
+            self.calls = 0
+
+        async def resolve(self, _handle):
+            self.calls += 1
+            raise _sign_error(SignAPIError.ErrorReason.SIGN_NOT_200, 500)
+
+    class _Gate:
+        async def acquire(self, priority=False):
+            return None
+
+    sleeps = []
+
+    async def _sleep(delay):
+        sleeps.append(delay)
+        if len(sleeps) >= 3:
+            listener._stopped = True
+
+    resolver = _Resolver()
+    listener = C.OpponentRoomListener(
+        "rina__0910", "123", resolver, _Gate(), None, retry_seconds=5, retry_max=8
+    )
+    with caplog.at_level("WARNING", logger="tictok.collector"):
+        with mock.patch.object(C.asyncio, "sleep", _sleep):
+            await listener._run()
+
+    assert resolver.calls == 3
+    # 間隔は失敗のたびに伸ばし、上限で頭打ちにする。
+    assert sleeps == [5, 10, 15]
+    records = [r for r in caplog.records if r.event == "collector.opponent_listener_sign_unavailable"]
+    assert records[0].ctx["retry_in_seconds"] == 5
+    assert "繋ぎ直します" in records[0].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_peer_listener_gives_up_after_the_consecutive_failure_cap(caplog):
+    """相手が配信を終えた室は何度撃っても通らない。撃ち続けず、諦めたことを名乗る。"""
+    class _Resolver:
+        def __init__(self):
+            self.calls = 0
+
+        async def resolve(self, _handle):
+            self.calls += 1
+            raise RuntimeError("boom")
+
+    class _Gate:
+        async def acquire(self, priority=False):
+            return None
+
+    async def _sleep(_delay):
+        return None
+
+    resolver = _Resolver()
+    listener = C.OpponentRoomListener(
+        "rina__0910", "123", resolver, _Gate(), None, retry_seconds=1, retry_max=4
+    )
+    with caplog.at_level("WARNING", logger="tictok.collector"):
+        with mock.patch.object(C.asyncio, "sleep", _sleep):
+            await listener._run()
+    assert resolver.calls == 4
+    gave_up = [r for r in caplog.records if r.event == "collector.opponent_listener_gave_up"]
+    assert len(gave_up) == 1
+    assert gave_up[0].ctx["attempts"] == 4
+
+
+@pytest.mark.asyncio
+async def test_peer_listener_stops_even_when_reconnects_keep_succeeding():
+    """繋がるたびに連続失敗は数え直すので、「繋がっては即切れる」相手はそれだけでは
+    止まらない。総試行数の背板で止める。"""
+    class _Gate:
+        async def acquire(self, priority=False):
+            raise AssertionError("room_idが判っているのでgateは通らない")
+
+    class _Client:
+        def __init__(self, unique_id, seen=None):
+            pass
+
+        def add_listener(self, *_args):
+            return None
+
+        async def connect(self, room_id, **_kwargs):
+            # 繋がった直後に切れる相手。attached_atが立つので連続失敗は0のまま。
+            listener.attached_at = 1.0
+
+    async def _sleep(_delay):
+        return None
+
+    listener = C.OpponentRoomListener(
+        "rina__0910", "123", None, _Gate(), None, room_id="7777",
+        retry_seconds=1, retry_max=4,
+    )
+    with mock.patch.object(C, "DedupTikTokLiveClient", _Client):
+        with mock.patch.object(C.asyncio, "sleep", _sleep):
+            await listener._run()
+    assert listener.attempts == C._PEER_ROOM_MAX_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_peer_listener_skips_the_resolver_when_the_room_id_is_known():
+    """コラボ相手のroom_idはLinkLayerが名乗る。resolverはPlaywrightのpageを開き、全監視の
+    live検出と同じlockを握るので、判っている相手には通さない。"""
+    class _Resolver:
+        async def resolve(self, _handle):
+            raise AssertionError("resolverを通してはいけない")
+
+    class _Gate:
+        async def acquire(self, priority=False):
+            raise AssertionError("probe gateを通してはいけない")
+
+    connected = {}
+
+    class _Client:
+        def __init__(self, unique_id, seen=None):
+            connected["handle"] = unique_id
+
+        def add_listener(self, *_args):
+            return None
+
+        async def connect(self, room_id, **_kwargs):
+            connected["room_id"] = room_id
+
+    listener = C.OpponentRoomListener(
+        "rina__0910", "123", _Resolver(), _Gate(), None, room_id="7777"
+    )
+    with mock.patch.object(C, "DedupTikTokLiveClient", _Client):
+        await listener._run()
+    assert connected == {"handle": "rina__0910", "room_id": 7777}
+    assert listener.attempts == 1
+
+
+def _sign_response(status=500, body="", headers=None):
+    import httpx
+    return httpx.Response(
+        status_code=status, headers=headers or {}, text=body,
+        request=httpx.Request("GET", "https://tiktok.eulerstream.com/webcast/fetch/"),
+    )
+
+
+def test_sign_outage_keeps_the_server_response_for_diagnosis():
+    """500の中身を捨てない。これまでは status だけを残していたので、121件の5xxが
+    どれも「500だった」以外に何も判らないまま積み上がっていた。"""
+    from TikTokLive.client.errors import SignAPIError
+
+    response = _sign_response(
+        500, body='{"message":"Room is not live"}',
+        headers={"X-Log-Code": "SIGN_FAIL_9", "X-Agent-Id": "agent-7"},
+    )
+    exc = SignAPIError(SignAPIError.ErrorReason.SIGN_NOT_200, "boom", response=response)
+    ctx = C.sign_server_outage(exc)["ctx"]
+    assert ctx["sign_status"] == 500
+    assert ctx["sign_body"] == '{"message":"Room is not live"}'
+    assert ctx["sign_log_code"] == "SIGN_FAIL_9"
+    assert ctx["sign_agent_id"] == "agent-7"
+    # keyed/anonymousのどちらで撃った結果かは、5xxを読むときの前提そのもの。
+    assert "sign_key" in ctx
+
+
+def test_sign_outage_truncates_a_long_body():
+    from TikTokLive.client.errors import SignAPIError
+
+    exc = SignAPIError(SignAPIError.ErrorReason.SIGN_NOT_200, "boom",
+                       response=_sign_response(503, body="x" * 5000))
+    ctx = C.sign_server_outage(exc)["ctx"]
+    assert len(ctx["sign_body"]) == C._SIGN_BODY_LOG_CHARS
+    assert ctx["sign_body_chars"] == 5000
+
+
+def test_sign_rate_limit_reports_the_wait_the_server_asked_for():
+    """利用上限は「こちらが撃ちすぎた」合図。指定された待ち時間を無視して自分の間隔で
+    撃ち直すと、上限を押し広げることになる。"""
+    from TikTokLive.client.errors import SignatureRateLimitError
+
+    response = _sign_response(
+        429, body='{"message":"rate limited"}',
+        headers={"RateLimit-Remaining": "42", "RateLimit-Limit": "60",
+                 "RateLimit-Reset": "1787753999"},
+    )
+    exc = SignatureRateLimitError("rate limited", "wait %s", response=response)
+    outage = C.sign_server_outage(exc)
+    assert outage["retry_after"] == 42
+    assert outage["ctx"]["sign_rate_limit"] == "60"
+    assert outage["ctx"]["sign_rate_remaining"] == "42"
+
+
+@pytest.mark.asyncio
+async def test_peer_listener_waits_as_long_as_the_sign_server_asked():
+    from TikTokLive.client.errors import SignatureRateLimitError
+
+    class _Resolver:
+        async def resolve(self, _handle):
+            raise SignatureRateLimitError(
+                "rate limited", "wait %s",
+                response=_sign_response(429, body="{}",
+                                        headers={"RateLimit-Remaining": "90"}),
+            )
+
+    class _Gate:
+        async def acquire(self, priority=False):
+            return None
+
+    sleeps = []
+
+    async def _sleep(delay):
+        sleeps.append(delay)
+        listener._stopped = True
+
+    listener = C.OpponentRoomListener(
+        "rina__0910", "123", _Resolver(), _Gate(), None, retry_seconds=5, retry_max=8
+    )
+    with mock.patch.object(C.asyncio, "sleep", _sleep):
+        await listener._run()
+    # こちらの既定(5秒)ではなく、sign serverが言った90秒を待つ。
+    assert sleeps == [90]
+
+
+# ---------------- 相手Room listenerの寿命 ----------------
+
+
+class _FakeListener:
+    """OpponentRoomListenerの代役。start/stopの回数だけ数える。"""
+
+    started = []
+
+    def __init__(self, handle, host_id, resolver, probe_gate, on_gift,
+                 room_id="", retry_seconds=0, retry_max=1, dedup_window=0):
+        self._handle = handle
+        self.host_id = str(host_id)
+        self.room_id = room_id
+        self.retry_seconds = retry_seconds
+        self.retry_max = retry_max
+        self.stopped = False
+        self.attached_at = None
+        self.exhausted = False
+
+    @property
+    def handle(self):
+        return self._handle
+
+    async def start(self):
+        _FakeListener.started.append(self)
+
+    async def stop(self):
+        self.stopped = True
+
+    def coverage(self):
+        return {"handle": self._handle, "attached_at": self.attached_at,
+                "attempts": 1, "error": "" if self.attached_at else "boom"}
+
+
+def _peer_collector(collector, monkeypatch, **settings):
+    values = {"monitor_opponent_rooms": 1, "opponent_room_keep_seconds": 180,
+              "opponent_room_retry_seconds": 15, "opponent_room_retry_max": 8,
+              "message_dedup_window": 7200}
+    values.update(settings)
+    monkeypatch.setattr(collector, "_settings", FakeSettings(**values))
+    monkeypatch.setattr(collector, "_resolver", object())
+    monkeypatch.setattr(C, "OpponentRoomListener", _FakeListener)
+    _FakeListener.started = []
+    return collector
+
+
+def _battle_rec(battle_id, *, action=None, hosts=()):
+    parts = {"own": {"user_id": "own", "unique_id": "me", "is_own": True, "side": "own"}}
+    for host_id, handle, side in hosts:
+        parts[host_id] = {"user_id": host_id, "unique_id": handle, "is_own": False, "side": side}
+    return {"battle_id": battle_id, "action": action, "aborted": False,
+            "participants": parts, "contributions": {}, "coin_coverage": {},
+            "start_time": 1000.0}
+
+
+@pytest.mark.asyncio
+async def test_peer_listener_survives_between_consecutive_battles(collector, monkeypatch):
+    """コラボ中は同じ相手と連戦する。PKごとに切ると、実測で延べ接続の55.1%(1,617本)が
+    ただの張り直しになる。前のPKの終了から猶予の内は保つ。"""
+    _peer_collector(collector, monkeypatch)
+    collector._battles[1] = _battle_rec(1, hosts=[("h2", "rival", "opp")])
+    await collector._sync_peer_listeners()
+    first = collector._peer_listeners["h2"]
+
+    # PKが終わった: 猶予の内なので切らない。
+    collector._battles[1]["action"] = C.BATTLE_ACTION_FINISH
+    collector._peer_battle_end["h2"] = time.time()
+    await collector._sync_peer_listeners()
+    assert collector._peer_listeners["h2"] is first
+    assert not first.stopped
+
+    # 次のPKでも同じlistenerのまま(張り直さない)。
+    collector._battles[2] = _battle_rec(2, hosts=[("h2", "rival", "opp")])
+    await collector._sync_peer_listeners()
+    assert collector._peer_listeners["h2"] is first
+    assert len(_FakeListener.started) == 1
+
+
+@pytest.mark.asyncio
+async def test_peer_listener_is_dropped_once_the_grace_is_over(collector, monkeypatch):
+    _peer_collector(collector, monkeypatch, opponent_room_keep_seconds=60)
+    collector._battles[1] = _battle_rec(1, hosts=[("h2", "rival", "opp")])
+    await collector._sync_peer_listeners()
+    listener = collector._peer_listeners["h2"]
+
+    collector._battles[1]["action"] = C.BATTLE_ACTION_FINISH
+    collector._peer_battle_end["h2"] = time.time() - 61
+    await collector._sync_peer_listeners()
+    assert "h2" not in collector._peer_listeners
+    assert listener.stopped
+
+
+@pytest.mark.asyncio
+async def test_peer_listener_covers_teammates_and_uses_the_known_room_id(collector, monkeypatch):
+    """味方の実弾も味方のRoomにしか流れないので、取りに行く先は陣営で変わらない。
+    room_idが判っていればresolver(Playwright、live検出とlockを共有)を通さない。"""
+    _peer_collector(collector, monkeypatch)
+    collector._peer_rooms["mate"] = "7777"
+    collector._battles[1] = _battle_rec(
+        1, hosts=[("mate", "buddy", "own"), ("h2", "rival", "opp")])
+    await collector._sync_peer_listeners()
+    assert set(collector._peer_listeners) == {"mate", "h2"}
+    assert collector._peer_listeners["mate"].room_id == "7777"
+    assert collector._peer_listeners["h2"].room_id == ""
+    assert collector._peer_listeners["h2"].retry_seconds == 15
+
+
+@pytest.mark.asyncio
+async def test_peer_listeners_are_dropped_when_the_setting_is_off(collector, monkeypatch):
+    _peer_collector(collector, monkeypatch)
+    collector._battles[1] = _battle_rec(1, hosts=[("h2", "rival", "opp")])
+    await collector._sync_peer_listeners()
+    listener = collector._peer_listeners["h2"]
+    monkeypatch.setattr(collector, "_settings", FakeSettings(
+        monitor_opponent_rooms=0, opponent_room_keep_seconds=180,
+        opponent_room_retry_seconds=15, opponent_room_retry_max=8))
+    await collector._sync_peer_listeners()
+    assert collector._peer_listeners == {}
+    assert listener.stopped
+
+
+@pytest.mark.asyncio
+async def test_exhausted_peer_is_only_retried_when_a_new_battle_starts(collector, monkeypatch):
+    """撃ち切った相手を撃ち直し続けない。ただし次のPKが始まった時だけは作り直す — その
+    相手が戦えている以上、室は戻っている。作り直しはPK1戦につき相手1人1本まで。"""
+    _peer_collector(collector, monkeypatch)
+    collector._battles[1] = _battle_rec(1, hosts=[("h2", "rival", "opp")])
+    await collector._sync_peer_listeners()
+    dead = collector._peer_listeners["h2"]
+    dead.exhausted = True
+
+    # 普段のsync(コラボの顔ぶれ変化など)では撃ち直さない。
+    await collector._sync_peer_listeners()
+    assert collector._peer_listeners["h2"] is dead
+    assert len(_FakeListener.started) == 1
+
+    # 落ちた本を畳んだ後も、PKが始まるまでは張り直さない。
+    await collector._stop_peer_listener("h2")
+    await collector._sync_peer_listeners()
+    assert "h2" not in collector._peer_listeners
+    assert len(_FakeListener.started) == 1
+
+    # 次のPKの開始で1本だけ作り直す。
+    await collector._sync_peer_listeners(restart_exhausted=True)
+    assert collector._peer_listeners["h2"] is not dead
+    assert len(_FakeListener.started) == 2
+
+
+@pytest.mark.asyncio
+async def test_coin_coverage_records_who_could_not_be_reached(collector, monkeypatch):
+    """繋げなかった相手の実弾は後から取り戻せない(armiesはコインを持たない)。素性を
+    残さないと欠測が「実弾0」として読まれる。"""
+    _peer_collector(collector, monkeypatch)
+    rec = _battle_rec(1, hosts=[("h2", "rival", "opp"), ("h3", "other", "opp")])
+    collector._battles[1] = rec
+    await collector._sync_peer_listeners()
+    collector._peer_listeners["h2"].attached_at = 1000.0
+    collector._record_coin_coverage(rec)
+    assert rec["coin_coverage"]["h2"]["attached_at"] == 1000.0
+    assert rec["coin_coverage"]["h3"]["attached_at"] is None
+    assert rec["coin_coverage"]["h3"]["error"] == "boom"
+    # 自hostは自室で拾えているので素性を持たない。
+    assert "own" not in rec["coin_coverage"]
 
 
 # ---------------- ProbeGate ----------------
@@ -2203,3 +2936,139 @@ async def test_a_peers_departure_keeps_the_window_open_for_the_remaining_peers(
     assert collector._collab_open == {}, "最後の相手が抜けたら閉じる"
     window = collector._collab_windows[0]
     assert (window["start"], window["end"]) == (1000.0, 1200.0)
+
+
+# ---------------- 接続時の遡り(backlog)の重複除去 ----------------
+
+
+async def _noop_broadcast(_message):
+    return None
+
+
+def _comment_event(text, message_id):
+    return CommentEvent(
+        base_message=CommonMessageData(message_id=message_id),
+        user_info=User(id=7_012_345_678, nick_name="Nick", username="handle"),
+        content=text,
+    )
+
+
+def _chat_message(message_id, text="おは"):
+    """message_idだけを持つ最小のevent。dedupが見るのはこの1 fieldだけである。"""
+    return SimpleNamespace(base_message=SimpleNamespace(message_id=message_id), text=text)
+
+
+def test_message_id_treats_the_protobuf_default_as_absent():
+    """未設定のint64は0で届く。0を鍵にすると、idを持たないevent同士が互いの重複になる。"""
+    assert dedup.message_id_of(_chat_message(7658591137032538901)) == 7658591137032538901
+    assert dedup.message_id_of(_chat_message(0)) is None
+    assert dedup.message_id_of(SimpleNamespace()) is None
+
+
+def test_message_id_is_read_from_whichever_event_carries_it():
+    """1つのmessageは最大3つのeventへ展開され、どれも同じbase_messageを持つ。
+    ConnectEventのようにidを持たないものが先頭に来ても拾えること。"""
+    events = [SimpleNamespace(), _chat_message(42)]
+    assert dedup.first_message_id(events) == 42
+    assert dedup.first_message_id([SimpleNamespace()]) is None
+    assert dedup.first_message_id([]) is None
+
+
+def test_seen_messages_accepts_once_and_refuses_the_replay():
+    seen = dedup.SeenMessages(window_seconds=3600)
+    assert seen.add_if_new(1) is True
+    assert seen.add_if_new(2) is True
+    assert seen.add_if_new(1) is False
+    assert seen.dropped == 1
+
+
+def test_seen_messages_forgets_after_the_window():
+    """窓の外まで離れた再訪は落とせない。窓は「覚えていられる範囲」の宣言である。"""
+    seen = dedup.SeenMessages(window_seconds=100)
+    seen.add_if_new(1, now=1000.0)
+    assert seen.add_if_new(1, now=1099.0) is False
+    assert seen.add_if_new(1, now=1101.0) is True
+
+
+def test_seen_messages_does_not_extend_the_window_on_a_replay():
+    """再訪で時刻を更新すると、接続のたびに届き直すmessageが永久に窓へ留まる。
+    窓は最初に受け取った時刻から数える。"""
+    seen = dedup.SeenMessages(window_seconds=100)
+    seen.add_if_new(1, now=1000.0)
+    seen.add_if_new(1, now=1090.0)
+    assert seen.add_if_new(1, now=1101.0) is True, "初回から101秒。再訪では延びない"
+
+
+def test_seen_messages_drops_the_oldest_when_the_cap_bites():
+    """上限は判定の条件ではなくmemoryの天井。当たったら古い方から捨てる。"""
+    seen = dedup.SeenMessages(window_seconds=3600, max_entries=2)
+    for i in (1, 2, 3):
+        seen.add_if_new(i)
+    assert len(seen) == 2
+    assert seen.capped == 1
+    assert seen.add_if_new(1) is True, "追い出された分は覚えていない"
+    assert seen.add_if_new(3) is False
+
+
+class _Wrapper:
+    """ProtoMessageFetchResultBaseProtoMessage の代役(dedupは中身を見ない)。"""
+
+
+async def _parse_via(client, events):
+    with mock.patch.object(
+        C.DedupTikTokLiveClient.__bases__[0], "_parse_webcast_response_message",
+        mock.AsyncMock(return_value=events),
+    ):
+        return await client._parse_webcast_response_message(_Wrapper())
+
+
+@pytest.mark.asyncio
+async def test_dedup_client_drops_the_whole_message_on_the_second_delivery():
+    """接続のたびに届き直す遡り分を、eventへ配る前にmessageごと落とす。
+
+    落とすのがevent単位ではなくmessage単位であることが要点。1つのmessageから生まれる
+    custom event(FollowEvent等)とproto eventは同じmessage_idを共有しているので、
+    event単位で落とすと最初の1つを通した時点で残りが道連れになる。"""
+    seen = dedup.SeenMessages(window_seconds=3600)
+    client = C.DedupTikTokLiveClient(unique_id="tester", seen=seen)
+    events = [SimpleNamespace(), _chat_message(999), _chat_message(999)]
+
+    assert await _parse_via(client, events) == events, "初回は3つとも通る"
+    assert await _parse_via(client, events) == [], "2回目はmessageごと落ちる"
+    assert seen.dropped == 1
+
+
+@pytest.mark.asyncio
+async def test_dedup_client_passes_messages_that_carry_no_id():
+    """idの無いmessage(接続の合図など)は判定材料が無いので通す。"""
+    client = C.DedupTikTokLiveClient(
+        unique_id="tester", seen=dedup.SeenMessages(window_seconds=3600))
+    events = [SimpleNamespace()]
+    assert await _parse_via(client, events) == events
+    assert await _parse_via(client, events) == events
+
+
+@pytest.mark.asyncio
+async def test_the_dedup_memory_survives_a_reconnect_and_the_next_session(collector):
+    """記憶はclientではなくcollectorが持つ。clientは再接続のたびに作り直されるので、
+    clientに持たせると再接続の遡り(=落としたい相手そのもの)が毎回素通りする。"""
+    first = collector._build_client("tester")
+    assert await _parse_via(first, [_chat_message(555)]) != []
+    second = collector._build_client("tester")
+    assert await _parse_via(second, [_chat_message(555)]) == []
+    collector._reset_session_data()
+    third = collector._build_client("tester")
+    assert await _parse_via(third, [_chat_message(555)]) == [], "session跨ぎでも覚えている"
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_message_never_reaches_the_stats(collector, monkeypatch):
+    """落とす位置が受信側なので、統計もbucketも重複を数えない。DB側の一意制約だけで
+    止めていると行は1つでも stats_json の件数だけが水増しされる。"""
+    monkeypatch.setattr(collector, "_broadcast", _noop_broadcast)
+    event = _comment_event("hello", message_id=4242)
+    client = collector._build_client("tester")
+    for _ in range(2):
+        for kept in await _parse_via(client, [event]):
+            await collector._on_comment(kept)
+    assert collector.stats["comments"] == 1

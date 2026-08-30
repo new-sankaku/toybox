@@ -18,6 +18,8 @@ JOB_DOMAIN_LABELS = {
     "audionorm": "音量正規化",
     "pack": "ts結合",
     "waveform": "音声波形",
+    # 実体は再生時に当てるgainの時系列(.gain.json)。録画そのものは書き換えない。
+    "gain": "再生gain曲線",
     # 実体は声の在る区間の解析(.voice.json)で、無音skipと無言の早送りが同じものを使う。
     # 名前を用途側から付けているのは、探す人がその名前で探すため。
     "voice": "無音skipの解析",

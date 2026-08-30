@@ -2,6 +2,7 @@
 
 「まだ作られていない派生物」をqueueへ積む仕組み。実処理は行わず、**投入だけ**を行う。
 server起動のたびに1回と、以降は `sweep_interval_minutes`(既定30分)ごとに繰り返す。
+録画が確定すると、その録画が候補に入る時刻まで待ちを縮める（[確定から波形が出るまでを詰める](#確定から波形が出るまでを詰める)）。
 
 ## 何を積むか
 
@@ -11,7 +12,12 @@ server起動のたびに1回と、以降は `sweep_interval_minutes`(既定30分
 | 音声波形 (`waveform`) | media job queue | `waveform_sweep_per_start` | 10本/回 |
 | サムネ (`sprite`) | media job queue | `sprite_sweep_per_start` | 10本/回 |
 | 無音skipの解析 (`voice`) | media job queue | `voice_sweep_per_start` | 10本/回 |
+| 再生gain曲線 (`gain`) | media job queue | `gain_sweep_per_start` | 10本/回 |
 | 文字起こし (`transcribe`) | media job queue (kind=stt) | `transcribe_sweep_enabled` | ON・本数無制限 |
+| 意味検索index (`semantic`) | index構築のtask (kind=semantic) | `semantic_sweep_enabled` | ON・差分のみ |
+
+意味検索indexだけは材料が素材ではなく他の派生物なので、扱いが別になる
+([意味検索indexだけは、素材ではなく派生物の上に建つ](#意味検索indexだけは素材ではなく派生物の上に建つ))。
 
 文字起こしだけ本数で区切らないのは、GPUを1本ずつ直列に使い、queueが再起動をまたいで残る
 ため。全部積んでも同時に走るのは常に1本で、終わらなかったぶんは次のsweep・次の起動でその
@@ -32,6 +38,36 @@ server起動のたびに1回と、以降は `sweep_interval_minutes`(既定30分
 **素材を書き換えない / 消えても作り直せる / 無いと人がその場で待たされる** の3つを満たす
 種別だけ。
 
+## 意味検索indexだけは、素材ではなく派生物の上に建つ
+
+意味検索(`semantic`)のindexは他の種別と材料が違う。波形もサムネも読むのは**素材(.ts)**だが、
+indexが読むのは `search_hits` — つまり**文字起こしとcommentのindexが書いた行**である。
+録画が確定した時点では文字起こしがまだ無いので、確定を合図に作らせても大半のgroupは
+取り残される。周期のsweepなら、文字起こしが終わった次の回で自然に拾える。
+
+| 積む先 | 設定 | 既定 |
+|---|---|---|
+| media job queueではなく、意味検索index構築のtask(job台帳のkind=`semantic`) | `semantic_sweep_enabled` | ON・差分のみ |
+
+同じ周期で「今積んだ文字起こし」は材料になっていない。この回で埋めるのは**前回までに揃った
+ぶん**で、今積んだぶんは次の周期が拾う。差分構築なので、同じgroupを二度埋めることはない。
+
+起こすだけで、sweepは走らせない(`routes_search.start_build_if_pending`)。構築は数十万
+passageで数時間に及ぶことがあり、待つとその間ずっと波形も文字起こしも積まれなくなる。
+起こし方は人が「indexを更新」を押す経路と同一で、Job画面には同じ1行が出る。
+
+何もしない条件:
+
+- 埋め込みserverが無効・未設定 (`TICTOK_SEMANTIC_ENABLED` / `TICTOK_SEMANTIC_MODEL`)
+- 未反映のgroupが0件 (`semantic.pending_groups` — `indexed` 表だけを読む軽い数え方。
+  `index_status` の同じ数はgroupごとのpassage数まで数えるため全passageを走査する)
+- 既に構築中
+- 直前の自動構築が失敗してから1時間以内 (`AUTO_BUILD_RETRY_SECONDS`)
+
+最後の待ちが要るのは、埋め込みserverが落ちていれば何度起こしても同じ所で失敗し、直せるのは
+人しかいないため。待たないと、周期ごとに同じ失敗の行が台帳へ積み上がる。人が押す
+「indexを更新」はこの待ちを見ない(押した本人はその場で結果を要求している)。
+
 ## いつ走るか
 
 | 回 | `since` | 見る範囲 |
@@ -41,6 +77,8 @@ server起動のたびに1回と、以降は `sweep_interval_minutes`(既定30分
 | 上限まで積んだ回の次 | 0 | 全録画(積み残しを拾うため) |
 | ts結合待ちでsidecarを見送った回の次 | 0 | 全録画(見送った録画は`since`の窓より古いため) |
 | 間隔を0にしている間 | — | 走らない(次に有効化した回は全録画から) |
+
+周期そのものは、定期の間隔と「確定した録画の静穏待ちが明ける時刻」の早い方で起きる(`_wait_next_sweep`)。間隔を0にしている間もこの起床は効かない — 走らない設定だからである。
 
 2回目以降を絞るのは、走査が録画ごとにfileの確認を伴うから。全部作り終えるとlimitが埋まらず
 毎回最後まで走るので、絞らないと録画が貯まるほど周期そのものが重くなる。遡り幅に静穏待ち
@@ -79,7 +117,7 @@ server起動のたびに1回と、以降は `sweep_interval_minutes`(既定30分
 | 種別 | 見るもの | 理由 |
 |---|---|---|
 | ts結合 | session dir内のfileの更新時刻 | 素材そのものを書き換える。捕捉中のffmpegはindex.m3u8を書き続けるので、その最中に束ねると差し替えた直後に上書きされ、消したsegmentを指すplaylistが残る(実際に1本やってしまった) |
-| 音声波形・サムネ・無音skipの解析 | 録画の `ended_at` | 素材を**読むだけ**。早すぎた場合に出来るのは指紋の合わないcacheであって壊れた素材ではなく、作り直しは再生画面が要求した時点で生成側が判断する |
+| 音声波形・サムネ・無音skipの解析・再生gain曲線 | 録画の `ended_at` | 素材を**読むだけ**。早すぎた場合に出来るのは指紋の合わないcacheであって壊れた素材ではなく、作り直しは再生画面が要求した時点で生成側が判断する |
 
 猶予の長さはどちらも `pack_sweep_quiet_minutes`(既定15分)。
 
@@ -89,7 +127,7 @@ server起動のたびに1回と、以降は `sweep_interval_minutes`(既定30分
 判定は1箇所に置く)。
 
 - ts結合: `hls_pack.is_packed`(束ねたfileの実在だけが根拠。DBに印は持たない)
-- 音声波形 / サムネ / 無音skipの解析: `.sidecars/` 内のcache fileの実在
+- 音声波形 / サムネ / 無音skipの解析 / 再生gain曲線: `.sidecars/` 内のcache fileの実在
   （種別→fact名の対応は `fsfacts.SIDECAR_JOB_FACTS` の1箇所。sweepと一括が別々に持っていた
   頃は、種別を足した側だけが増えて片方が古いまま残った）
 
@@ -102,7 +140,7 @@ scandirすれば全録画ぶんの実在がmembershipで分かる(`_sidecar_name
 
 ### ts結合待ちの録画にはsidecarを積まない
 
-ts結合は.tsの本数・合計byte・最新mtimeを変える。それは音声波形・サムネ・声profileのcache指紋
+ts結合は.tsの本数・合計byte・最新mtimeを変える。それは音声波形・サムネ・声profile・gain曲線のcache指紋
 そのものなので、**束ねる前に作ったsidecarは、packが終わった瞬間にまとめて無効になる**。
 
 順序は「積む順」では保てない。同じ回で4種を積むと、packを先頭に積んでもsidecarの行が待機列に
@@ -146,17 +184,107 @@ sweepが積んだ行かどうかはjob画面へも `sweep: true` として届く
 `interrupted` であって「録画中」ではないため候補の除外を素通りし、束ねと移送が同じsegmentを
 奪い合う。詳細は [RELOCATE_TO_FINAL.md](RELOCATE_TO_FINAL.md#確定処理中の録画には誰も触らない)。
 
-## なぜfinalizeでやらないか
+## なぜfinalizeで積まないか
 
-録画の確定callbackから直接積めば待ち時間は最短になるが、そうしていない理由が3つある。
+録画の確定callbackから直接queueへ積めば待ち時間は最短になるが、そうしていない理由が3つある。
 
 - **ts結合が後から素材を書き換える。** 音声波形・サムネのcache指紋は、mp4の無い録画では
   素材(.ts)の本数・合計byte・最新mtime(`waveform._source_key` / `thumbnails`)。確定直後に
-  波形を作ると、後で走ったts結合が指紋を外して作り直しになる（声profileも同じ指紋）。sweepは
-  同じ走査で束ね待ちの録画を見分け、その録画のsidecarを同じ回には積まないので
-  「ts結合 → 波形・サムネ」の順序が保たれる（下記「ts結合待ちの録画にはsidecarを積まない」）。
+  波形を作ると、後で走ったts結合が指紋を外して作り直しになる（声profileも同じ指紋）。確定
+  時点の録画は**必ず束ねる前**なので、これは「起きることがある」ではなく「必ず起きる」。
 - **候補の規則が1箇所に残る。** 静穏待ち・失敗録画の除外・二重投入の判断を確定側へ複製しない。
 - **確定callbackは1回きり。** そこで落ちれば誰も再開しない。sweepなら失敗しても次の周期・
   次の起動でまた積まれて自然に収束する。
 
-待ち時間は `sweep_interval_minutes` + `pack_sweep_quiet_minutes`(既定で合計45分)が目安。
+確定callbackが行うのは**この周期を早く起こすこと**だけである（次節）。積むかどうかは上の規則が
+そのまま決める。
+
+## 確定から波形が出るまでを詰める
+
+素の周期だけで回すと、録画の確定から音声波形が出るまでに **静穏待ち + 周期 × 2** かかっていた。
+
+| # | 何を待つ | 既定 |
+|---|---|---|
+| 1 | 確定 → 静穏待ちが明ける | 15分 |
+| 2 | → 次のsweepがts結合を積む | 最大30分 |
+| 3 | → ts結合の実行 | 30〜220秒 |
+| 4 | → **次の**sweepがsidecarを積む（3の回は`_awaiting_pack`で見送られている） | 最大30分 |
+
+利いているのは2と4で、どちらも「候補なのに誰も見に来ていない時間」である。2つとも、規則は
+変えずに**見に来る時期だけ**を早める。
+
+### 4を消す: ts結合の完了に続けてsidecarを積む
+
+`_pack_recording` が実際に束ね直した回だけ、その録画の音声波形・サムネ・声profileをそのまま
+queueへ積む(`media_jobs._enqueue_sidecars_after_pack`)。`_awaiting_pack` が守っていた順序の
+制約は、この時点で満たされたばかりである。
+
+- **既に在るsidecarも飛ばさずに積む。** ts結合は指紋そのものを変えるので、束ねる前に作られた
+  sidecarはこの時点で全て古い。作り直しが要るかは生成側(`ensure_waveform` /
+  `ensure_sprite` / `ensure_voice_profile`)が指紋で判断するため、合っていれば確認だけで終わる。
+  実在だけを見るsweepの済み判定とは、ここだけ意図的に方針が違う。
+- **`already_packed` では積まない。** .tsが1 byteも変わっておらず指紋も外れない。その録画の
+  sidecarはsweepの通常の候補選びが拾う。
+- **本数0の種別は積まない。** 自動生成を行わない指定なので、sweepと同じ意味で止める。
+  種別→設定keyの対応は `fsfacts.SIDECAR_SWEEP_SETTINGS` の1箇所（sweepの
+  `SWEEP_LIMIT_SETTINGS` も同じdictを読む）。
+- **積めなくてもts結合は成功のまま。** 束ね直しは既に完了しており、後始末の失敗で成功したjobを
+  failedにすると、再実行のたびに`already_packed`で空回りする行が残る。取りこぼしはsweepが拾う。
+
+### 2を縮める: 確定した録画がsweepを起こす
+
+確定callbackは `core.sweep_signal.note_recording_finished(ended_at)` を呼ぶだけで、queueには
+触らない。周期の待ち(`_wait_next_sweep`)は、**定期の間隔と、その録画が候補に入る時刻
+(`ended_at` + 静穏待ち)の早い方**で起きる。
+
+- 合図は「録画がいつ終わったか」しか持たない。候補かどうかを決めるのは
+  `_sweep_candidates` の1箇所のままにする。
+- 合図が失われても、失うのは**起きるのが早くなること**だけ。録画は次の周期と次回起動時のsweepが
+  拾うので、processが落ちれば中身も消えてよくDBにも残さない。
+- 起きたときに捨てるのは**静穏待ちの明けた合図だけ**。1回のsweepで全部捨てると、まだ静穏中の
+  録画が「早く起きる」対象から外れて次の定期まで待つ — 合図を置いた意味がそこで消える。
+- 目標時刻は寝ている最中に早くなる(録画は待っている間にも終わる)ので、`SWEEP_SIGNAL_POLL_SECONDS`
+  (30秒)ごとに引き直す。`asyncio.Event` で起こさないのは、module levelのEventが最初に使われた
+  loopへ束縛され(3.10の`_LoopBoundMixin`)、loopを作り直すtestで使えなくなるため。
+- 空の確定(byte数0・出力fileなし)では合図を出さない。行ごと削除され、復旧loopが回る側なので
+  積むものが無い。
+
+collectorとstartupが互いにimportできない(runtimeがcollectorをimportし、startupがruntimeを
+importする)ため、合図の置き場は両方より下の `tictok/core/sweep_signal.py` にある。
+
+### 結果
+
+確定から音声波形が出るまでの目安は **静穏待ち + ts結合の実行時間**（既定で16〜20分）。
+`sweep_interval_minutes` を変えても、この経路は静穏待ちに張り付いたままになる。
+
+## ts結合は、開いたままの再生画面を壊す
+
+ts結合のcommitは `seg*.ts` を `pack*.ts` へ束ね、**元のsegmentをfileごと消す**
+(`hls_pack.pack_session`)。一方 hls.js は終端済み(VOD)のplaylistを最初の1回しか読み直さない。
+結合の最中に録画を開いていたpageは消えたsegmentを指すlistを持ち続け、再生がそこへ届いた瞬間に
+404で止まる。hls.jsは致命的なnetwork errorで読み込みを止めるだけなので、そのpageでは以後
+**必ず同じ位置で**読み込み待ちのまま止まる。
+
+実測(rid=1125, 2026-08-29):
+
+```
+08:29:10  ts結合を開始しました
+08:31:26  GET /api/recordings/1125/hls/seg01189.ts  200   ← 削除前は普通に返る
+08:31:33,123  GET /api/recordings/1125/hls/seg01205.ts  404
+08:31:33,143  ts結合が完了しました: segment 6816 件 -> file 12 件
+```
+
+`seg01205.ts` はplaylist上で 2410.833秒 から始まる。利用者の申告した「40:10で止まる」と一致する。
+
+### 直し方: 失効したlistは引き直す
+
+hls.jsが致命的なnetwork errorを出したら、`/playback` からplaylistを引き直して**同じ位置から**
+再生し直す(`common.js` の `hlsPlaylistMayBeStale` / `hlsReloadGate`、適用先はシーン検索の本編
+player・見どころtabのplayer・配信者画面の再生box)。
+
+- **引き直しは1度きり。** listを引き直しても直らない失敗(素材そのものが無い・serverが落ちて
+  いる)で読み直し続けると、理由の出ないloopになる。読み込みが実際に進んだら
+  (`FRAG_BUFFERED`)権利を戻すので、直った後の別の失敗はまた引き直せる。人が起こした
+  読み込み(録画を選ぶ・素材版を切り替える)も権利を戻す。
+- **完了をWebSocketで知らせて先回りする案は採らない。** 404起点の復帰は原因を問わず効く
+  (束ね直し以外に素材の置き場所が変わる経路が増えても、そのまま守れる)。

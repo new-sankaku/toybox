@@ -17,6 +17,7 @@ from tictok.core import layout
 from tictok.record.recorder import (Recorder, render_vod_playlist, session_prefix,
     SESSION_PREFIX_WIDTH)
 from tictok.media.thumbnails import thumbnail_artifact_paths
+from tictok.media.loudness import gain_artifact_paths
 from tictok.media.waveform import waveform_artifact_paths
 from tictok.record.upscale import (cleanup_upscale_files, upscale_artifact_paths,
     upscale_input_path, upscale_output_path)
@@ -42,7 +43,8 @@ def _recording_cache_paths(path: Path) -> tuple:
     どれもsrcが消えれば二度と参照されない。cacheの寿命はsrcの実在ではなくmtime+sizeの
     指紋で決まるため(thumbnails._signature / waveform._source_key)、srcを消しただけでは
     無効化されず`.sidecars/`に残り続ける。srcを消す経路は必ずここを通す。"""
-    return (timing_path(path), *thumbnail_artifact_paths(path), *waveform_artifact_paths(path))
+    return (timing_path(path), *thumbnail_artifact_paths(path),
+            *waveform_artifact_paths(path), *gain_artifact_paths(path))
 
 
 def _recording_derived_paths(path: Path) -> tuple:

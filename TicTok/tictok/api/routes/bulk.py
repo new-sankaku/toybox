@@ -30,28 +30,28 @@ router = APIRouter()
 
 # 一括投入を許すkind。任意のkindを通すと、preview等の一括に向かないjobまで配信者単位で
 # 大量に積めてしまうので、ここに挙げたものだけを受け付ける。
-BULK_KINDS = ("transcribe", "laugh", "voice", "overlay", "upscale", "reprocess",
+BULK_KINDS = ("transcribe", "laugh", "voice", "gain", "overlay", "upscale", "reprocess",
               "audionorm", "pack", "delete_mp4")
 
 # queueへ載る種別。delete_mp4はfileを1本消すだけでffmpegを起こさないため、jobにすると
 # 実行時間0の行が録画数ぶん台帳へ並ぶだけになる。専用APIで即時に実行する。
 # 文字起こしもここには入らない: 走る先は同じmedia_job_queue(kind=stt)だが、投入は
 # _enqueue_stt_jobs が持つ(group_idを振らない)ため、同じ投入APIから種別で振り分ける。
-BULK_QUEUE_KINDS = ("overlay", "upscale", "reprocess", "audionorm", "pack", "voice")
+BULK_QUEUE_KINDS = ("overlay", "upscale", "reprocess", "audionorm", "pack", "voice", "gain")
 
-# 出力fileを作らない種別。残すのは録画1本あたり数百kBのsidecarだけなので、投入前の空き容量
-# 判定を通す(文字起こし・笑い声分析はそもそも別の投入口でこの判定を通らない)。
-BULK_NO_OUTPUT_KINDS = ("voice",)
+# 出力fileを作らない種別。残すのは録画1本あたり数百kB〜1MB程度のsidecarだけなので、投入前の
+# 空き容量判定を通す(文字起こし・笑い声分析はそもそも別の投入口でこの判定を通らない)。
+BULK_NO_OUTPUT_KINDS = ("voice", "gain")
 
 # 対象判定に .ts の走査が要る種別。母集合単位の呼び出しは _bulk_hls_batch で先に埋める。
 # 焼き込み・Up出力・文字起こしが入っているのは、mp4が無い録画でも素材から処理できるため —
 # 素材の有無を見ずに判定すると、単体では処理できる録画が一括だけ弾かれる。
 BULK_HLS_KINDS = ("transcribe", "laugh", "overlay", "upscale", "reprocess", "delete_mp4",
-                  "pack", "waveform", "sprite", "voice")
+                  "pack", "waveform", "gain", "sprite", "voice")
 
 # 対象判定に .sidecars の走査が要る種別。母集合単位の呼び出しは _bulk_sidecar_batch で
 # 先に埋める(録画ごとのstatにすると数千本で効く)。
-BULK_SIDECAR_KINDS = ("waveform", "sprite", "voice")
+BULK_SIDECAR_KINDS = ("waveform", "gain", "sprite", "voice")
 
 # 一括投入の種別名。映像jobの台帳に出る語(MEDIA_JOB_TITLES)と揃えるが、そこに無い種別
 # (文字起こし・元mp4の削除)も画面と409本文で名乗る必要があるので、この画面の語彙として

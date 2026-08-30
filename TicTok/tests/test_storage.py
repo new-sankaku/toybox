@@ -1,3 +1,4 @@
+import json
 import logging
 import sqlite3
 import time
@@ -1250,6 +1251,26 @@ def test_get_recording_for_read_does_not_wait_on_the_writer_lock(tmp_db, make_se
     assert got[0]["id"] == rec
 
 
+def test_search_hit_rows_returns_time_order_and_skips_missing_ids(tmp_db, make_session):
+    """意味検索のpassageを文へ開く口。渡した順ではなく時間順、消えたidは黙って落ちる。
+
+    落とすのを「無い行を空で埋める」に変えてはいけない — 位置を名乗れない文へ飛ばすと、
+    passageの先頭に着地したのと同じ間違いが別経路で復活する。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    tmp_db.replace_search_hits(rec, "stt", [
+        {"unique_id": "alice", "started_at": 1.0, "video_time": 30.0, "end_time": 31.0,
+         "session_id": session_id, "body": "うしろの文"},
+        {"unique_id": "alice", "started_at": 1.0, "video_time": 10.0, "end_time": 11.0,
+         "session_id": session_id, "body": "まえの文"},
+    ])
+    ids = [row["id"] for row in tmp_db.search_hits_for(rec, "stt")]
+    rows = tmp_db.search_hit_rows(list(reversed(ids)) + [999999])
+    assert [row["body"] for row in rows] == ["まえの文", "うしろの文"]
+    assert [row["video_time"] for row in rows] == [10.0, 30.0]
+    assert tmp_db.search_hit_rows([]) == []
+
+
 def test_search_scenes_falls_back_to_like_for_short_terms(tmp_db, make_session):
     session_id = make_session("alice", status="connected")
     rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
@@ -2455,7 +2476,8 @@ def test_cohort_counts_whales_by_the_day_total_not_by_each_gift(
     tmp_db, make_session, gift_builder
 ):
     """帯は「その日1日のコイン合計」で決まる。1回ごとの額で判定すると、少額を積んで
-    1Kへ届いた人が数から漏れる。帯は排他なので、積み上げた合計が1K以上の人数になる。"""
+    帯へ届いた人が数から漏れる。帯は排他で、合計は大口の下限(1K)以上だけを積む
+    (手前の100〜1Kは内訳としてだけ出て、合計には入らない)。"""
     session_id = make_session("owner")
     day1, day2 = _local_noon(1), _local_noon(2)
     # 600+400=1000 で1Kへ届く(1回ずつでは届かない)。
@@ -2464,23 +2486,33 @@ def test_cohort_counts_whales_by_the_day_total_not_by_each_gift(
     tmp_db.add_event(session_id, _gift(gift_builder, "9002", 1200, at=day1))
     tmp_db.add_event(session_id, _gift(gift_builder, "9003", 999, at=day1))
     tmp_db.add_event(session_id, _gift(gift_builder, "9004", 120000, at=day1))
+    # 100未満はどの帯にも入らない。100〜1Kは1本の帯。
+    tmp_db.add_event(session_id, _gift(gift_builder, "9005", 99, at=day1))
+    tmp_db.add_event(session_id, _gift(gift_builder, "9006", 100, at=day1))
+    tmp_db.add_event(session_id, _gift(gift_builder, "9007", 500, at=day1))
     # 日を跨いだ分は合算しない(同じ人でもその日ごとに数え直す)。
     tmp_db.add_event(session_id, _gift(gift_builder, "9001", 6000, at=day2))
     tmp_db.flush()
 
     result = tmp_db.streamer_cohort("owner")
     assert [t["label"] for t in result["tiers"]] == [
+        "100〜1K",
         "1K〜5K", "5K〜10K", "10K〜20K", "20K〜30K", "30K〜40K", "40K〜50K",
         "50K〜75K", "75K〜100K", "100K〜200K", "200K〜300K", "300K↑",
     ]
     assert [t["min_label"] for t in result["tiers"]] == [
+        "100",
         "1K", "5K", "10K", "20K", "30K", "40K", "50K", "75K", "100K", "200K", "300K",
     ]
+    # 合計段の下限は帯の境目そのもの。from_tierがその帯を指す。
+    assert result["total"] == {"min": 1000, "min_label": "1K", "from_tier": 1}
+    assert result["tiers"][result["total"]["from_tier"]]["min"] == result["total"]["min"]
     days = {d["date"]: d for d in result["days"]}
-    # 120000コインは100K〜200K(index 8)。
-    assert days[_ymd(day1)]["tiers"] == [2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+    # 120000コインは100K〜200K(index 9)。999・100・500は100〜1K(index 0)。
+    assert days[_ymd(day1)]["tiers"] == [3, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+    # 100〜1Kの3人は合計に入らない(1K以上は9001・9002・9004の3人)。
     assert days[_ymd(day1)]["whales"] == 3
-    assert days[_ymd(day2)]["tiers"] == [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    assert days[_ymd(day2)]["tiers"] == [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     assert days[_ymd(day2)]["whales"] == 1
 
 
@@ -2495,9 +2527,10 @@ def test_cohort_days_without_whales_still_report_zero(
     tmp_db.add_event(session_id, _gift(gift_builder, "9001", 50, at=day1))
     tmp_db.flush()
 
-    day = tmp_db.streamer_cohort("owner")["days"][0]
+    result = tmp_db.streamer_cohort("owner")
+    day = result["days"][0]
     assert day["date"] == _ymd(day1)
-    assert day["tiers"] == [0] * 11
+    assert day["tiers"] == [0] * len(result["tiers"])
     assert day["whales"] == 0
     assert day["whales_list"] == []
 
@@ -2510,8 +2543,8 @@ def test_cohort_returns_whale_roster_with_identity(tmp_db, make_session, gift_bu
     day1, day2 = _local_noon(1), _local_noon(2)
     tmp_db.add_event(session_id, _gift(gift_builder, "9001", 3000, at=day1))
     tmp_db.add_event(session_id, _gift(gift_builder, "9002", 8000, at=day1))
-    # 1Kに届かない人は大口ではないので顔ぶれにも載らない。
-    tmp_db.add_event(session_id, _gift(gift_builder, "9003", 500, at=day1))
+    # 最小帯(100)に届かない人は顔ぶれにも載らない。
+    tmp_db.add_event(session_id, _gift(gift_builder, "9003", 50, at=day1))
     tmp_db.add_event(session_id, _gift(gift_builder, "9001", 1500, at=day2))
     tmp_db.flush()
 
@@ -2519,7 +2552,7 @@ def test_cohort_returns_whale_roster_with_identity(tmp_db, make_session, gift_bu
     days = {d["date"]: d for d in result["days"]}
     # 額の多い順。帯番号は棒の段(帯)で絞るためのもの。
     assert [(w["coins"], w["tier"]) for w in days[_ymd(day1)]["whales_list"]] == [
-        (8000, 1), (3000, 0),
+        (8000, 2), (3000, 1),
     ]
     keys = [w["key"] for w in days[_ymd(day1)]["whales_list"]]
     assert result["people"][keys[0]]["unique_id"] == "handle9002"
@@ -2750,3 +2783,103 @@ def test_media_job_queue_forbids_a_null_recording_id(tmp_db, make_session):
     """
     with pytest.raises(sqlite3.IntegrityError):
         tmp_db.enqueue_media_job("null_rec", "reel", None)
+
+
+# ---------------- 接続時の遡り(backlog)の二重記録 ----------------
+
+
+def test_the_same_message_id_lands_only_once_per_session(
+    tmp_db, db_read, make_session, event_builder
+):
+    """接続時の遡りに対する耐久側の防波堤。受信側(dedup)がprocessの再起動で記憶を
+    失った直後 —— まさに再接続が集中する場面 —— でも行は増えない。"""
+    session_id = make_session(status="connected")
+    for at in (100.0, 160.0):
+        tmp_db.add_event(session_id, event_builder(
+            "comment", at=at, comment="おは", text="おは",
+            create_time=99.5, message_id=7658591137032538901))
+    tmp_db.flush()
+    rows = db_read.execute(
+        "SELECT time FROM events WHERE session_id = ?", (session_id,)
+    ).fetchall()
+    assert [r["time"] for r in rows] == [100.0], "最初に届いた1件だけが残る"
+
+
+def test_rows_without_a_message_id_are_never_deduped(
+    tmp_db, db_read, make_session, event_builder
+):
+    """一意制約は部分indexである。collector自身が書くsystem eventと計装前の既存行は
+    message_idを持たず、同じ内容が何度並んでも1件も落ちてはならない。"""
+    session_id = make_session(status="connected")
+    for _ in range(3):
+        tmp_db.add_event(session_id, event_builder(
+            "system", at=100.0, text="再接続します"))
+    tmp_db.flush()
+    assert db_read.execute(
+        "SELECT COUNT(*) n FROM events WHERE session_id = ?", (session_id,)
+    ).fetchone()["n"] == 3
+
+
+def test_the_same_message_id_in_another_session_is_kept(
+    tmp_db, db_read, make_session, event_builder
+):
+    """一意制約はsession内で閉じている。session跨ぎの遡りは受信側の記憶が落とす担当で、
+    どちらのsessionの出来事かをDBが決めてはならない。"""
+    first = make_session("a", status="ended")
+    second = make_session("b", status="connected")
+    for sid in (first, second):
+        tmp_db.add_event(sid, event_builder(
+            "comment", at=100.0, comment="おは", text="おは",
+            create_time=99.5, message_id=555))
+    tmp_db.flush()
+    assert db_read.execute("SELECT COUNT(*) n FROM events").fetchone()["n"] == 2
+
+
+def test_a_foreign_key_violation_still_surfaces(tmp_db):
+    """ON CONFLICT DO NOTHING が飲み込むのは一意制約だけであること。OR IGNORE にすると
+    孤児eventのFK違反まで黙って消え、隔離経路(poison-pillの検知)が効かなくなる。"""
+    row = [None] * tmp_db._events_insert_sql.count("?")
+    row[0] = 999999  # 存在しないsession(NOT NULLの列はすべて埋めてある)
+    row[1] = 100.0
+    row[3] = "comment"
+    with tmp_db._lock:
+        with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+            tmp_db._conn.execute(tmp_db._events_insert_sql, row)
+        tmp_db._conn.rollback()
+
+
+def test_purge_rebuilds_the_stats_of_the_sessions_it_touched(
+    tmp_db, db_read, make_session, event_builder
+):
+    """message_id列より前に入った既存行の掃除。削った後に stats_json / buckets を
+    作り直さないと、行数と集計が食い違ったまま残る。"""
+    session_id = make_session(status="ended")
+    # 遡りの二重記録: 同じ人・同じ文・同じcreate_timeが、接続のたびに1行ずつ。
+    for at in (100.0, 160.0, 220.0):
+        tmp_db.add_event(session_id, event_builder(
+            "comment", at=at, comment="おは", text="おは", create_time=99.5))
+    # 同じ人が同じ短文を続けて送った本物。create_timeが違うので畳んではならない。
+    for create_time in (300.5, 301.5):
+        tmp_db.add_event(session_id, event_builder(
+            "comment", at=create_time, comment="おは", text="おは", create_time=create_time))
+    tmp_db.flush()
+    tmp_db._conn.execute(
+        "UPDATE sessions SET stats_json = ? WHERE id = ?", ('{"comments": 5}', session_id))
+    tmp_db._conn.execute("DELETE FROM settings WHERE key = ?",
+                         ("_migration:purge_connect_backlog_dupes_v1",))
+    tmp_db._conn.commit()
+
+    with tmp_db._lock:
+        tmp_db._purge_connect_backlog_dupes()
+        tmp_db._conn.commit()
+
+    times = [r["time"] for r in db_read.execute(
+        "SELECT time FROM events WHERE session_id = ? ORDER BY time", (session_id,))]
+    assert times == [100.0, 300.5, 301.5], "遡りだけを畳み、本物の連投は残す"
+    stats = json.loads(db_read.execute(
+        "SELECT stats_json FROM sessions WHERE id = ?", (session_id,)).fetchone()["stats_json"])
+    assert stats["comments"] == 3
+    assert stats["deduplicated"] is True
+    assert db_read.execute(
+        "SELECT COALESCE(SUM(comments), 0) n FROM buckets WHERE session_id = ?",
+        (session_id,)).fetchone()["n"] == 3

@@ -33,6 +33,7 @@ from tictok.media.clipper import clip_path, make_clip, still_path, STILL_VARIANT
 from tictok.media.reel import make_reel
 from tictok.media.still import capture_still
 from tictok.media.thumbnails import ensure_sprite
+from tictok.media.loudness import curve_params, ensure_gain_curve
 from tictok.media.waveform import ensure_audio_profile, ensure_waveform, silence_spans
 from tictok.ai import ai_analysis
 from tictok.search import indexer
@@ -298,7 +299,7 @@ def _preview_sources(recording_id: int) -> tuple:
 # 文字起こし・笑い声分析も同じ台帳で走る。別台帳だった頃はJob一覧に出ず、GPUを同じ枠で
 # 取り合っているのに「動いているのにjobが無い」と読める状態だった。
 MEDIA_JOB_KINDS = ("overlay", "upscale", "reprocess", "audionorm", "pack",
-                   "waveform", "sprite", "voice", "overlay_preview", "clip_batch",
+                   "waveform", "gain", "sprite", "voice", "overlay_preview", "clip_batch",
                    "reel", "clip_overlay", "short", "stt", "laugh", "still")
 
 # 台帳に出る種別名。訳語の出所はops_labelsの1箇所だけにする(同じ語を2箇所に置くと、job
@@ -1208,6 +1209,11 @@ async def _run_sidecar_cache_job(kind: str, recording_id: int, report) -> dict:
             await ensure_audio_profile(path)
             detail = {"buckets": result["buckets"],
                       "duration_seconds": result["duration_seconds"]}
+        elif kind == "gain":
+            # 再生時に当てるgainの時系列。録画は書き換えず、曲線だけをsidecarへ持つ。
+            curve = await ensure_gain_curve(path, curve_params(runtime.settings))
+            detail = {"points": len(curve.get("gains") or []),
+                      "duration_seconds": curve.get("duration_seconds")}
         elif kind == "voice":
             # 声確率(0.1秒刻みの生確率)。無音skipと無言の早送りが同じsidecarを読む。
             profile = await voice.ensure_voice_profile(path)
@@ -1312,8 +1318,25 @@ async def _run_media_job(job: dict, report) -> dict:
         if recording is None:
             raise JobSkipped("録画が見つかりません（削除済み）。")
         with _input_precondition():
-            return await _pack_recording(recording_id, recording, report)
-    if kind in ("waveform", "sprite", "voice"):
+            result = await _pack_recording(recording_id, recording, report)
+        # 束ね直した録画だけ、続けてsidecarを積む。already_packedは.tsが1 byteも変わって
+        # おらず指紋も外れないので、sweepの通常の候補選びに任せる。
+        if result.get("packed"):
+            try:
+                queued = await _enqueue_sidecars_after_pack(recording_id, recording)
+            except Exception:
+                # 束ね直しは既に完了している。その後始末の失敗で成功したjobをfailedにすると、
+                # 再実行のたびにalready_packedで空回りする行が残る。sweepが拾う。
+                runtime.logger.exception(
+                    "ts結合の後のsidecar投入に失敗しました（sweepが拾い直します）",
+                    extra={"event": "pack.sidecar_chain_failed",
+                           "ctx": {"recording_id": recording_id}},
+                )
+            else:
+                if queued:
+                    result = {**result, "sidecars_queued": queued}
+        return result
+    if kind in ("waveform", "gain", "sprite", "voice"):
         return await _run_sidecar_cache_job(kind, recording_id, report)
     if kind == "stt":
         return await _run_stt_job(recording_id, report, job.get("params"))
@@ -1672,6 +1695,36 @@ async def _pack_recording(recording_id: int, recording: dict, report) -> dict:
                                 detail=f"ts結合できませんでした: {result['reason']}")
     return {"recording_id": recording_id, "path": str(hls_dir), **result,
             "freed_bytes": result.get("bytes", 0)}
+
+
+async def _enqueue_sidecars_after_pack(recording_id: int, recording: dict) -> list:
+    """ts結合を終えた録画のsidecar(音声波形・サムネ・声profile)を続けてqueueへ積む。
+
+    sweepはts結合待ちの録画にsidecarを積まない(``startup._awaiting_pack``)。順序としては
+    正しいが、束ね終わった録画を拾うのは**次の周期**になるため、確定から波形が出るまでに
+    静穏待ち + 周期 × 2 がかかっていた。順序の制約はここで満たされたばかりなので、その場で
+    積んで周期を1つ削る。
+
+    既に在るsidecarも飛ばさずに積む。ts結合は.tsの本数・合計byte・最新mtimeを変え、それが
+    cacheの指紋そのものなので、**束ねる前に作られたsidecarはこの時点で全て古い**。作り直しが
+    要るかは生成側(ensure_waveform / ensure_sprite / ensure_voice_profile)が指紋で判断する
+    ので、指紋が合っていれば確認だけで終わる。
+
+    積めなかったものは黙って飛ばす。ここはts結合jobの後始末で、sidecarを積めないことは
+    ts結合の失敗ではない(既にqueueに居る等)。取りこぼしても定期のsweepが同じものを拾う。"""
+    queued = []
+    for kind, setting in fsfacts.SIDECAR_SWEEP_SETTINGS.items():
+        if int(runtime.settings.get(setting)) <= 0:
+            continue  # その種別の自動生成を行わない指定。sweepと同じ意味で止める。
+        try:
+            await _enqueue_media_job(
+                kind, recording_id, recording=recording,
+                stem=api_files._recording_label(recording),
+                priority=SWEEP_JOB_PRIORITY, sweep=True)
+        except HTTPException:
+            continue
+        queued.append(kind)
+    return queued
 
 
 async def _audionorm_recording(recording_id: int, recording: dict, job_id: str,

@@ -390,7 +390,6 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
     with container:
         stream = container.streams.audio[0]
         time_base = float(stream.time_base)
-        rate = stream.rate
         # 出す時刻は**playerがseekする軸**でなければならない。その軸は0始まりだが、
         # containerの内部timestampは0始まりとは限らない。HLSのsegmentは実測1.438s から
         # 始まり、**PyAVはffmpegと違って先頭を0へ寄せない**(ffmpegは-copytsを付けない
@@ -416,6 +415,15 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
                     anchor_gapless.append(gapless)
                     anchor_media.append(media)
                     last_delta = delta
+            # sample rateは**復号したframe**から採る。HLSのplaylistを入力にすると、
+            # 開いた直後の ``stream.rate`` は 0 のことがある(実測: 先頭segmentの音声
+            # headerが読めない録画で 0 / channels も 0。frameを1枚通すと 48000 が入る)。
+            # 開く時点の値で割ると文字起こしが丸ごと ZeroDivisionError で落ちる。
+            rate = frame.sample_rate
+            if not rate:
+                raise STTError(
+                    "音声のsample rateを %s から読み取れません（frameが 0 を名乗りました）"
+                    % os.path.basename(path))
             gapless += frame.samples / rate
             frame.pts = None
             for rframe in resampler.resample(frame):

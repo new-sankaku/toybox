@@ -148,14 +148,6 @@
             <!-- 動画は縦長で右に余白が残るため、操作系と文字起こしをその余白に積む。
                  文字起こしは残り高さを全部使い、動画と高さを揃える。 -->
             <div class="vd-side">
-              <!-- 見出し行。音量は録画の中身と関係が無い常設の操作なので、群の中に1行を
-                   専有させず、ID・配信日の右の余りへ寄せる。 -->
-              <div class="vd-headrow">
-                <div id="player-head" class="vd-player-head">未選択</div>
-                <button id="mute" class="btn btn-small vd-mute" type="button" title="ミュート切替">音量</button>
-                <input id="volume" class="vd-volume" type="range" min="0" max="100" step="1" value="100" aria-label="音量" />
-                <span id="volume-label" class="vd-volume-label">100%</span>
-              </div>
               <!-- 9行が見出しも罫線も無く積まれていたため、目的のbuttonを探すのに毎回時間が
                    かかり、「今なにができるか」も読めなかった(disabledの理由は各buttonの
                    hoverにしかない)。作業の段階で3群に分け、押せない理由は群の見出しに出す。
@@ -169,7 +161,9 @@
                      動画の右に空行が並ぶだけになる。 -->
                 <div class="vd-row">
                   <span class="vd-rowlabel">再生</span>
-                  <span class="vd-chk seg-field"><span class="seg-label">確認</span>
+                  <!-- 選択肢そのものが「確認」と名乗っているので見出しは置かない
+                       (1行に収める幅を、名乗り直しではなく操作へ回す)。 -->
+                  <span class="vd-chk seg-field">
                     <span id="review-state" class="seg" role="radiogroup"
                           aria-label="この録画の確認状態" data-value="unchecked"
                           title="この録画を観たかどうかの印です。手で付け替えたときだけ変わります。">
@@ -178,25 +172,29 @@
                       <button class="seg-item" type="button" data-value="checked">確認済</button>
                     </span>
                   </span>
-                  <span class="vd-chk seg-field"><span class="seg-label">速度(x)</span>
-                    <span id="play-rate" class="seg seg-rate" role="radiogroup"
-                          aria-label="再生速度" data-value="1" data-revert="1" data-wheel="1"
-                          title="click=その速度へ / 選択中を再click=1xへ戻る / wheel=1段ずつ / , . key でも動きます">
-                      <button class="seg-item" type="button" data-value="0.25">0.25</button>
-                      <button class="seg-item" type="button" data-value="0.5">0.5</button>
-                      <button class="seg-item" type="button" data-value="0.75">0.75</button>
-                      <button class="seg-item" type="button" data-value="1">1</button>
-                      <button class="seg-item" type="button" data-value="1.25">1.25</button>
-                      <button class="seg-item" type="button" data-value="1.5">1.5</button>
-                      <button class="seg-item" type="button" data-value="2">2</button>
-                      <button class="seg-item" type="button" data-value="3">3</button>
-                      <button class="seg-item" type="button" data-value="4">4</button>
-                    </span>
+                  <!-- 9段のpillを並べていた頃は、速度だけで行の半分以上を占め、同じ行の
+                       他の操作を次の行へ押し出していた。段の意味が「速い/遅い」しか無い
+                       群はbarで出す(段そのものは変えないので、選んだ速度は今までのまま)。 -->
+                  <span class="vd-chk seg-field"><span class="seg-label">速度</span>
+                    <span id="play-rate" class="segbar"
+                          data-stops="0.25,0.5,0.75,1,1.25,1.5,2,3,4"
+                          data-value="1" data-revert="1" data-wheel="1"
+                          data-label="再生速度" data-unit="x"
+                          title="drag=その速度へ / 数値をclick=1xへ戻る / wheel=1段ずつ / , . key でも動きます"></span>
                   </span>
-                  <label class="vd-chk"><input id="loop-range" type="checkbox" /> IN/OUTをループ</label>
-                  <label class="vd-chk" title="再生中に「誰も喋っていない区間」を飛ばします。判定は音声のVAD（声が出ているかの検出）で、音量では判定しません（配信はBGMとゲーム音で静かにならないため）。声の手前は余裕を残して着地するので語頭は切れません。笑い・叫び・拍手といった反応は解析済みの録画なら飛ばしません。読み込みが追い付いていない先へは飛ばず、等速のまま流します。無言を早送りとは同時に使えません。初回は音声を読むので少し待ちます。"><input id="skip-silence" type="checkbox" /> 無音を飛ばす</label>
+                  <!-- 音量は録画の中身と関係が無い常設の操作だが、耳で確かめながら観る間は
+                       速度と同じ頻度で触る。見出し行を別に立てるより再生の行に置く。 -->
+                  <span class="vd-chk seg-field">
+                    <button id="mute" class="btn btn-small vd-mute" type="button" title="ミュート切替">消音</button>
+                    <input id="volume" class="vd-volume" type="range" min="0" max="100" step="1" value="100" aria-label="音量" />
+                    <span id="volume-label" class="vd-volume-label">100%</span>
+                  </span>
+                  <label class="vd-chk" title="配信ごと・場面ごとの音量差を、設定の目標ラウドネスへ向けて揃えて鳴らします。録画のfileは書き換えず、あらかじめ測っておいた音量の時系列を再生時に当てるだけなので、切れば即座に素の音へ戻ります。曲線がまだ作られていない録画では、その場で測るぶん少し待ちます。音が割れないところで頭が押さえられるので、大きい場面で歪むことはありません。"><input id="playback-gain" type="checkbox" /> 音量を揃える</label>
+                  <span id="gain-note" class="vd-summary"></span>
+                  <label class="vd-chk" title="IN/OUTで挟んだ範囲だけを繰り返し再生します（境界の当たりを確かめるための一時的なmodeなので、次に開いた時は外れています）。"><input id="loop-range" type="checkbox" /> ループ</label>
+                  <label class="vd-chk" title="再生中に「誰も喋っていない区間」を飛ばします。判定は音声のVAD（声が出ているかの検出）で、音量では判定しません（配信はBGMとゲーム音で静かにならないため）。声の手前は余裕を残して着地するので語頭は切れません。笑い・叫び・拍手といった反応は解析済みの録画なら飛ばしません。読み込みが追い付いていない先へは飛ばず、等速のまま流します。無言早送りとは同時に使えません。初回は音声を読むので少し待ちます。"><input id="skip-silence" type="checkbox" /> 無音飛ばし</label>
                   <span id="skip-note" class="vd-summary"></span>
-                  <label class="vd-chk" title="誰も喋っていない時間だけを速く流します。飛ばさないので音は鳴り続け、判定が外した瞬間も速いまま通り過ぎるだけで消えません。速い間は音量を下げます。判定は音声のVAD（声が出ているかの検出）で、文字起こしは要りません。笑い・叫び・息を呑む・拍手といった反応は解析済みの録画なら内容として扱います（速くしません）。無音を飛ばすとは同時に使えません。初回は音声を読むので少し待ちます。"><input id="pace-talk" type="checkbox" /> 無言を早送り</label>
+                  <label class="vd-chk" title="誰も喋っていない時間だけを速く流します。飛ばさないので音は鳴り続け、判定が外した瞬間も速いまま通り過ぎるだけで消えません。速い間は音量を下げます。判定は音声のVAD（声が出ているかの検出）で、文字起こしは要りません。笑い・叫び・息を呑む・拍手といった反応は解析済みの録画なら内容として扱います（速くしません）。無音飛ばしとは同時に使えません。初回は音声を読むので少し待ちます。"><input id="pace-talk" type="checkbox" /> 無言早送り</label>
                   <span id="pace-note" class="vd-summary"></span>
                   <span class="sp"></span>
                   <span id="review-note" class="vd-summary"></span>
@@ -241,18 +239,22 @@
                   <button id="do-still" class="btn" type="button" disabled
                           title="今表示している1 frameをpngで保存します（再生中の素材版のまま・原寸）。&lt;一時保存先&gt;/&lt;配信者&gt;/_screenshots/ に出ます。key: S">スクショ</button>
                   <span class="vd-row-sep" aria-hidden="true"></span>
+                  <!-- 記録先。以前は選択肢そのものを次の行へ常時並べていたが、グループが
+                       増えるほど段が積まれ、その全部が下の本文block(文字起こし・コメント)から
+                       高さを奪っていた。今どこへ入るかはこのbuttonが名乗り、選ぶ時だけ
+                       一覧を出す。行き先を先に置くのは、読む順と物が動く順(どこへ → 入れる)を
+                       揃えるため。 -->
+                  <button id="dest-pick" class="btn vd-destbtn" type="button"
+                          aria-haspopup="listbox" aria-expanded="false"
+                          title="見どころの記録先グループを選びます。グループは切り抜き動画1本の単位です。"></button>
+                  <!-- 記録先がどの操作の行き先なのかは、隣に置いただけでは読めない
+                       (同じ行に4つのbuttonが並ぶので、次の1つがその設定だとは判らない)。 -->
+                  <span class="vd-destarrow" aria-hidden="true">→</span>
                   <!-- 記録の口は1つ。IN/OUTが立っていれば尺付き(=そのままmp4にできる素材)、
                        立っていなければ点として残る。以前は「見どころに記録」と「切り出しリスト
                        に追加」が並び、同じ範囲を2つの表へ二重に登録する形になっていた。
                        押した結果が入力の状態で変わるので、button自身に何が入るかを書かせる。 -->
-                  <button id="add-mark" class="btn" type="button" disabled>見どころに記録</button>
-                  <!-- 記録先。以前は選択肢そのものを次の行へ常時並べていたが、グループが
-                       増えるほど段が積まれ、その全部が下の本文block(文字起こし・コメント)から
-                       高さを奪っていた。今どこへ入るかはこのbuttonが名乗り、選ぶ時だけ
-                       一覧を出す。記録するbuttonの隣に置くので、行き先は押す直前に読める。 -->
-                  <button id="dest-pick" class="btn vd-destbtn" type="button"
-                          aria-haspopup="listbox" aria-expanded="false"
-                          title="見どころの記録先グループを選びます。グループは切り抜き動画1本の単位です。"></button>
+                  <button id="add-mark" class="btn" type="button" disabled>見どころ記録</button>
                   <!-- メモは覚え書きであり、書き出しfile名でもある。以前はメモとラベルで欄が
                        2つに割れ、同じ言葉を2度打つか、片方だけが古いまま残るかだった。 -->
                   <input id="mark-memo" class="vd-memo" type="text" aria-label="見どころのメモ（書き出しfile名になります）" placeholder="メモ（書き出しfile名になります）" autocomplete="off" />
@@ -336,7 +338,9 @@
                    (表題だけを事実として読ませない)。 -->
               <div id="chapter-block" class="vd-transcript-block vd-block-collapsed">
                 <div class="vd-heat-head">
-                  <span class="vd-heat-label" title="clickでその位置へ移動します。下段はその位置の実際の発話で、AIの書いた表題を確かめるための根拠です。">章立て（AI）</span>
+                  <button id="chapter-fold" class="vd-heat-label vd-fold" type="button"
+                          aria-expanded="true" aria-controls="chapters"
+                          title="clickで畳む／開く（一覧の操作: click=その位置へ移動 / 下段はその位置の実際の発話）"><span class="vd-fold-mark" aria-hidden="true">▾</span>章立て（AI）</button>
                   <button id="do-chapters" class="btn btn-small" type="button" disabled>章立てを作る</button>
                   <button id="copy-chapters" class="btn btn-small" type="button" disabled>説明欄用をcopy</button>
                   <button id="save-chapters" class="btn btn-small" type="button" disabled>VTTを保存</button>

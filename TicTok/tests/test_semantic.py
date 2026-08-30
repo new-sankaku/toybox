@@ -147,3 +147,32 @@ def test_index_status_without_storage_reports_zero_not_an_error(semantic_env, tm
     assert status["built"] is True
     assert status["stale_groups"] == 0
     assert status["unindexed_groups"] == 0
+
+
+def test_pending_groups_counts_unindexed_and_stale(semantic_env, tmp_db, recordings):
+    """sweepが構築を起こすか決める数が、実際に埋め直す対象と一致すること。
+
+    ここが多めに出ると、埋める物が無いbuildを周期ごとに起こし続ける。少なめに出ると、
+    検索から抜け落ちたgroupが誰にも拾われないまま残る。"""
+    _seed(tmp_db, recordings)
+    assert semantic.pending_groups(tmp_db) == 1, "未indexのgroupを数えていない"
+    asyncio.run(semantic.build_index(tmp_db))
+    assert semantic.pending_groups(tmp_db) == 0, "index済みを積み直そうとしている"
+    # 文字起こしのやり直し。行が入れ替わるとindexは古い秒を名乗るので、埋め直す対象になる。
+    _seed(tmp_db, recordings, times=(11.0, 41.0, 71.0))
+    assert semantic.pending_groups(tmp_db) == 1, "張り直されたgroupを数えていない"
+
+
+def test_passage_body_lines_line_up_with_hit_ids(semantic_env, tmp_db, recordings):
+    """passageの本文は1行=1文で、hit_idsと同じ並びに対応する。
+
+    画面はこの対応だけを根拠に本文を文ごとに押せるようにしている(passageの先頭へ飛ぶと、
+    当たった文は実測で+6.9〜20.9秒 後ろに居る)。崩れると押した文と飛ぶ先が別物になる。"""
+    _seed(tmp_db, recordings, times=(10.0, 12.0, 14.0))
+    asyncio.run(semantic.build_index(tmp_db))
+    found = _search(tmp_db)
+    item = found["items"][0]
+    assert item["body"].split("\n") == BODIES
+    assert len(item["hit_ids"]) == len(BODIES)
+    times = tmp_db.search_hit_times(item["hit_ids"])
+    assert [times[i]["video_time"] for i in item["hit_ids"]] == [10.0, 12.0, 14.0]

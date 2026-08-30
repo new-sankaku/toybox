@@ -25,10 +25,20 @@ describe("videos.js の時間軸と対応付け", () => {
   const state = () => page.get("state");
 
   /** jsdom は layout を持たないので、bar の矩形は test が与える。 */
-  function layoutHeat({ left = 0, width = 200, top = 0, height = 60 } = {}) {
-    doc.getElementById("heat").getBoundingClientRect = () => ({
+  function layoutBar(id, { left = 0, width = 200, top = 0, height = 60 } = {}) {
+    const rect = {
       left, top, width, height, right: left + width, bottom: top + height, x: left, y: top,
-    });
+    };
+    const el = doc.getElementById(id);
+    el.getBoundingClientRect = () => rect;
+    // content boxを基準に換算するので、border無しのbarとして clientLeft/Width も与える。
+    Object.defineProperty(el, "clientLeft", { configurable: true, get: () => 0 });
+    Object.defineProperty(el, "clientWidth", { configurable: true, get: () => width });
+    return el;
+  }
+
+  function layoutHeat(box) {
+    return layoutBar("heat", box);
   }
 
   function setDuration(seconds) {
@@ -85,45 +95,80 @@ describe("videos.js の時間軸と対応付け", () => {
       url: "/api/x/sprite.jpg",
     };
 
+    /** thumb の収まり計算が親(wrapper)の矩形を読む。 */
+    function layoutWrap(id, width) {
+      doc.getElementById(id).parentElement.getBoundingClientRect = () => ({
+        left: 0, top: 0, width, height: 80, right: width, bottom: 80, x: 0, y: 0,
+      });
+    }
+
     beforeEach(() => {
       layoutHeat({ left: 0, width: 1200 });
+      layoutBar("zoom", { left: 0, width: 1200, top: 100, height: 60 });
       setDuration(120);
       state().sprite = SPEC;
-      // thumb の収まり計算が親の矩形を読む。
-      doc.getElementById("thumb").parentElement.getBoundingClientRect = () => ({
-        left: 0, top: 0, width: 1200, height: 80, right: 1200, bottom: 80, x: 0, y: 0,
-      });
+      layoutWrap("heat", 1200);
+      layoutWrap("zoom", 1200);
     });
 
     const posOf = () => doc.getElementById("thumb-img").style.backgroundPosition;
 
     it("秒 → 何枚目 → 行と列 を対応させる", () => {
       // 25秒 = 3枚目(index 2) = 1行目の3列目。
-      win.showThumb(250);
+      win.showThumb("heat", 250);
       expect(posOf()).toBe("-320px 0px");
       expect(doc.getElementById("thumb-time").textContent).toBe("00:00:25");
 
       // 63秒 = 7枚目(index 6) = 2行目の2列目。
-      win.showThumb(630);
+      win.showThumb("heat", 630);
       expect(posOf()).toBe("-160px -90px");
       expect(doc.getElementById("thumb-time").textContent).toBe("00:01:03");
     });
 
     it("最後の1枚を超える位置は最終枚へclampする(空tileを出さない)", () => {
-      win.showThumb(1200); // 尺の右端
+      win.showThumb("heat", 1200); // 尺の右端
       // index 11 = 3行目の2列目。
       expect(posOf()).toBe("-160px -180px");
     });
 
     it("spriteが無い録画ではthumbを出さない", () => {
       state().sprite = null;
-      win.showThumb(250);
+      win.showThumb("heat", 250);
       expect(doc.getElementById("thumb").classList.contains("hidden")).toBe(true);
     });
 
     it("尺が分かる前はthumbを出さない", () => {
       setDuration(NaN);
-      win.showThumb(250);
+      win.showThumb("heat", 250);
+      expect(doc.getElementById("thumb").classList.contains("hidden")).toBe(true);
+    });
+
+    // 拡大窓は全尺barと換算が違う(窓の始点+割合)。同じx座標でも別の秒になるので、
+    // 全尺barの換算を使い回すと、bar上の位置と別の場面のthumbnailが出る。
+    it("拡大窓では窓の秒でtileを選ぶ(全尺barの換算を使わない)", () => {
+      state().zoomStart = 60;
+      state().zoomSpan = 60; // 窓は60〜120秒
+      // 中央(x:600) = 90秒 = 10枚目(index 9) = 2行目の5列目。
+      win.showThumb("zoom", 600);
+      expect(posOf()).toBe("-640px -90px");
+      expect(doc.getElementById("thumb-time").textContent).toBe("00:01:30");
+      expect(doc.getElementById("thumb").classList.contains("hidden")).toBe(false);
+    });
+
+    // thumbは1つしか無いので、出す先のwrapperへ移してから位置を決める。移していないと
+    // 全尺barのwrapperの中で「拡大窓の高さぶん上」に置かれ、絵が別のbarの上に出る。
+    it("thumbは出したbarのwrapperへ移る", () => {
+      win.showThumb("zoom", 600);
+      expect(doc.getElementById("thumb").parentElement)
+        .toBe(doc.getElementById("zoom").parentElement);
+      win.showThumb("heat", 250);
+      expect(doc.getElementById("thumb").parentElement)
+        .toBe(doc.getElementById("heat").parentElement);
+    });
+
+    it("拡大窓でも尺が分かる前はthumbを出さない", () => {
+      setDuration(NaN);
+      win.showThumb("zoom", 600);
       expect(doc.getElementById("thumb").classList.contains("hidden")).toBe(true);
     });
   });
@@ -145,7 +190,7 @@ describe("videos.js の時間軸と対応付け", () => {
       // 記録の口は1つで、IN/OUTが立っていれば尺つきで入ると自分で名乗る。
       const add = doc.getElementById("add-mark");
       expect(add.disabled).toBe(false);
-      expect(add.textContent).toBe("見どころに記録（尺あり）");
+      expect(add.textContent).toBe("見どころ記録（尺あり）");
     });
 
     it("OUTがINより前なら尺を出さず理由を出す(負の尺で投入させない)", () => {

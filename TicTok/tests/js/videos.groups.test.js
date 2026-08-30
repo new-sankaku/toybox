@@ -176,6 +176,17 @@ describe("videos.js のグループと見どころ", () => {
       expect(markRows().length).toBe(3);
     });
 
+    // 型(作品の作り方)の一覧が先に届くと、見出しの書き直しはグループ一覧より先に走る。
+    // 「表示するグループ」は前回の選択をprefから復元しているので、実体が手元に
+    // 無いままここへ入る瞬間がある。落ちると画面全体が組み上がらない。
+    it("グループの実体が届く前でも落ちず、選択中として名乗る", () => {
+      page.run("state.groups = []");
+      page.run("renderMarksHead()");
+      expect(doc.getElementById("marks-list-title").textContent)
+        .toBe("■ グループ#1 ／ 見どころ（書き出し順）");
+      expect(doc.getElementById("cuts-work").title).toContain("グループ#1");
+    });
+
     it("並びはstartではなくposition(=書き出し順)", () => {
       expect(markRows().map(memoOf)).toEqual(["後の場面", "前の場面", "点だけ"]);
     });
@@ -254,6 +265,41 @@ describe("videos.js のグループと見どころ", () => {
       const starts = posted.find((p) => p.url === "/api/clips/batch").body.items
         .map((i) => i.start);
       expect(starts).not.toContain(700);
+    });
+  });
+
+  // 章立て(再生画面の目次)のうち、切り出す価値があると判断した範囲だけが切り抜き候補として
+  // ここへ入り、色が変わる。自動生成と違って隠さない — 出せと言われて入れた行である。
+  describe("切り抜き候補", () => {
+    const PICK = { id: 51, recording_id: 1, unique_id: "alice", recording_started_at: 100,
+                   start: 900, end: 960, memo: "本音", group_id: null, position: null,
+                   origin: "pick", pts_mapped: 1, filename: "a.mp4" };
+
+    beforeEach(async () => {
+      await page.close();
+      await open({ "/api/bookmarks": { items: [...MARKS, PICK] } });
+    });
+
+    it("自動生成と違って既定で並ぶ(隠す設定を入れていない)", () => {
+      expect(doc.getElementById("marks-show-auto").checked).toBe(false);
+      expect(markRows().length).toBe(5);
+    });
+
+    it("出所の列で名乗る", () => {
+      const pick = markRows().find((tr) => memoOf(tr) === "本音");
+      expect(cellsOf(pick)[COL.origin]).toBe("切り抜き候補");
+      // 名乗る行が居るので出所の列は畳まない(自動生成を出していなくても)。
+      expect(doc.getElementById("mark-table").classList.contains("vd-hide-origin"))
+        .toBe(false);
+    });
+
+    it("色が変わるのは切り抜き候補だけ(人が付けた印は変えない)", () => {
+      const rows = markRows();
+      const pick = rows.find((tr) => memoOf(tr) === "本音");
+      expect(pick.classList.contains("row-pick")).toBe(true);
+      expect(rows.filter((tr) => tr.classList.contains("row-pick")).length).toBe(1);
+      // 塗る根拠の列(出所)にclassが載っていないと、色を当てる先が無い。
+      expect(pick.cells[COL.origin].classList.contains("mark-origin")).toBe(true);
     });
   });
 
@@ -1103,14 +1149,14 @@ describe("videos.js のグループと見どころ", () => {
     it("IN/OUTが無ければ点として記録すると名乗る", () => {
       win.setCut(null, null);
       const button = doc.getElementById("add-mark");
-      expect(button.textContent).toBe("見どころに記録（点）");
+      expect(button.textContent).toBe("見どころ記録（点）");
       expect(button.title).toContain("mp4にはできません");
     });
 
     it("IN/OUTがあれば尺つきで記録すると名乗る", () => {
       win.setCut(400, 430);
       const button = doc.getElementById("add-mark");
-      expect(button.textContent).toBe("見どころに記録（尺あり）");
+      expect(button.textContent).toBe("見どころ記録（尺あり）");
       expect(button.disabled).toBe(false);
     });
 

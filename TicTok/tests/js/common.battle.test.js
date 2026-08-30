@@ -198,7 +198,9 @@ describe("common.js のbattle構造", () => {
   });
 
   describe("groupContribsByHost", () => {
-    it("host_id が無い自陣の貢献は自陣hostへ寄せる", () => {
+    it("host_id が無い貢献は自陣hostへ寄せず、陣営ごとの別枠へ集める", () => {
+      // チーム戦のarmiesはチーム1つぶんの集約で「誰への貢献か」を名乗らない。自陣hostへ
+      // 寄せると、味方hostを支えた人が自hostの貢献者として並ぶ。
       const battle = {
         participants: [
           { user_id: "own1", side: "own", is_own: true },
@@ -209,17 +211,44 @@ describe("common.js のbattle構造", () => {
           { host_id: "opp1", side: "opp", diamonds: 20 },
         ],
       };
-      const topo = win.battleTopology(battle, owner);
-      const byHost = win.groupContribsByHost(battle, topo);
-      expect(byHost.get("own1")).toHaveLength(1);
+      const byHost = win.groupContribsByHost(battle);
+      expect(byHost.get("own1")).toBeUndefined();
+      expect(byHost.get("__own__")).toHaveLength(1);
       expect(byHost.get("opp1")).toHaveLength(1);
     });
 
     it("host_id も自陣hostも無い敵陣の貢献は捨てずに専用keyへ集める", () => {
       const battle = { participants: [], contributions: [{ side: "opp", diamonds: 5 }] };
-      const topo = win.battleTopology(battle, owner);
-      const byHost = win.groupContribsByHost(battle, topo);
+      const byHost = win.groupContribsByHost(battle);
       expect(byHost.get("__opp__")).toHaveLength(1);
+    });
+  });
+
+  describe("coinCoverageNote", () => {
+    const battle = {
+      start_time: 1000,
+      coin_coverage: {
+        h1: { handle: "a", attached_at: null, attempts: 3, error: "sign serverが500を返しました" },
+        h2: { handle: "b", attached_at: 1090, attempts: 2, error: "" },
+        h3: { handle: "c", attached_at: 1000.5, attempts: 1, error: "" },
+      },
+    };
+
+    it("繋がらなかったhostは実弾0ではなく未取得と名乗る", () => {
+      const note = win.coinCoverageNote(battle, { user_id: "h1" });
+      expect(note.text).toBe("実弾 未取得");
+      expect(note.title).toContain("500");
+    });
+
+    it("遅れて繋がったhostは「どこから先の合計か」を名乗る", () => {
+      const note = win.coinCoverageNote(battle, { user_id: "h2" });
+      expect(note.text).toBe("実弾 途中(00:01:30〜)");
+    });
+
+    it("PK開始から繋がっていたhostと自hostには断りを付けない", () => {
+      expect(win.coinCoverageNote(battle, { user_id: "h3" })).toBeNull();
+      expect(win.coinCoverageNote(battle, { user_id: "h1", is_own: true })).toBeNull();
+      expect(win.coinCoverageNote(battle, { user_id: "unknown" })).toBeNull();
     });
   });
 

@@ -18,6 +18,7 @@ from tictok.media import clipper
 from tictok.media import concat as concat_mod
 from tictok.media import gift_icons as gi
 from tictok.media import hls_source
+from tictok.media import loudness as ld
 from tictok.media import skip
 from tictok.media import still
 from tictok.media import thumbnails as th
@@ -270,6 +271,132 @@ def test_decode_command_maps_only_audio_and_resamples(monkeypatch, make_recordin
     assert args[args.index("-ac") + 1] == "1"
     assert args[args.index("-f") + 1] == "s16le"
     assert args[-1] == "-"
+
+
+# ------------------------------------------------------------------- 再生gain曲線
+
+_PARAMS = {"target_lufs": -14.0, "ceiling_dbfs": -1.5,
+           "max_boost_db": 12.0, "max_cut_db": 12.0}
+
+
+def _metadata(frames):
+    """ametadataの出力を組み立てる。framesは (S, Peak_level文字列) の並び。"""
+    lines = []
+    for i, (short_term, peak) in enumerate(frames):
+        lines.append(f"frame:{i}    pts:{i * 4800}  pts_time:{i / 10}")
+        lines.append(f"lavfi.astats.Overall.Peak_level={peak}")
+        lines.append(f"lavfi.r128.M={short_term}")
+        lines.append(f"lavfi.r128.S={short_term}")
+        lines.append("lavfi.r128.I=-16.0")
+    return io.BytesIO("".join(line + "\n" for line in lines).encode("utf-8"))
+
+
+def test_metadata_parse_keeps_one_value_per_frame():
+    short_term, peaks, integrated = ld._parse_metadata(
+        _metadata([(-20.0, "-6.0"), (-30.0, "-12.5"), (-25.0, "-9.25")]))
+    assert short_term.tolist() == [-20.0, -30.0, -25.0]
+    assert peaks.tolist() == [-6.0, -12.5, -9.25]
+    assert integrated == -16.0
+
+
+def test_metadata_parse_reads_silence_as_the_lowest_peak():
+    # 無音frameのPeak_levelは-inf、streamの端ではnanが出る。どちらもfloat()に渡すと
+    # infやnanになり、以降の演算(窓最大・引き算)を丸ごと汚す。
+    _, peaks, _ = ld._parse_metadata(_metadata([(-70.0, "-inf"), (-70.0, "nan")]))
+    assert peaks.tolist() == [-120.0, -120.0]
+
+
+def _flat(value, n):
+    return np.full(n, float(value))
+
+
+def test_the_curve_never_lets_the_peak_pass_the_ceiling():
+    # 天井の保証は「窓が自分自身のframeを含む中心揃えの最大」と「slewが値を下げる向きにしか
+    # 動かさない」ことから来る。実装ではなくこの性質を突く: 静かなのにpeakだけ立つ区間を
+    # 混ぜても、適用後が天井を超えてはならない。
+    rng = np.random.default_rng(20260829)
+    short_term = rng.uniform(-45.0, -10.0, 600)
+    peaks = rng.uniform(-40.0, 0.5, 600)
+    gains = ld.build_curve(short_term, peaks, -16.0, _PARAMS)
+    assert (peaks + gains).max() <= _PARAMS["ceiling_dbfs"] + 1e-9
+
+
+def test_the_curve_moves_no_faster_than_the_slew_allows():
+    rng = np.random.default_rng(11)
+    short_term = rng.uniform(-50.0, -5.0, 400)
+    gains = ld.build_curve(short_term, _flat(-30.0, 400), -16.0, _PARAMS)
+    steps = np.diff(gains)
+    assert steps.max() <= ld.RELEASE_DB_PER_SECOND * ld.STEP_SECONDS + 1e-9
+    assert -steps.min() <= ld.ATTACK_DB_PER_SECOND * ld.STEP_SECONDS + 1e-9
+
+
+def test_a_pause_holds_the_gain_instead_of_lifting_the_room_tone():
+    # gateを外すと、間や暗騒音まで目標へ持ち上がって「呼吸」が出る。静かな区間の前後で
+    # gainが動かないことを見る(相対gateは統合ラウドネス-10 LU = -26 LUFS)。
+    short_term = _flat(-20.0, 300)
+    short_term[120:180] = -60.0
+    gains = ld.build_curve(short_term, _flat(-30.0, 300), -16.0, _PARAMS)
+    assert gains[130:170] == pytest.approx(gains[110], abs=1e-9)
+
+
+def test_a_silent_recording_is_left_alone():
+    # 揃える相手が居ない。0 dB以外を返すと、無音を最大まで持ち上げて暗騒音だけが鳴る。
+    gains = ld.build_curve(_flat(-120.691, 100), _flat(-120.0, 100), -70.0, _PARAMS)
+    assert gains.tolist() == [0.0] * 100
+
+
+def test_the_curve_lifts_a_quiet_recording_toward_the_target():
+    short_term = _flat(-30.0, 400)
+    gains = ld.build_curve(short_term, _flat(-40.0, 400), -30.0, _PARAMS)
+    # 目標まで16 dB要るが上限で12 dBに切られる。切られたことは値そのもので確かめる。
+    assert gains.max() == pytest.approx(_PARAMS["max_boost_db"])
+
+
+def test_the_curve_is_measured_at_the_middle_of_the_short_term_window():
+    # ebur128のSは[t-3s, t]の値なので、戻さないと曲線が常に1.5秒遅れる。音が大きくなる
+    # 地点でgainが下がり切っている位置を見る(どちらのlevelもgateの内側に置く)。
+    short_term = _flat(-20.0, 600)
+    short_term[300:] = -10.0
+    gains = ld.build_curve(short_term, _flat(-60.0, 600), -16.0, _PARAMS)
+    lag = int(round(ld.SHORT_TERM_SECONDS / 2 / ld.STEP_SECONDS))
+    # 窓の中心へ戻せば、Sが動く1.5秒前には既に下がり切っている。戻さない実装ではこの地点は
+    # まだ降下の途中で、-4.0には達しない。
+    assert gains[300 - lag] == pytest.approx(-4.0)
+    assert gains[0] == pytest.approx(6.0)
+
+
+def test_gain_cache_roundtrip_and_invalidation(make_recording):
+    _, mp4 = make_recording()
+    result = {"step_seconds": ld.STEP_SECONDS, "duration_seconds": 0.4,
+              **{k: round(v, 3) for k, v in _PARAMS.items()},
+              "integrated_lufs": -16.0, "gains": [0.0, 1.0, 2.0, 2.0]}
+    ld._store_cache(mp4, result)
+    loaded = ld._load_cache(mp4, _PARAMS)
+    assert loaded["gains"] == result["gains"]
+    assert loaded["duration_seconds"] == 0.4
+
+    mp4.write_bytes(bytes(999))
+    assert ld._load_cache(mp4, _PARAMS) == {}
+
+
+def test_gain_cache_is_rejected_when_the_target_changed(make_recording):
+    # 目標を変えたのに前の曲線を返すと、設定を変えても音が変わらない。
+    _, mp4 = make_recording()
+    ld._store_cache(mp4, {"step_seconds": ld.STEP_SECONDS, "duration_seconds": 0.1,
+                          **{k: round(v, 3) for k, v in _PARAMS.items()},
+                          "integrated_lufs": -16.0, "gains": [0.0]})
+    assert ld._load_cache(mp4, _PARAMS)
+    assert ld._load_cache(mp4, {**_PARAMS, "target_lufs": -16.0}) == {}
+
+
+def test_the_measurement_prints_metadata_from_a_single_filter():
+    # ametadataを2本並べて同じstdoutへ流すと、filterごとに別のbufferを持つため行が途中で
+    # 混ざる(frame:568level=-27.9 という壊れた行を実際に踏んだ)。1本であることを固定する。
+    source = types.SimpleNamespace(path=pathlib.Path("x.mp4"), input_args=())
+    chain = ld._measure_args(source)[ld._measure_args(source).index("-af") + 1]
+    assert chain.count("ametadata") == 1
+    assert "measure_overall=Peak_level" in chain
+    assert f"asetnsamples=n={int(ld.MEASURE_RATE * ld.STEP_SECONDS)}" in chain
 
 
 # --------------------------------------------------------------------------- clipper

@@ -266,7 +266,8 @@ async def compute_clip_candidates(recording_id: int) -> dict:
     window_buckets = spike.window_bucket_count(bucket_seconds, window_seconds)
     path = files._resolved_recording_path(recording)
     to_pts = await asyncio.to_thread(
-        indexer.build_time_mapper_sync, path, started_at, ended_at)
+        indexer.build_time_mapper_sync, path, started_at, ended_at,
+        indexer.mapper_video_duration(path, recording))
     # 指標は設定で増える(音声・映像・笑い)。要素数まで固定した型にすると、
     # 足すたびに型が変わったと言われる。
     metrics: tuple = spike.METRICS

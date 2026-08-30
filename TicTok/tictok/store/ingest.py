@@ -920,6 +920,7 @@ class IngestMixin:
             entry.get("content_language"),
             entry.get("comment_tag"),
             entry.get("extra"),
+            entry.get("message_id"),
         )
         # DB bufferへ積む前に耐久journalへ追記する。プロセスがこの直後に死んでも、eventは
         # diskに残り起動時recoverで復元できる(paramsはeventsの行tupleそのもの)。

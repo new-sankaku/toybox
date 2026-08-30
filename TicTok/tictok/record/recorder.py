@@ -91,6 +91,10 @@ _SEGMENT_NAME_MATCH = re.compile(fnmatch.translate(os.path.normcase("seg*.ts")))
 # the collector restarting the recording on websocket reconnect.
 RECONNECT_DELAY_MAX = 30
 
+# 源の測定(_probe_source)を最後に走らせた時刻。unique_id別。失敗した録画は復旧loopが
+# 約1分ごとに作り直すので、Recorder instanceの外で覚えないと同じ測定を毎回繰り返す。
+_source_probe_at: dict = {}
+
 # A glitched source timestamp can inflate a single HLS segment's media span
 # (EXTINF) far beyond the real wall-clock time it took to capture, baking a
 # phantom gap (a multi-minute frozen frame) into the concatenated mp4 and
@@ -1035,6 +1039,7 @@ def relocatable_artifact_paths(src) -> list:
 
     importが関数内なのは、video_overlay/upscale/thumbnails/waveformがこのmoduleを
     import しており、module levelで取ると循環するため。"""
+    from tictok.media.loudness import gain_artifact_paths
     from tictok.media.thumbnails import thumbnail_artifact_paths
     from tictok.media.waveform import waveform_artifact_paths
     from tictok.record.upscale import upscale_artifact_paths
@@ -1047,6 +1052,7 @@ def relocatable_artifact_paths(src) -> list:
         timing_path(src),
         *thumbnail_artifact_paths(src),
         *waveform_artifact_paths(src),
+        *gain_artifact_paths(src),
     ]
 
 
@@ -1452,6 +1458,7 @@ class Recorder:
                 await self._terminate(proc)
                 if self._stop_requested or attempt >= MAX_LAUNCH_ATTEMPTS:
                     if not self._has_segments():
+                        probe = {} if self._stop_requested else await self._probe_source(url)
                         logger.error(
                             "%s の録画が %d 回の試行でも安定しませんでした",
                             self.unique_id, attempt,
@@ -1461,6 +1468,7 @@ class Recorder:
                                            "min_segments": MIN_SEGMENTS,
                                            "segments": self._segment_count(),
                                            "stop_requested": self._stop_requested,
+                                           **probe,
                                            **ffmpeg_ctx(self._capture_args, proc.returncode, log_path)}},
                         )
                         raise RuntimeError(
@@ -1548,6 +1556,62 @@ class Recorder:
             raise
         finally:
             log_file.close()
+
+    async def _probe_source(self, url: str) -> dict:
+        """1 segmentも書けずに終わったとき、源が今何を返しているのかを一度だけ測る。
+
+        捕捉は -loglevel warning で走らせるため、この型の失敗(接続は張れているのにpacketが
+        来ない)ではstderrが空のまま終わり、後から原因を絞れない。同じ入力を短時間 ``-f null``
+        へ流してinfo段を吐かせ、失敗logへ畳み込む。frameが0なら源が出していない、frameが
+        立つのにsegmentが無いならこちら側(muxer/keyframe待ち)、と読み分けられる。
+
+        測定は配信者ごとに間引く。復旧loopは失敗を約1分ごとに繰り返すので、毎回測るとその
+        ぶん復帰が遅れ、同じ内容がlogへ積み上がる。"""
+        seconds = config.get_record_source_probe_seconds()
+        if seconds <= 0 or self.hls_dir is None:
+            return {}
+        interval = config.get_record_source_probe_interval_seconds()
+        now = time.time()
+        last = _source_probe_at.get(self.unique_id)
+        if last is not None and now - last < interval:
+            return {"probe_skipped": "throttled",
+                    "probe_last_seconds_ago": round(now - last, 1)}
+        _source_probe_at[self.unique_id] = now
+        args = [
+            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "info", "-nostats",
+            # 源が黙り込んだ場合にffmpeg自身で切り上げさせる。これが無いと、取得できない
+            # ことの確認に外側のtimeoutぶんだけ復帰を待たせる。
+            "-rw_timeout", str(int(seconds * 1_000_000)),
+            "-analyzeduration", "10M", "-probesize", "10M",
+            "-i", url,
+            "-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy",
+            "-t", f"{seconds:g}", "-f", "null", "-",
+        ]
+        log_path = self.hls_dir / "probe.ffmpeg.log"
+        started = time.time()
+        timed_out = False
+        try:
+            with open(log_path, "wb") as log_file:
+                proc = await asyncio.create_subprocess_exec(
+                    *args,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=log_file,
+                )
+        except OSError as exc:
+            return {"probe_error": str(exc)}
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=seconds * 3 + 10)
+        except asyncio.TimeoutError:
+            timed_out = True
+            await self._terminate(proc)
+        tail = tail_text(log_path, config.get_log_source_probe_chars())
+        log_path.unlink(missing_ok=True)
+        return {"probe_cmd": " ".join(args),
+                "probe_exit_code": proc.returncode,
+                "probe_elapsed_seconds": round(time.time() - started, 1),
+                "probe_timed_out": timed_out,
+                "probe_stderr_tail": tail}
 
     async def _await_healthy(self, proc: asyncio.subprocess.Process) -> bool:
         for _ in range(HEALTHY_WAIT_SECONDS):

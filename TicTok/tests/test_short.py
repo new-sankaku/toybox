@@ -100,7 +100,7 @@ def recording(server, monkeypatch):
     monkeypatch.setattr(storage, "session_buckets",
                         lambda sid, start=None, end=None: rows)
     monkeypatch.setattr(server.indexer, "build_time_mapper_sync",
-                        lambda src, started_at, ended_at: (lambda t: t - started_at))
+                        lambda src, started_at, ended_at, video_duration=None: (lambda t: t - started_at))
 
     async def _duration(src, input_args=()):
         return float(BUCKET_SECONDS * BUCKET_COUNT)

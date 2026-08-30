@@ -135,7 +135,7 @@ def recording(server, monkeypatch):
     # wall-clock -> 動画時間。実mapperはtiming anchorを読むので、ここでは録画開始からの
     # 経過秒という素の対応にしておく(窓の写し先が読める形であることが要点)。
     monkeypatch.setattr(server.indexer, "build_time_mapper_sync",
-                        lambda src, started_at, ended_at: (lambda t: t - started_at))
+                        lambda src, started_at, ended_at, video_duration=None: (lambda t: t - started_at))
 
     async def _duration(src, input_args=()):
         return float(BUCKET_SECONDS * BUCKET_COUNT)

@@ -40,6 +40,7 @@ from tictok.core.config import (ConfigError, get_asset_prefetch_concurrency,
     get_avatar_fetch_backoff_seconds, get_avatar_fetch_concurrency, dotenv_summary,
     get_db_path, get_job_retention_seconds, get_websocket_send_timeout_seconds,
     validate_env)
+from tictok.collect.collector import sign_key_summary
 from tictok.collect.manager import CollectorManager
 from tictok.core import ops_labels
 from tictok.core.process_lock import ProcessLock, ProcessLockError
@@ -369,6 +370,16 @@ logger.info(
     "環境設定fileを読み込みました（存在=%s 適用=%d件）",
     dotenv_summary()["present"], dotenv_summary()["applied"],
     extra={"event": "process.dotenv_loaded", "ctx": dotenv_summary()},
+)
+# sign server(EulerStream)の素性も同じ理由でここで報告する。keyの適用はcollectorの
+# module importで走り、その時点ではhandlerがまだ無い(実際 sign_key_configured は全logに
+# 1件も残っていなかった)。keyed / anonymous のどちらで動いているかは、sign requestの
+# 失敗を読むときの前提そのものなので、起動logに1行残す。
+logger.info(
+    "sign server: key=%s 接続先=%s",
+    "設定済み" if sign_key_summary()["configured"] else "未設定(anonymous tier)",
+    sign_key_summary()["sign_url"],
+    extra={"event": "process.sign_key_state", "ctx": sign_key_summary()},
 )
 # 読み込んだ環境変数が値として使えるかを、ここで全件まとめて確かめる。個々のgetterは呼ばれた
 # 時点で例外にするが、値の多くはmedia jobの実行中にしか読まれないので、.envの1文字の誤りが

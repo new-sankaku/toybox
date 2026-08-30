@@ -6,10 +6,13 @@ from tictok.core import cancel as cancel_mod
 from tictok.core.battle import (
     BATTLE_RESULT_REPORTED,
     BATTLE_RESULT_SETTLED,
+    BATTLE_PUNISH_MAX_SECONDS,
     BATTLE_SETTLE_GRACE_SECONDS,
     annotate_result,
     battle_sides,
     battle_type,
+    opponent_hosts,
+    punish_window_end,
     resolve_result,
     result_from_scores,
     settled_scores,
@@ -74,6 +77,40 @@ def test_battle_type_untagged_participants_do_not_break_personal_detection():
     # team_id を持たない参加者は判定母集団から外れる(roster が埋まる途中)。
     parts = [_p("11", team_id="11", own=True), _p("22")]
     assert battle_type(parts) == "personal"
+
+
+# ------------------------------------------------------------- opponent_hosts
+
+
+def test_opponent_hosts_drops_teammates_from_the_opponent_list():
+    """anchor_infoは陣営を名乗らないので、収集時のopponentsには味方hostも入る。陣営が
+    確定するのはparticipantsなので、読み出し時にそちらで濾す。"""
+    battle = {
+        "participants": [
+            _p("11", own=True), _p("22", team_id="1"), _p("33", team_id="2"),
+        ],
+        "opponents": [
+            {"user_id": "22", "nickname": "味方"},
+            {"user_id": "33", "nickname": "相手"},
+        ],
+    }
+    battle["participants"][1]["side"] = "own"
+    assert [o["nickname"] for o in opponent_hosts(battle)] == ["相手"]
+
+
+def test_opponent_hosts_leaves_records_without_sides_alone():
+    """陣営が判らない古い記録から相手を落とすと、本物の相手まで消える。"""
+    battle = {"participants": [], "opponents": [{"user_id": "22"}]}
+    assert opponent_hosts(battle) == [{"user_id": "22"}]
+
+
+def test_annotate_result_filters_the_opponent_list():
+    battle = {
+        "result": "win", "own_score": 10, "opp_score": 5, "end_time": None,
+        "participants": [_p("11", own=True), {"user_id": "22", "side": "own"}],
+        "opponents": [{"user_id": "22"}],
+    }
+    assert annotate_result(battle)["opponents"] == []
 
 
 # --------------------------------------------------------------- battle_sides
@@ -246,6 +283,37 @@ def test_annotate_result_leaves_scores_alone_when_not_settled():
     assert battle["result"] == "win"
     assert battle["result_basis"] == BATTLE_RESULT_REPORTED
     assert battle["result_reason"] == "aborted"
+
+
+# ---------------------------------------------------------- punish_window_end
+
+def test_punish_window_uses_the_measured_finish_event():
+    """終わりの合図(punish_end_time)が録れていればそれが実測値。"""
+    battle = {"end_time": 1000.0, "punish_end_time": 1090.0}
+    assert punish_window_end(battle, [500.0]) == 1090.0
+
+
+def test_punish_window_falls_back_to_the_measured_ceiling():
+    """合図が無ければ実測上限(180秒)まで。無制限に開けない。"""
+    assert punish_window_end({"end_time": 1000.0}, []) == 1000.0 + BATTLE_PUNISH_MAX_SECONDS
+
+
+def test_punish_window_closes_at_the_next_battle():
+    """次のPKが始まれば演出はそこで打ち切られる(合図が届かない戦の大半がこれ)。"""
+    assert punish_window_end({"end_time": 1000.0}, [900.0, 1050.0, 2000.0]) == 1050.0
+
+
+def test_punish_window_never_outlives_the_next_battle_even_when_measured():
+    """実測値が次戦の開始を越えることは無いが、越えていれば次戦を優先する
+    (2つのPKの窓が重なると、同じ瞬間に2戦が出せてしまう)。"""
+    battle = {"end_time": 1000.0, "punish_end_time": 1200.0}
+    assert punish_window_end(battle, [1100.0]) == 1100.0
+
+
+def test_punish_window_is_none_for_unfinished_and_aborted_battles():
+    """進行中と不成立には勝利時間そのものが無い。"""
+    assert punish_window_end({"end_time": None}, []) is None
+    assert punish_window_end({"end_time": 1000.0, "aborted": True}, []) is None
 
 
 # -------------------------------------------------------- window_bucket_count

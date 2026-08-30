@@ -534,6 +534,10 @@ class MaintenanceMixin:
             # いるのに読んでいなかった値を捨てないための受け皿で、意味が確定した項目は
             # 個別の列へ昇格させる。既存行はNULL=計装前の未計測。
             ("extra", "TEXT"),
+            # TikTokがmessage 1件ごとに振る一意のid。接続のたびに届き直す遡り分を
+            # 判別する鍵(tictok/collect/dedup.py)。既存行はNULL=計装前の未計測で、
+            # 後から埋める手は無い(TikTokからしか得られない値である)。
+            ("message_id", "INTEGER"),
         ):
             if name not in columns:
                 # backfillはしない。既存行は「計装前で未計測」であって「不明と観測した」
@@ -592,6 +596,22 @@ class MaintenanceMixin:
             "CREATE INDEX IF NOT EXISTS idx_events_kind_identity"
             " ON events(kind, identity_key, diamonds, session_id, time)"
         )
+        # 接続時の遡りの二重記録を止める一意制約(_events_insert_sql の ON CONFLICT が
+        # ここを指す)。部分indexにしてあるので、message_idを持たない行 — collector自身が
+        # 書くsystem eventと、計装前の既存120万行 — は1件もindexへ載らない。
+        #
+        # kindを鍵に含めるのは、1つのmessageが複数のkindの行を生む形が将来現れても、
+        # 片方を黙って捨てないためである(同じmessageから同じkindの行が2つ出るのは
+        # 遡りの二重記録だけで、これが落としたい相手そのものである)。
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_message"
+            " ON events(session_id, kind, message_id) WHERE message_id IS NOT NULL"
+        )
+        # 接続時の遡りで二重に記録された既存行の掃除。message_id列より前に入った行が
+        # 対象なので、一度きりで済む(以後はdedupと一意制約が入口で止める)。
+        if not self._migration_done("purge_connect_backlog_dupes_v1"):
+            self._purge_connect_backlog_dupes()
+            self._mark_migration("purge_connect_backlog_dupes_v1")
         # 逆引き補完 + users表再構成。identity_key列が既にある旧migration適用済みDBにも
         # 一度だけ効かせるため、column追加とは独立にsettings markerで管理する。
         if not self._migration_done("reverse_link_v1"):
@@ -1374,6 +1394,67 @@ class MaintenanceMixin:
                    "ctx": {"dropped": dropped, "vacuum_required": True}},
         )
         return {"dropped": True, "dropped_columns": dropped, "vacuum_required": True}
+
+    # 遡りの二重記録を判定する列。message_idを持たない既存行を畳む唯一の手であり、
+    # **これはmessage_idの代わりではない。** 一致を要求するのは create_time —— TikTokが
+    # そのmessageに打ったms精度の時刻 —— を含む組で、同じ人が同じ文を同じmilli秒に
+    # 二度送ることは無い。text単独や「近い時刻」で畳むと、同じ人が同じ短文("おは"等)を
+    # 続けて送った本物のCommentが消える。
+    _BACKLOG_DUPE_KEY = ("session_id", "kind", "user_id", "text", "create_time")
+
+    def _purge_connect_backlog_dupes(self) -> None:
+        """接続時の遡りで二重に記録された既存行を、session内で最古の1件へ畳む。lock保持前提。
+
+        TikTokは接続のたびにRoomの直近messageを送り直す。message_id列が入るまでは
+        受け側にそれを判別する鍵が無く、配信の開始時と切断からの復帰時に同じ行が積まれて
+        いた(実測: comment 202,654件中3,201件、1配信で同一commentが最大20行)。
+
+        session内に限るのは、どの行を残すかが自明だからである。session跨ぎの重複(実測
+        369件)は「どちらのsessionの出来事だったか」の判断を伴う —— 消せばもう一方の
+        sessionの集計が動く —— ので、ここでは触れない。
+
+        削った後のsessionは stats_json / buckets / 解析cacheが行数と食い違うため、
+        journalからの復元と同じ順で作り直す。解析cacheだけは行を消すに留める:
+        再計算はread専用接続を使う_ensure_analytics_cacheの仕事で、migrationの途中で
+        commitを挟まずに済む。
+        """
+        keys = self._BACKLOG_DUPE_KEY
+        # NULL同士を等しいと見るために比較は IS を使う(GROUP BY の畳み方と揃える)。
+        join_on = " AND ".join(f"e.{col} IS d.{col}" for col in keys)
+        dupes = (
+            "SELECT e.id AS id, e.session_id AS session_id FROM events e"
+            f" JOIN (SELECT {', '.join(keys)}, MIN(id) AS keep_id FROM events"
+            "        WHERE create_time IS NOT NULL AND kind <> 'system'"
+            f"       GROUP BY {', '.join(keys)} HAVING COUNT(*) > 1) d"
+            f"  ON {join_on}"
+            " WHERE e.id <> d.keep_id"
+        )
+        rows = self._conn.execute(dupes).fetchall()
+        if not rows:
+            return
+        ids = [row["id"] for row in rows]
+        sessions = sorted({row["session_id"] for row in rows})
+        started = time.time()
+        self._conn.executemany("DELETE FROM events WHERE id = ?", [(i,) for i in ids])
+        self._conn.executemany(
+            "DELETE FROM analytics_session_cache WHERE session_id = ?",
+            [(sid,) for sid in sessions],
+        )
+        for sid in sessions:
+            row = self._conn.execute(
+                "SELECT bucket_seconds FROM sessions WHERE id = ?", (sid,)
+            ).fetchone()
+            if row is None:
+                continue
+            self._recompute_session_stats_locked(sid, provenance="deduplicated")
+            self._rebuild_buckets_locked(sid, row["bucket_seconds"])
+        logger.info(
+            "接続時の遡りで二重に記録されていた event %d 行を削除し、session %d 件の"
+            "集計・timeline・解析cacheを作り直しました（%.1f秒）",
+            len(ids), len(sessions), time.time() - started,
+            extra={"event": "storage.backlog_dupes_purged",
+                   "ctx": {"rows": len(ids), "sessions": len(sessions)}},
+        )
 
     def _migration_done(self, name: str) -> bool:
         row = self._conn.execute(

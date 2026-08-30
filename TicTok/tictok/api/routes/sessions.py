@@ -66,6 +66,214 @@ async def list_sessions(limit: Optional[int] = None) -> dict:
     }
 
 
+# マージ表示で一度に選べるSession数の上限。DeleteUsersRequestと同じ考えで、URLと
+# 1requestの読み取り量が青天井にならないところで止める。
+MERGE_MAX_SESSIONS = 500
+
+# 合算できる集計。最大同接だけは合算ではなくMAX(同時に居た人数は足し算にならない)。
+MERGE_SUM_STATS = (
+    "gifts", "diamonds", "comments", "likes_total", "follows",
+    "shares", "joins", "battles", "battle_points",
+)
+MERGE_MAX_STATS = ("viewers_peak",)
+
+
+def _parse_session_ids(ids: str) -> list:
+    """``?ids=1,2,3`` を重複なしのint列にする。並びは指定順を保つ。"""
+    parsed: list = []
+    seen: set = set()
+    for chunk in (ids or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            value = int(chunk)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Session idが数値ではありません: {chunk}")
+        if value not in seen:
+            seen.add(value)
+            parsed.append(value)
+    if not parsed:
+        raise HTTPException(status_code=400, detail="Session idが指定されていません。")
+    if len(parsed) > MERGE_MAX_SESSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"一度にマージできるSessionは{MERGE_MAX_SESSIONS}件までです。",
+        )
+    return parsed
+
+
+def _merged_stats(sessions: list) -> dict:
+    """選択したsessionの通算。最大同接はMAX、収集時間は各sessionの長さの合算。
+
+    平均同接はここに出さない。あれは階段保持積分で宝箱窓を除いて出す値で、session跨ぎでは
+    積分をやり直さないと出せない — 各sessionの平均を平均すると、長さの違うsessionが同じ
+    重みで混ざった別物になる。"""
+    stats = {key: 0 for key in MERGE_SUM_STATS}
+    for key in MERGE_MAX_STATS:
+        stats[key] = 0
+    duration = 0.0
+    for session in sessions:
+        source = session.get("stats") or {}
+        for key in MERGE_SUM_STATS:
+            stats[key] += source.get(key) or 0
+        for key in MERGE_MAX_STATS:
+            stats[key] = max(stats[key], source.get(key) or 0)
+        if session.get("ended_at"):
+            duration += max(0.0, session["ended_at"] - session["started_at"])
+    stats["duration"] = duration
+    return stats
+
+
+def _merge_sessions_or_404(session_ids: list) -> list:
+    """指定順のsession行。収集中のsessionはlive collectorのstatsで上書きする
+    (stats_jsonはfinalizeでしか書かれないため、そのままでは古い値が混ざる)。"""
+    sessions = [runtime._get_session_or_404(session_id) for session_id in session_ids]
+    active = runtime.manager.active_session_ids()
+    for session in sessions:
+        if session["id"] not in active:
+            continue
+        collector = runtime.manager.get(session["unique_id"])
+        if collector is not None and collector.session_id == session["id"]:
+            session["stats"] = collector.stats
+    return sessions
+
+
+@router.get("/api/sessions/merged")
+async def merged_sessions(ids: str) -> dict:
+    """複数sessionをまとめて1つの詳細として返す。
+
+    ``/api/sessions/{session_id}`` より前に置くこと。後ろに置くと "merged" が
+    ``session_id: int`` に食われて422になる。
+
+    timelineは返さない。bucketは絶対時刻を持つので、別日のsessionを1本の軸へ並べても
+    大半が空白になる。画面側もマージ中はSession Timelineを出さない。"""
+    session_ids = _parse_session_ids(ids)
+    sessions = await asyncio.to_thread(_merge_sessions_or_404, session_ids)
+
+    # 貢献集計・録画・コラボはどれも同期のDB/filesystem読み。session数ぶん並ぶので、
+    # 素のまま置くとevent loopをその間ずっと掴む(session_detailと同じ理由)。
+    def _read() -> dict:
+        transcribed = runtime.storage.transcribed_recording_ids()
+        recordings: list = []
+        collabs: list = []
+        for session in sessions:
+            for rec in runtime.storage.recordings_for_session(session["id"]):
+                rec["has_transcript"] = rec["id"] in transcribed
+                rec["has_output"] = fsfacts._output_done(rec.get("path"))
+                rec["has_up_output"] = bool(rec.get("path")) and upscale_done(Path(rec["path"]))
+                rec["media"] = files._recording_media_kinds(rec)
+                rec["file_exists"] = bool(rec["media"])
+                recordings.append(rec)
+            for window in runtime.storage.collab_windows_for_session(session["id"]):
+                window["session_id"] = session["id"]
+                collabs.append(window)
+        return {
+            "summary": _summary_with_gift_icons(
+                runtime.storage.sessions_summary([s["id"] for s in sessions])),
+            "recordings": recordings,
+            "collabs": collabs,
+        }
+
+    payload = await asyncio.to_thread(_read)
+    battles: list = []
+    for session in sessions:
+        owner = _session_owner(session)
+        for battle in await _battles_for_session(session):
+            # カードは自陣がどちらかをownerで決める。配信者を跨いだ選択では1つに
+            # 決まらないので、Battleごとにその配信者を連れて行く。
+            battle["session_id"] = session["id"]
+            battle["owner"] = owner
+            battles.append(battle)
+    return {
+        "sessions": sessions,
+        "stats": _merged_stats(sessions),
+        **payload,
+        "battles": battles,
+    }
+
+
+EVENT_EXPORT_COLUMNS = [
+    "time", "kind", "user_unique_id", "user_nickname", "comment", "text",
+    "gift_name", "gift_count", "diamonds", "like_count",
+]
+
+
+def _event_export_row(event) -> list:
+    return [
+        event["time"],
+        event["kind"],
+        event["user_unique_id"] or "",
+        event["user_nickname"] or "",
+        event["comment"] or "",
+        event["text"] or "",
+        event["gift_name"] or "",
+        event["gift_count"] if event["gift_count"] is not None else "",
+        event["diamonds"] if event["diamonds"] is not None else "",
+        event["count"] if event["count"] is not None else "",
+    ]
+
+
+@router.get("/api/sessions/merged/export.csv")
+async def export_merged_csv(ids: str) -> Response:
+    """選択したsessionのeventを1本のCSVに繋ぐ。どのsessionの行かは先頭2列で分かる
+    (単体exportと列が違うのは、混ざった行を区別できないと合算の検算ができないため)。"""
+    session_ids = _parse_session_ids(ids)
+    sessions = await asyncio.to_thread(_merge_sessions_or_404, session_ids)
+    events_by_session = await asyncio.to_thread(
+        lambda: [(s, runtime.storage.iter_events(s["id"])) for s in sessions])
+
+    def _rows():
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["session_id", "session_unique_id", *EVENT_EXPORT_COLUMNS])
+        yield "\ufeff" + buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
+        for session, events in events_by_session:
+            for event in events:
+                writer.writerow([session["id"], session["unique_id"], *_event_export_row(event)])
+                yield buffer.getvalue()
+                buffer.seek(0)
+                buffer.truncate(0)
+
+    filename = f"tictok_merged_{len(sessions)}sessions.csv"
+    return StreamingResponse(
+        _rows(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/api/sessions/merged/export.json")
+async def export_merged_json(ids: str) -> Response:
+    """マージ表示と同じ集計 + session別のevent。timelineは入れない(合算しない値なので、
+    file側にだけ在ると画面に無い軸を持ち込むことになる)。"""
+    session_ids = _parse_session_ids(ids)
+    sessions = await asyncio.to_thread(_merge_sessions_or_404, session_ids)
+
+    def _build() -> str:
+        payload = {
+            "sessions": sessions,
+            "stats": _merged_stats(sessions),
+            "summary": runtime.storage.sessions_summary([s["id"] for s in sessions]),
+            "events": [
+                {"session_id": s["id"], "session_unique_id": s["unique_id"],
+                 "events": runtime.storage.iter_events(s["id"])}
+                for s in sessions
+            ],
+        }
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    content = await asyncio.to_thread(_build)
+    filename = f"tictok_merged_{len(sessions)}sessions.json"
+    return Response(
+        content=content,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/api/sessions/{session_id}")
 async def session_detail(session_id: int) -> dict:
     session = await asyncio.to_thread(runtime._get_session_or_404, session_id)
@@ -281,27 +489,12 @@ async def export_session_csv(session_id: int) -> Response:
     def _rows():
         buffer = io.StringIO()
         writer = csv.writer(buffer)
-        writer.writerow(
-            ["time", "kind", "user_unique_id", "user_nickname", "comment", "text", "gift_name", "gift_count", "diamonds", "like_count"]
-        )
+        writer.writerow(EVENT_EXPORT_COLUMNS)
         yield "\ufeff" + buffer.getvalue()
         buffer.seek(0)
         buffer.truncate(0)
         for event in events:
-            writer.writerow(
-                [
-                    event["time"],
-                    event["kind"],
-                    event["user_unique_id"] or "",
-                    event["user_nickname"] or "",
-                    event["comment"] or "",
-                    event["text"] or "",
-                    event["gift_name"] or "",
-                    event["gift_count"] if event["gift_count"] is not None else "",
-                    event["diamonds"] if event["diamonds"] is not None else "",
-                    event["count"] if event["count"] is not None else "",
-                ]
-            )
+            writer.writerow(_event_export_row(event))
             yield buffer.getvalue()
             buffer.seek(0)
             buffer.truncate(0)

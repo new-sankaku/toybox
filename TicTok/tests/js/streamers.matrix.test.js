@@ -106,6 +106,10 @@ describe("streamers.js の人×期間の一覧", () => {
     return Array.from(doc.querySelectorAll("#sm-gmx tbody tr"))
       .map((tr) => tr.querySelector(".u-name").textContent);
   }
+  function ranks() {
+    return Array.from(doc.querySelectorAll("#sm-gmx tbody tr"))
+      .map((tr) => (tr.querySelector(".sm-mx-rank") || {}).textContent || "");
+  }
   function cellsOf(rowIndex) {
     return Array.from(doc.querySelectorAll("#sm-gmx tbody tr")[rowIndex]
       .querySelectorAll("td.sm-mx-cell")).map((td) => td.textContent);
@@ -141,6 +145,17 @@ describe("streamers.js の人×期間の一覧", () => {
     // 2つの表が同じ窓を見ているときは1回の応答を分け合う。1回の応答に両方の一覧が
     // 入っているので、別々に投げるとserver側で同じ集計を2度走らせることになる。
     expect(page.calls.fetches.filter((f) => f.url.includes("/matrix"))).toHaveLength(1);
+  });
+
+  it("通算・伸びで並べたときも順位を名前の左に出す", async () => {
+    await loadMatrix({ [URL_DAY]: MATRIX });
+    expect(ranks()).toEqual(["1", "2"]);
+    clickHead("伸び");
+    expect(rowNames()).toEqual(["FAN02", "FAN01"]);
+    expect(ranks()).toEqual(["1", "2"]);
+    // 昇順では1位が最下位になるので、順位は付けない。
+    clickHead("伸び");
+    expect(ranks()).toEqual(["", ""]);
   });
 
   it("出していない古い期間と、切った人数を名乗る", async () => {

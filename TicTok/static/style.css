@@ -26,6 +26,12 @@
   --ok-ink: #404e30;
   /* ★等の「登録済み」を金色系で示す文字用途。--bonus(明色)は明地で4.5:1に届かない。 */
   --gold-ink: #654304;
+  /* 機械が「ここを切り抜く価値がある」と推した行の印。押せる(--accent)・危ない(--warn)・
+     登録済み(--gold-ink)・量(--ramp)のどれとも別の役で、「推し」だけを表す。既存の役が
+     使っていない紫へ置く。--pickは装飾(左の縦線・canvasの帯)、--pick-inkは明地の文字用
+     (--sand-panel上5.6:1 / --sand-panel-muted上5.0:1で、--warn-inkと同程度)。 */
+  --pick: #7c4d9e;
+  --pick-ink: #5d2f80;
   /* 暗地(--invert-bg / 黒地)に載る文字用。--*-inkは明地専用の暗色なので、暗地へ置くと
      地色とほぼ同じ明度になり読めない。暗地側は必ずこの*-brightを使い4.5:1を確保する。 */
   --ok-bright: #b2c0a2;
@@ -495,12 +501,6 @@ body {
   margin-bottom: 0.8rem;
 }
 
-.note-block {
-  margin-top: 0.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
 
 .note-input {
   font: inherit;
@@ -1259,6 +1259,20 @@ select optgroup, select option {
   color: var(--warn-ink);
   font-weight: 700;
 }
+
+/* 切り抜き候補の行(機械が推した見どころ)。危ない行と同じ組みで色だけ替える ―― 左の縦線と、
+   そう判断した根拠の列(出所)だけを塗る。行全体を塗ると、選択中(--invert-bgの塗り)と
+   ぶつかって「選ばれている」が読めなくなる。 */
+.result-table .row-pick td:first-child {
+  box-shadow: inset 0.2rem 0 0 var(--pick);
+}
+.result-table .row-pick td.mark-origin {
+  color: var(--pick-ink);
+  font-weight: 700;
+}
+/* 出所の名乗りは折り返させない。「切り抜き候補」だけが2行に割れると、その行の背だけが
+   倍になって一覧を目で追えなくなる(行の高さは読む側の手掛かりで、行ごとに変えない)。 */
+.result-table td.mark-origin { white-space: nowrap; }
 
 /* 数値列の背後に敷く占有bar。量の大小を色ではなく長さで示す。割合はrenderTableRowsの
    barColsが --q として渡す(その列の最大値を1とする)。barは「その表の中での相対」で、
@@ -2464,12 +2478,12 @@ select optgroup, select option {
   border: 1px solid var(--accent-deep); border-radius: 0.4em;
   background: var(--sand-panel-muted); color: var(--accent-ink);
 }
-#detail-modal .u-league { font-size: 0.9rem; }
-/* 履歴詳細はGLv/MLvバッジを少し拡大して視認性を上げる(余白のあるModal向け)。数値は
+#detail-dock .u-league { font-size: 0.9rem; }
+/* 履歴詳細はGLv/MLvバッジを少し拡大して視認性を上げる(余白のあるdock向け)。数値は
    アイコンと釣り合う程度に留め、突出して大きくならないようにする。 */
-#detail-modal .u-badge { height: 1.2em; }
-#detail-modal .u-badge-lv { font-size: 0.8rem; }
-#detail-modal .u-lv { font-size: 0.75rem; }
+#detail-dock .u-badge { height: 1.2em; }
+#detail-dock .u-badge-lv { font-size: 0.8rem; }
+#detail-dock .u-lv { font-size: 0.75rem; }
 
 /* ---- 全体監視: 集計バー + 高密度タイル ---- */
 .a-summary {
@@ -2584,6 +2598,8 @@ select optgroup, select option {
 .tb-host.own .tb-host-score { color: var(--ok-ink); }
 .tb-host.opp .tb-host-score { color: var(--warn-ink); }
 .tb-host-cnt { flex: 0 0 auto; font-size: 0.58rem; color: var(--ink-muted); }
+/* 宛先hostの判らない貢献の見出し。配信者名の位置に入るが人ではないので、名前の色は使わない。 */
+.tb-host-unattr { flex: 1 1 auto; min-inline-size: 0; font-size: 0.6rem; color: var(--ink-muted); }
 .tile-battle .tb-c { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; font-size: 0.6rem; padding-inline-start: 0.4rem; }
 .tile-battle .tb-c .u { min-inline-size: 0; overflow: hidden; }
 .tile-battle .tb-c .tb-d { flex: 0 0 auto; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
@@ -2693,10 +2709,13 @@ select optgroup, select option {
 .x-chartstack.hidden { display: none; }
 .x-chartstack > .x-cs-pane { position: relative; min-block-size: 0; flex: 1 1 0; }
 .x-chartstack > .x-cs-pane.lead { flex: 1.6 1 0; }
+/* 従属の段(移動平均だけを引く段)。主指標と同じ高さを取ると、均した線のためだけに
+   1枚ぶんの縦を食う。 */
+.x-chartstack > .x-cs-pane.thin { flex: 1.1 1 0; }
 .x-chartstack > .x-cs-pane > canvas { position: absolute; inset: 0; }
 /* 4枚積むstack。2枚ぶんの高さのまま増やすと1枚が数remまで痩せて、線の形も棒の高低も
    読めなくなる。枚数に見合う高さを与える(上限は画面の縦を食い潰さない範囲)。 */
-.x-chartstack.x-cs-tall { block-size: clamp(32rem, 68vh, 48rem); }
+.x-chartstack.x-cs-tall { block-size: clamp(35rem, 74vh, 52rem); }
 
 /* ---- Battle 詳細（battle.html / 監視Battleタブ） ---- */
 /* PK応援パネル(進行中PKのスコア差+応援コメントのコピー) */
@@ -2880,6 +2899,9 @@ select optgroup, select option {
 .bch-host.own .bch-host-score { color: var(--ok-ink); }
 .bch-host.opp .bch-host-score { color: var(--warn-ink); }
 .bch-host-cnt { flex: 0 0 auto; font-size: 0.66rem; color: var(--ink-muted); }
+.bch-host-unattr { flex: 1 1 auto; min-inline-size: 0; font-size: 0.68rem; color: var(--ink-muted); }
+/* 実弾を取得できていないhost。金額の位置に出るので、値と同じ強さで読ませない。 */
+.bch-host.own .bch-host-nocoin, .bch-host.opp .bch-host-nocoin { color: var(--ink-muted); }
 
 /* ---- 履歴: Session詳細モーダル ---- */
 .modal-overlay {
@@ -3059,27 +3081,158 @@ select optgroup, select option {
 .userdel-footer { display: flex; align-items: center; justify-content: flex-end; gap: 0.8rem; margin-top: 0.8rem; flex-wrap: wrap; }
 .userdel-footer .form-message { margin-inline-end: auto; }
 
-/* History 詳細モーダル: 主役グラフ → [ランキング｜Battle] → [録画｜Memo] */
-.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; align-items: start; margin-top: 0.9rem; }
-.detail-grid > section { margin-top: 0; min-inline-size: 0; }
-.detail-rankings { display: flex; flex-direction: column; gap: 0.8rem; }
-.detail-rankings .table-wrap { max-height: 28vh; }
-/* 録画｜Memo の段。Memoはrows=3のtextareaで縦に伸びないため、等分割だと右が
-   数百px空いたまま左の録画tableだけが潰れる。余りは録画側へ寄せる。
-   fr比だと窓を狭めた分だけMemoも一定割合を持ち続け、録画側の唯一の可変列(File名)が
-   先に潰れて2行になる。Memoは上限付きで頭打ちにし、残りは全て録画側へ渡す。
-   狭い窓では素の.detail-grid(auto-fit)に任せて1列へ畳む。 */
-@media (min-width: 60rem) {
-  .detail-grid-manage { grid-template-columns: minmax(0, 1fr) minmax(0, clamp(12rem, 20%, 20rem)); }
+/* ---- 履歴: Session詳細は画面下部へdockする ----
+   floating windowは一覧を覆うため、詳細を読みながら別のSessionへ移れなかった。
+   開いている間は一覧を上端の帯へ畳み(画面比15%)、閉じれば一覧が全高へ戻る。 */
+.x-dock {
+  flex: 1 1 auto;
+  display: flex;
+  min-block-size: 0;
+  /* 一覧との境目。地の明度差(--sand-bg → --sand-panel)だけでは表の続きに見えたので、
+     暗い構造線を1本引き、内側へ影を落として「別の面が手前にある」ことを示す。
+     線に--accentは使わない ―― あれは「押せる」の色で、区切りへ流用すると役が濁る。 */
+  border-top: 0.2rem solid var(--invert-bg);
+  box-shadow: inset 0 0.45rem 0.5rem -0.45rem var(--shadow);
+  background: var(--sand-panel);
 }
+.x-dock.hidden { display: none; }
+.x-dock-panel {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  min-block-size: 0;
+  padding: 0.5rem 1rem 0.6rem;
+}
+/* 見出し行は帯にする。地のまま文字だけ置くと一覧の続きに見えるため、この画面の他の帯
+   (a-topbar / a-kpibar / x-toolbar)と同じ地色にし、panelのpaddingぶん外へ広げて
+   左右の端まで届く1本にする。ここが「詳細はここから」の唯一の目印になる。 */
+.x-dock-panel > .modal-head {
+  margin: -0.5rem -1rem 0.6rem;
+  padding: 0.4rem 1rem;
+  background: var(--sand-bg-deep);
+  border-bottom: 1px solid var(--line);
+}
+/* 外側は転がさない。転がるのは表示中のcardの中だけ(理由は下の「History 詳細」の節)。 */
+.x-dock-panel > .modal-body { display: flex; flex-direction: column; overflow: hidden; }
+
+.dk-split { flex: 1 1 auto; display: flex; min-block-size: 0; min-inline-size: 0; }
+
+/* カテゴリの縦pane。帯を1行も増やさずにカテゴリ名を常時見せる場所で、
+   ここが「今どの区画を見ているか」の唯一の名乗りになる。 */
+.dk-rail {
+  flex: 0 0 clamp(5.5rem, 9%, 9rem);
+  display: flex;
+  flex-direction: column;
+  min-block-size: 0;
+  overflow-y: auto;
+  /* panelのpaddingぶん外へ広げて画面端まで届かせつつ、labelの左端は他の帯(1rem)へ揃える
+     (tabの左padding 0.7rem + ここ 0.3rem)。 */
+  margin-inline-start: -1rem;
+  padding: 0.2rem 0 0.2rem 0.3rem;
+  border-right: 1px solid var(--line);
+  background: var(--sand-panel-muted);
+}
+.dk-tab {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.3rem;
+  font: inherit;
+  font-size: 0.7rem;
+  text-align: left;
+  padding: 0.35rem 0.5rem 0.35rem 0.7rem;
+  border: 0;
+  border-left: 0.2rem solid transparent;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.dk-tab:hover { background: rgba(255, 250, 230, 0.32); }
+/* 選択中。一覧の選択行(.xtab tr.sel)・配信者一覧(.sm-item.sel)と同じ塗りにして、
+   この画面全体で「選ばれている物」の見え方を1つに揃える。 */
+.dk-tab[aria-current="true"] {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  border-left-color: var(--accent-deep);
+  color: var(--ink-strong);
+  font-weight: 700;
+}
+.dk-tab.hidden { display: none; }
+/* 中に何件あるかを名前の横へ。開かずに中身の有無が分かる。 */
+.dk-tab .dk-n { font-size: 0.62rem; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.dk-tab[aria-current="true"] .dk-n { color: var(--ink-strong); }
+
+.dk-panes { flex: 1 1 auto; min-inline-size: 0; min-block-size: 0; display: flex; padding-inline-start: 0.6rem; }
+.dk-pane { display: none; flex: 1 1 auto; min-inline-size: 0; min-block-size: 0; gap: 0.6rem; }
+.dk-pane.on { display: flex; }
+
+/* カテゴリの中の区画。見出しだけでは地に浮いて境が読めなかったので、面と見出し帯を持たせる。 */
+.dk-block {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  min-block-size: 0;
+  border: 1px solid var(--line);
+  background: var(--sand-panel);
+}
+.dk-block > .result-subtitle {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.3rem 0.6rem;
+  background: var(--sand-panel-muted);
+  border-bottom: 1px solid var(--line);
+}
+/* card内で転がるのはこの1枚だけ。max-heightは持たせない — 丈はcardが決める。 */
+.dk-block > .table-wrap,
+.dk-block > .bcards,
+.dk-block > .dk-body {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  max-height: none;
+  overflow: auto;
+  border: 0;
+}
+.dk-block > .dk-body { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.5rem 0.6rem; }
+.dk-block > .feed-empty, .dk-block > .dk-note { flex: 0 0 auto; }
+.dk-note { margin: 0; padding: 0.3rem 0.6rem; font-size: 0.66rem; color: var(--ink-muted); border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent); }
+/* Timelineはcardいっぱいに伸ばす。clamp(70vh)のままだとcardの中でもう一度転がる。 */
+.dk-pane[data-cat="timeline"] .chart-wrap { flex: 1 1 auto; block-size: auto; min-block-size: 0; border: 0; }
+/* Memoはcardの丈ぶん書ける。rows=3のままだと下が数百px空いたまま残る。 */
+.dk-pane[data-cat="memo"] .note-input { flex: 1 1 auto; min-block-size: 6rem; }
+/* 詳細を開いている間の一覧。%はapp-shell(100vh)基準なので画面比のまま畳む。
+   極端に低い窓でheaderごと消えないよう下限だけ持たせる。 */
+.app-dashboard.detail-docked .x-tablewrap { flex: 0 0 max(15%, 3rem); }
+/* 一覧が数行しか見えないので、今どのSessionを開いているかは行の塗りでしか分からない。
+   偶数行のstripe・hoverより後に置き、選択が消えないようにする。 */
+.xtab tbody tr.sel, .xtab tbody tr.sel:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+.xtab tbody tr[data-session-id] { cursor: pointer; }
+/* 行頭のマージ選択列。checkだけの列なので、幅は中身ぶんに詰めて他の列から奪わない。 */
+.xtab th.sel-th, .xtab td.sel-cell { inline-size: 1%; padding-inline: 0.35rem; text-align: center; }
+.xtab th.sel-th input, .xtab td.sel-cell input { cursor: pointer; margin: 0; }
+/* マージ表示で畳む区画。合算できない値をマージの見出しの下に置かない —
+   Session Timeline(絶対時刻の軸が別日で繋がらない)、AIコメント分析(保存済みの文章は
+   足せない)、Memo(どのSessionへ書くか決まらない)。 */
+/* マージ表示で畳むカテゴリのtabは .hidden(JSが付ける)で消える。
+   可否の根拠はhistory.jsのMERGED_HIDDEN_CATEGORIES1箇所だけに置いてある。 */
+
+/* History 詳細: 左の縦paneでカテゴリを選び、選んだ1カテゴリだけが右を丸ごと使う。
+   ---- なぜこの形か ----
+   段を縦に積んで各段に max-height の内側scrollerを置くと、85%の領域がほぼ内側scrollerで
+   覆われる。wheelを始める位置がまず内側になるため、外側(.modal-body)へ手が届かない
+   (common.jsの入れ子latchは「動かし始めた後」しか助けられない)。
+   規則は1つ: **1つの領域に対してscrollerは1つ。入れ子にするなら外側は転がさない。**
+   ここでは .modal-body を固定高にし、転がるのは表示中のcardの中だけにしてある。 */
 /* 列幅の配り方: 中身の幅が決まっている列(#・画質・状態・時間・Size・操作)は
    shrink-to-fit(1%)で詰め、余りは唯一の可変列であるFile名(100%)へ全部渡す。
    固定幅ではないので窓幅に追従する。左右paddingは共通値(0.6rem)のままだと7列分で
    100px超をFile名から奪い、窓を狭めた時にFile名だけが折り返す。ここは詰める。 */
 .rec-table th, .rec-table td { inline-size: 1%; white-space: nowrap; padding-inline: 0.35rem; }
 .rec-table th:nth-child(2), .rec-table td:nth-child(2) { inline-size: 100%; white-space: normal; }
-.detail-battle .bcards { grid-template-columns: 1fr; gap: 0.6rem; max-height: 60vh; overflow-y: auto; }
-.detail-battle .bcard { box-shadow: none; }
+/* dock内のBattleは1列で縦に積む(横に並べるとカードが細って中の表が読めない)。
+   丈と scroll は .dk-block が持つので、ここでは列と余白だけ。 */
+.dk-pane[data-cat="battle"] .bcards { grid-template-columns: 1fr; gap: 0.6rem; padding: 0.5rem 0.6rem; }
+.dk-pane[data-cat="battle"] .bcard { box-shadow: none; }
 .result-sub-note { font-size: 0.66rem; font-weight: 400; letter-spacing: 0.04em; color: var(--ink-muted); margin-left: 0.4rem; }
 
 @media (max-width: 60rem) {
@@ -3090,6 +3243,9 @@ select optgroup, select option {
   .a-livecard, .a-statcard, .a-chartcard, .a-actcard { flex: 1 1 auto; }
   .a-videowrap { min-height: 60vh; }
   .x-tablewrap { max-height: 60vh; }
+  /* この幅ではapp-shellがheight:autoになりpage scrollへ移るため、%のflex-basisは
+     拠り所を失う。詳細dockは一覧の下へそのまま流し、一覧は畳まない。 */
+  .app-dashboard.detail-docked .x-tablewrap { flex: 1 1 auto; }
   /* 縦は画面高でなくpage scrollに任せる幅なので、表の伸びも他一覧と同じ上限に戻す。 */
   .a-card-fill > .body { overflow: visible; }
   .a-card-fill .table-wrap { max-height: 60vh; }
@@ -3182,7 +3338,6 @@ select optgroup, select option {
 .sm-video { inline-size: 100%; max-block-size: 50vh; background: #000; }
 
 /* AI コメント分析 */
-.detail-ai { display: flex; flex-direction: column; gap: 0.4rem; }
 .ai-actions { display: flex; align-items: center; gap: 0.6rem; }
 .ai-result { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--line); background: var(--sand-panel-muted); padding: 0.6rem 0.7rem; }
 .ai-mood { font-size: 0.86rem; font-weight: 600; color: var(--ink-strong); }
@@ -3815,23 +3970,18 @@ select optgroup, select option {
   /* key一覧を帯の下へ重ねて開くための基準。 */
   position: relative;
 }
-/* 見出し行。ID・配信日は伸び縮みさせ、音量は右の余りを取る(音量は録画の中身と無関係な
-   常設の操作なので、control群の中に1行を専有させない)。 */
-.vd-headrow { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
-.vd-player-head { flex: 3 1 12rem; min-inline-size: 0; font-size: 0.7rem; color: var(--ink-muted); }
-/* barは余りを取るが、伸びの比率は見出しより小さくする(広い窓で音量barだけが行の半分を
-   占めると、ID・配信日が読める幅を失う)。 */
-.vd-headrow .vd-volume { flex: 1 1 6rem; }
 /* 動画と操作系を横に並べる。stageに高さを持たせ、右列(.vd-side)がその高さを埋める。 */
 /* 固定高さにするとseek barの下に死んだ余白が残る。stageがpaneの残り高さを吸うことで
    動画と文字起こしが縦いっぱいに広がり、下端はseek barとkey説明で閉じる。 */
-/* 動画32 : 右エリア40 を実寸で割り当てる。flexで動画を実比率のまま置くと、幅は録画の
-   縦横比まかせになって指定の配分にならない(未選択時は<video>の既定300px)。 */
+/* 動画27 : 右エリア45 を実寸で割り当てる(表28と足して100)。flexで動画を実比率のまま
+   置くと、幅は録画の縦横比まかせになって指定の配分にならない(未選択時は<video>の既定300px)。
+   縦動画は幅を削っても高さで決まるので見え方が変わらず、削った分は操作系が1行に収まる
+   ぶんの幅として効く。 */
 /* 行は必ず minmax(0, 1fr) で切ること。既定の暗黙行(auto)のままだと行の高さが「中身なり」
    になり、(1)中身が枠を越えて伸びる (2)子の block-size / max-block-size の%が解決先を
    持てず none に落ちる ―― 実際に縦動画(640x1280)で枠が794px高まで伸び、stageの413pxを
    越えたぶん(48%)が .vd-player の overflow:hidden で切り落とされていた。 */
-.vd-stage { display: grid; grid-template-columns: minmax(0, 32fr) minmax(0, 40fr); grid-template-rows: minmax(0, 1fr); align-items: stretch; gap: 0.6rem; min-inline-size: 0; flex: 1 1 auto; min-block-size: clamp(16rem, 42vh, 34rem); }
+.vd-stage { display: grid; grid-template-columns: minmax(0, 27fr) minmax(0, 45fr); grid-template-rows: minmax(0, 1fr); align-items: stretch; gap: 0.6rem; min-inline-size: 0; flex: 1 1 auto; min-block-size: clamp(16rem, 42vh, 34rem); }
 /* 未選択(録画の縦横比がまだ判らない)の間は枠いっぱい。<video>の既定の実寸は300x150なので、
    下のvd-has-arの規則をそのまま当てると小さな黒い箱が残る。 */
 .vd-video {
@@ -3875,34 +4025,61 @@ select optgroup, select option {
   scrollbar-gutter: stable;
   container-type: inline-size;
 }
-.vd-controls { flex: 0 0 auto; display: flex; flex-direction: column; gap: 0.3rem; }
+.vd-controls { flex: 0 0 auto; display: flex; flex-direction: column; gap: 0.4rem; }
 /* control群を作業の段階で束ねる。罫線も見出しも無く9行積んでいた頃は、目的のbuttonを
-   探すのに毎回時間がかかり、押せない理由も各buttonのhoverにしか無かった。 */
+   探すのに毎回時間がかかり、押せない理由も各buttonのhoverにしか無かった。
+   区切りが1本の細罫だった頃は、その罫がbuttonの枠と同じ色・同じ太さで、並んだ枠の中に
+   紛れて群の切れ目として読めなかった。面そのものを一段沈めて、群を塊として見せる。 */
 .vd-group {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  padding-block: 0.3rem;
-  border-block-start: 1px solid var(--line);
+  gap: 0.35rem;
+  padding: 0.45rem 0.5rem;
+  background: color-mix(in srgb, var(--sand-panel) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
 }
-.vd-group:first-child { border-block-start: none; padding-block-start: 0; }
 /* 行の頭に置く見出し。1行を専有させると群の数だけ帯が増え、その分だけ縦が削られる。
-   全行で同じ幅を取るので左端が1本の柱に揃い、「どの行が何をする行か」を縦に読める。 */
+   全行で同じ幅を取るので左端が1本の柱に揃い、「どの行が何をする行か」を縦に読める。
+   柱は文字だけでは通らない(見出しが最も小さく最も薄い字だった)ので、縦罫で実体を持たせ、
+   字も操作の側より強くする ―― 構造を伝える文字が一番弱いと、目が毎回全部を読み直す。 */
+/* 柱の幅。行のpaddingと見出しの負marginが同じ値を指す必要があるので1箇所で持つ
+   (0.85rem = 見出しの右padding 0.5rem + 行のgap 0.35rem)。
+   remで持つのは、emだと基準が2つに割れるため ―― この変数を読む .vd-row の em は
+   親の1remで、見出し自身の em は 0.68rem。同じ「6.5em」が104pxと71pxに解決し、
+   柱の右に33pxの死んだ余白が残っていた。
+   幅は最も長い見出し(文字起こし・章立て（AI）に畳みの▾が付いた形)が収まる下限。
+   6.5em(=104px)から4.7em相当へ詰めたぶんは、そのまま操作の載る幅になる。 */
+.vd-side, .vd-timeline { --rowlabel-w: 4.7rem; --rowlabel-hang: calc(var(--rowlabel-w) + 0.85rem + 1px); }
+/* 行が折り返しても操作を柱の右へ揃える。flexの折り返しは行頭へ戻るため、2行目だけが
+   見出しの真下へ潜り込み、柱が途中で切れて「どこまでが1つの行か」が読めなかった。
+   行に見出しぶんのpaddingを敷き、見出しだけを負のmarginでそこへ吊るす。 */
+.vd-row, .vd-heat-head { padding-inline-start: var(--rowlabel-hang, 0px); }
+.vd-rowlabel, .vd-heat-label { margin-inline-start: calc(-1 * var(--rowlabel-hang, 0px)); }
 .vd-rowlabel {
   flex: 0 0 auto;
+  align-self: stretch;
+  display: flex; align-items: center;
   /* 文字起こし・コメントの見出し(.vd-heat-label)と同じ幅。最も長い見出し(章立て（AI）)に
      合わせているので、control行と本文panelの見出しが1本の柱で揃う。 */
-  min-inline-size: 6.5em;
-  font-size: 0.62rem;
-  letter-spacing: 0.12em;
-  color: var(--ink-muted);
+  min-inline-size: var(--rowlabel-w, 4.7rem);
+  font-size: 0.68rem;
+  /* CJKは字間を空けるほど語が割れる。0.12emでは「切出し」が3つの字に見えていた。 */
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--ink-strong);
   white-space: nowrap;
+  padding-inline-end: 0.5rem;
+  border-inline-end: 1px solid var(--line);
 }
 /* 行の途中で「ここから先はこれに効く」と示すだけの見出しは柱を作らない(行頭の見出しと
    同じ幅を取ると、その分だけ操作が右へ押し出される)。 */
-.vd-rowlabel-inline { min-inline-size: 0; }
+.vd-rowlabel-inline {
+  min-inline-size: 0;
+  margin-inline-start: 0;
+  padding-inline-end: 0; border-inline-end: none;
+}
 /* 押せない理由は行の右端に出す。空のときは幅を取らない。 */
-.vd-group-note { font-size: 0.62rem; color: var(--ink-muted); }
+.vd-group-note { font-size: 0.66rem; color: var(--ink); }
 .vd-group-note:empty { display: none; }
 .vd-row { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
 /* 行の中の右寄せ。既定の.spはmargin-leftしか持たないので、flex行では効き方が揃わない。 */
@@ -3951,6 +4128,51 @@ select optgroup, select option {
   white-space: nowrap;
 }
 
+/* 「今なにが押せるか」を色で撃ち分ける。この列は実行button・設定のsegmented control・
+   checkbox・選択欄が全部同じ砂色の角丸無し矩形で並んでいて、押す物と選ぶ物と押せない物が
+   見た目で区別できなかった(押せない合図は opacity 0.45 だけで、地も薄いので沈むだけ)。
+   :rootで宣言済みの役割(押せる物=--accent-deep/-ink)をこの列にも通す。
+   記録先は「選ぶ物」なので除く ―― 押す物と同じ色にすると、行き先を決める欄が実行buttonに
+   見える。 */
+.vd-side button.btn:not(:disabled):not(.vd-destbtn),
+.vd-timebar button.btn:not(:disabled) {
+  background: var(--sand-panel);
+  border-color: var(--accent-deep);
+  color: var(--accent-ink);
+}
+.vd-side button.btn:not(:disabled):not(.vd-destbtn):hover,
+.vd-timebar button.btn:not(:disabled):hover {
+  background: var(--accent-deep);
+  border-color: var(--accent-deep);
+  color: var(--invert-fg);
+}
+/* 押せない物は薄さではなく「色が無い・枠が点線」で示す。薄さは周りも薄い面では合図に
+   ならず、字が読めなくなるだけだった。 */
+.vd-side button.btn:disabled,
+.vd-timebar button.btn:disabled {
+  opacity: 1;
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--line);
+  color: var(--ink-muted);
+}
+/* segmented controlの押せない選択肢(その録画に無い素材版)も同じ作法。opacity 0.4では
+   選択肢が在ることすら見えず、「焼き込みが選べない」のか「そもそも無い」のか読めなかった。 */
+.vd-side .seg .seg-item:disabled {
+  opacity: 1;
+  background: var(--sand-bg-deep);
+  color: var(--ink-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--ink-muted) 60%, transparent);
+}
+/* 入っている設定を字の強さで示す。checkboxの□は小さく、6個が2行に散った状態では
+   「今なにが効いているか」を目で拾えなかった。 */
+.vd-side .vd-chk, .vd-timebar .vd-chk { color: var(--ink); }
+.vd-side .vd-chk:has(input:checked),
+.vd-timebar .vd-chk:has(input:checked) { color: var(--ink-strong); font-weight: 600; }
+/* 件数・状態の従属文字。0.68remのmutedはこの密度の面では地に沈んでいた。 */
+.vd-side .vd-summary, .vd-timebar .vd-summary { font-size: 0.7rem; color: var(--ink); }
+
 .vd-heat-block { display: flex; flex-direction: column; gap: 0.2rem; }
 /* space-betweenは中身の数で間隔が変わるため、行ごとに要素の並ぶ位置がばらついていた。
    左詰めに固定し、右へ寄せたい物だけ.spで送る。 */
@@ -3959,18 +4181,27 @@ select optgroup, select option {
    最も長い見出し(章立て（AI）)に合わせる。 */
 .vd-heat-label {
   flex: 0 0 auto;
-  min-inline-size: 6.5em;
-  font-size: 0.62rem;
-  letter-spacing: 0.12em;
-  color: var(--ink-muted);
+  min-inline-size: var(--rowlabel-w, 4.7rem);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--ink-strong);
   white-space: nowrap;
+  text-align: start;
+  padding-inline-end: 0.5rem;
+  border-inline-end: 1px solid var(--line);
 }
 /* 説明をhoverへ移した見出しは、hoverできることが見た目から判らない。点線で示す。 */
 .vd-heat-label[title] { border-block-end: 1px dotted var(--line); cursor: help; }
 /* 列が狭いときは柱を畳む。動画の脇に残る幅が数cmしか無い状態では、揃った左端より
-   操作そのものが載る幅の方が要る。 */
+   操作そのものが載る幅の方が要る。柱が無くなれば縦罫も嘘になるので一緒に消す。 */
 @container (max-width: 32rem) {
-  .vd-rowlabel, .vd-heat-label { min-inline-size: 0; }
+  .vd-row, .vd-heat-head { --rowlabel-hang: 0px; }
+  .vd-rowlabel, .vd-heat-label {
+    min-inline-size: 0;
+    padding-inline-end: 0;
+    border-inline-end: none;
+  }
 }
 /* 時間軸の操作帯。IN/OUTの道具と表示の切り替えを1本に納めるので、区切りだけ間を空ける。 */
 .vd-timebar { gap: 0.35rem; }
@@ -4037,6 +4268,30 @@ select optgroup, select option {
 /* 速度は数字の桁数で幅が動くと押し間違えるので、数字だけ等幅にして揃える。 */
 .seg-rate .seg-item { font-variant-numeric: tabular-nums; }
 
+/* 段の多い排他選択をbarで出す(initSegBar)。9段のpillは行の半分を占めて他の操作を次の行へ
+   押し出すが、段の意味が「大小」しかない群は摘みの位置で読めるのでbarで足りる。
+   barだけでは「だいたいこの辺」までしか読めないので、値そのものを右に添える。 */
+.segbar { display: inline-flex; align-items: center; gap: 0.3rem; min-inline-size: 0; }
+.segbar-range {
+  flex: 0 1 7rem; min-inline-size: 3rem;
+  accent-color: var(--accent-deep);
+  cursor: pointer;
+}
+/* 値の表示は既定値へ戻すbuttonでもある。pillを並べていた頃は「選択中をもう一度click」が
+   1xへの復路だったが、barにはその手が無い。 */
+.segbar-out {
+  flex: 0 0 auto;
+  font: inherit; font-size: 0.68rem; font-variant-numeric: tabular-nums;
+  min-inline-size: 3em; text-align: end;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid var(--line);
+  background: var(--sand-panel);
+  color: var(--ink-strong);
+  cursor: pointer;
+}
+.segbar-out:hover { border-color: var(--accent-deep); color: var(--accent-ink); }
+.segbar-out:focus-visible { outline: 2px solid var(--accent-deep); outline-offset: -2px; }
+
 .vd-hit { cursor: pointer; }
 .vd-hit:hover, .vd-hit:focus-visible { background: var(--sand-panel-muted); outline: none; }
 /* 縞模様(nth-child odd)はtrへの背景より詳細度が高い。hoverも選択もtd側へ付けて必ず見えるようにする。 */
@@ -4061,6 +4316,13 @@ select optgroup, select option {
 /* その続きの行そのもの。上の罫線を消して、名乗った先頭行から下が1つの配信の塊に見える
    ようにする(縞模様は残すので、行を目で追う手掛かりは失わない)。 */
 .result-table tbody tr.vd-cont td { border-top-color: transparent; }
+/* 意味検索の1行は約25秒のpassageで、中の文それぞれが飛び先になる。1文=1行に見せて
+   押せる場所を明示する(段落のまま流すと、どこを押しても同じ場所へ飛ぶように見える)。 */
+.vd-passage { display: block; }
+.vd-sent { display: block; padding: 0.05rem 0.25rem; border-left: 2px solid transparent; }
+/* 地はrow hover(--sand-panel-muted)より明るい面を載せる。暗い側へ振ると本文(--ink)との
+   対比が4.4:1まで落ち、押せる場所を示すためにその文だけ読みにくくなる。 */
+.vd-sent:hover { border-left-color: var(--accent-ink); background: var(--sand-panel); }
 .vd-src { display: inline-block; padding: 0 0.3rem; border: 1px solid var(--line); font-size: 0.62rem; white-space: nowrap; }
 .vd-src-stt { color: var(--accent-ink); }
 .vd-src-comment { color: var(--ok-ink); }
@@ -4250,30 +4512,47 @@ select optgroup, select option {
    以前は選択肢そのものを1行に並べていたが、グループが増えるほど段が積まれ、その全部が
    下の本文block(文字起こし・コメント)から高さを奪っていた ―― 18件で3段、以後も上限なく
    伸びる。行ごと畳んで、「今どこへ入るか」だけを記録buttonの隣に残す。 */
+/* 記録先はbuttonの形をしているが「押す物」ではなく「選ぶ物」。隣の実行buttonと同じ姿で
+   並んでいた頃は、押すと何かが出来上がるように見え、逆に行き先の欄だとは読めなかった。
+   実行buttonが藍の枠を持つのに対し、こちらは一段沈んだ地に見出し欄と値を仕切って載せる
+   ―― 「枠の中に今の値が入っている」姿が選択欄の作法。 */
 .vd-destbtn {
-  display: inline-flex; align-items: baseline; gap: 0.35rem;
+  display: inline-flex; align-items: center; gap: 0.4rem;
   /* 名前の長いグループを選んでも、隣のメモ欄を押し出して行を折り返させない。
      字の大きさに追従する上限なので固定幅ではない。 */
   max-inline-size: 16rem;
+  background: var(--sand-panel-muted);
+  border-color: var(--line);
 }
 .vd-destbtn-key {
   flex: 0 0 auto;
-  font-size: 0.62rem; letter-spacing: 0.12em; color: var(--ink-muted);
+  align-self: stretch; display: flex; align-items: center;
+  font-size: 0.6rem; letter-spacing: 0.08em; color: var(--ink-muted);
+  padding-inline-end: 0.4rem;
+  border-inline-end: 1px solid var(--line);
 }
 /* 行き先だけが可変。見出し(記録先)と同じ重さで並べると、目が毎回全部を読み直す。 */
 .vd-destbtn-val {
   min-inline-size: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--ink-strong);
+  color: var(--ink-strong); font-weight: 600;
 }
-/* 未分類は「まだ決めていない」ことが分かる見た目にする(表のグループ欄と同じ作法)。 */
-.vd-destbtn-none { color: var(--ink-muted); }
+/* 未分類は「まだ決めていない」ことが分かる見た目にする(表のグループ欄と同じ作法)。
+   ただし薄い字にはしない ―― 既定値である未分類が薄いと、この欄そのものが押せない物に
+   見えていた。太さの差だけで名付き/未分類を分ける。 */
+.vd-destbtn-none { color: var(--ink); font-weight: 400; }
 /* 件数は溜まっている先を取り違えないための目印。数としてしか読まないので小さく置く。 */
 .vd-destbtn-count {
   flex: 0 0 auto;
-  font-size: 0.62rem; color: var(--ink-muted); font-variant-numeric: tabular-nums;
+  font-size: 0.6rem; color: var(--ink-strong); font-variant-numeric: tabular-nums;
+  background: var(--sand-panel);
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  padding-inline: 0.3rem;
 }
-.vd-destbtn-caret { flex: 0 0 auto; font-size: 0.6rem; color: var(--ink-muted); }
+/* 「押すと一覧が出る」合図。0.6remのmuted▾は在ることが見えていなかった。 */
+.vd-destbtn-caret { flex: 0 0 auto; font-size: 0.7rem; color: var(--ink-strong); }
+/* 記録先がどの操作の行き先なのかは、隣に置いただけでは読めない。矢印で結ぶ。 */
+.vd-destarrow { flex: 0 0 auto; font-size: 0.7rem; color: var(--ink-muted); }
 
 /* 記録先の選択list。row-menuと同じくviewport基準のfixedで、scroll枠にclipされない。 */
 .vd-pick {
@@ -4292,15 +4571,17 @@ select optgroup, select option {
   box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.25);
 }
 .vd-pick-head {
-  font-size: 0.6rem; letter-spacing: 0.16em; color: var(--ink-muted);
-  padding: 0 0.2rem;
+  font-size: 0.7rem; letter-spacing: 0.06em; font-weight: 600; color: var(--ink-strong);
+  padding: 0 0.2rem 0.25rem;
+  border-block-end: 1px solid var(--line);
 }
 .vd-pick-filter {
-  font: inherit; font-size: 0.68rem;
-  padding: 0.2rem 0.35rem;
+  font: inherit; font-size: 0.72rem;
+  padding: 0.3rem 0.4rem;
   min-inline-size: 0;
   background: var(--sand-panel-muted); border: 1px solid var(--line); color: var(--ink);
 }
+.vd-pick-filter:focus { outline: 2px solid var(--accent-deep); outline-offset: -2px; }
 /* 一覧だけが縦へ流れる。見出し・絞り込み・作る入口は面の中で位置を変えない
    (件数が増えても「作る」入口が下端へ流れて見えなくなることが無い)。
    3列に敷くのは、縦1列だと十数件で枠を越えて「一覧で全部見る」ができなくなるため。
@@ -4311,44 +4592,54 @@ select optgroup, select option {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
   align-content: start;
-  gap: 0.05rem 0.5rem;
-  max-block-size: min(52vh, calc(14 * (0.72rem * 1.4 + 0.5rem + 1px)));
+  /* 列の間は空けるが行の間は空けない ―― 行の下に引く細罫が全列で1本に繋がり、3列でも
+     「横1行」として目が拾える。隙間を空けていた頃は罫も引けず、17件が一様な文字の面に
+     なって、どの名前とどの数が組なのかも読み取れなかった。 */
+  gap: 0 0.8rem;
+  max-block-size: min(52vh, calc(14 * (0.75rem * 1.5 + 0.6rem + 1px)));
   overflow-y: auto; overflow-x: hidden;
   scrollbar-gutter: stable;
 }
 .vd-pick-item {
-  appearance: none; background: none; border: 0;
-  display: flex; align-items: baseline; gap: 0.4rem;
+  appearance: none; background: none;
+  border: 0; border-block-end: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  display: flex; align-items: center; gap: 0.4rem;
   min-inline-size: 0;
-  font: inherit; font-size: 0.72rem; text-align: left;
-  padding: 0.22rem 0.3rem;
+  font: inherit; font-size: 0.75rem; line-height: 1.5; text-align: left;
+  padding: 0.3rem;
   color: var(--ink-strong); cursor: pointer;
 }
+/* hoverは「押せる」の合図なので淡い塗り。選択中(濃色の塗り)と同じ見た目にすると、
+   指を乗せた行が選択済みに見える。 */
 .vd-pick-item:hover, .vd-pick-item:focus-visible {
-  background: var(--invert-bg); color: var(--invert-fg); outline: none;
+  background: var(--sand-panel-muted); outline: 1px solid var(--accent-deep); outline-offset: -1px;
 }
-/* 今の行き先。塗りではなく印で示す ―― hoverの塗りと同じ見た目にすると、指を乗せた行が
-   選択済みに見える。 */
-.vd-pick-item[aria-selected="true"] { font-weight: 600; }
+/* 今の行き先。:rootで宣言済みの「選択中=--invert-bgの塗り」に揃える。✓と太字だけだった
+   頃は、3列に並んだ17件の中から今の行き先を見付けられなかった。 */
+.vd-pick-item[aria-selected="true"] {
+  font-weight: 600;
+  background: var(--invert-bg); color: var(--invert-fg);
+  border-block-end-color: var(--invert-bg);
+}
 .vd-pick-tick {
   flex: 0 0 auto;
   inline-size: 1ch;
   color: var(--accent-deep);
 }
-.vd-pick-item:hover .vd-pick-tick, .vd-pick-item:focus-visible .vd-pick-tick { color: inherit; }
+.vd-pick-item[aria-selected="true"] .vd-pick-tick { color: var(--invert-fg); }
+/* 名前は伸ばさない。伸ばすと件数が枠の右端へ飛び、名前と数の間に何も無い空きが開いて
+   どの数がどの名前の物か読めなくなる(12remの列では2cm以上離れていた)。 */
 .vd-pick-name {
-  flex: 1 1 auto; min-inline-size: 0;
+  flex: 0 1 auto; min-inline-size: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.vd-pick-name-none { color: var(--ink-muted); }
-.vd-pick-item:hover .vd-pick-name-none,
-.vd-pick-item:focus-visible .vd-pick-name-none { color: inherit; }
+.vd-pick-name-none { color: var(--ink); }
+.vd-pick-item[aria-selected="true"] .vd-pick-name-none { color: var(--invert-fg); }
 .vd-pick-count {
   flex: 0 0 auto;
   font-size: 0.62rem; color: var(--ink-muted); font-variant-numeric: tabular-nums;
 }
-.vd-pick-item:hover .vd-pick-count,
-.vd-pick-item:focus-visible .vd-pick-count { color: inherit; }
+.vd-pick-item[aria-selected="true"] .vd-pick-count { color: var(--invert-fg-muted); }
 .vd-pick-empty { font-size: 0.65rem; color: var(--ink-muted); padding: 0.25rem 0.3rem; }
 /* 作る入口。選ぼうとして初めて「まだ作っていない」と気付くので、同じ面から作れる。
    選ぶ行とは罫線で分ける(押し間違えるとgroupが1つ増える)。 */
@@ -4358,12 +4649,12 @@ select optgroup, select option {
   border-block-start: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
 }
 .vd-pick-act {
-  font: inherit; font-size: 0.65rem; letter-spacing: 0.04em; cursor: pointer;
-  padding: 0.15rem 0.5rem; white-space: nowrap;
-  border: 1px dashed var(--line);
-  background: var(--sand-panel-muted); color: var(--ink-strong);
+  font: inherit; font-size: 0.7rem; letter-spacing: 0.04em; cursor: pointer;
+  padding: 0.25rem 0.6rem; white-space: nowrap;
+  border: 1px dashed var(--accent-deep);
+  background: var(--sand-panel-muted); color: var(--accent-ink);
 }
-.vd-pick-act:hover { background: var(--invert-bg); color: var(--invert-fg); }
+.vd-pick-act:hover { background: var(--accent-deep); border-style: solid; color: var(--invert-fg); }
 /* 表内のグループ欄。その場で選び直すとその行だけ移る。1件だけ直す操作が最も多いので、
    選択→上段まで往復させずに済ませる。 */
 .vd-gsel {
@@ -4611,6 +4902,16 @@ tr[draggable="true"]:active { cursor: grabbing; }
   border: 1px solid var(--warn);
   padding: 0 0.25rem;
 }
+/* PK終了後の勝利(罰ゲーム)時間。断りであって警告ではないので、色は「一部のみ」(warn)とは
+   分ける ―― 演出中であることは異常ではない。 */
+.vd-pk-phase {
+  font-size: 0.6rem;
+  color: var(--ink-muted);
+  border: 1px solid var(--line);
+  padding: 0 0.25rem;
+  white-space: nowrap;
+}
+.vd-pk-phase[hidden] { display: none; }
 /* リード差は右端へ寄せる(見出しの語順は「いつ・どの戦・結果」で、差はその結び)。 */
 .vd-pk-gap {
   margin-inline-start: auto;
@@ -4653,6 +4954,16 @@ tr[draggable="true"]:active { cursor: grabbing; }
 }
 /* コイン数は量の値なので金色(.vd-gift-diaと同じ意味で使う)。 */
 .vd-pk-coin { margin-inline-start: auto; color: var(--gold-ink); font-variant-numeric: tabular-nums; }
+/* 勝利時間ぶんの内訳。PKの貢献とは別の数なので、同じ行に並べても地を変えて括る。 */
+.vd-pk-punish-sum {
+  padding: 0 0.25rem;
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--sand-panel-muted) 55%, var(--sand-panel));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vd-pk-punish-sum[hidden] { display: none; }
 /* 行は再生位置まで届いた分だけが下へ積まれる。追従ONの間は下端に貼り付く。 */
 .vd-pk-gifts-body { flex: 1 1 auto; overflow: auto; min-block-size: 0; }
 /* 中身が無いことの名乗り。欄そのものは残したまま、中だけを空にする。 */
@@ -4688,6 +4999,8 @@ tr[draggable="true"]:active { cursor: grabbing; }
 .vd-gift-name { flex: 0 1 auto; min-inline-size: 0; color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* コイン数は量の値なので、金色は「量」を指す一貫した意味で使う(見どころの★と同じ色)。 */
 .vd-gift-dia { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--gold-ink); }
+/* PK後の勝利時間に飛んだ分。スコアにも貢献にも入らないので、PK中の行と地で分ける。 */
+.vd-gift-punish { background: color-mix(in srgb, var(--sand-panel-muted) 55%, var(--sand-panel)); }
 .vd-gift.vd-gift-active {
   background: color-mix(in srgb, var(--accent) 22%, var(--sand-panel));
   color: var(--ink-strong);
@@ -4728,6 +5041,13 @@ tr[draggable="true"]:active { cursor: grabbing; }
   box-shadow: inset 2px 0 0 var(--accent-deep);
 }
 .vd-seg-t { flex: 0 0 auto; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+/* 章立ての行。表題と引用(その位置の実際の発話)を1行に並べる。幅が足りない時に末尾を
+   削るのは引用で、表題は最後まで残す ―― 目次として読むのは表題であり、引用はそれが
+   合っているかを確かめる材料なので、頭が読めれば足りる。shrinkの比を大きく離すのは、
+   等分に縮めると引用がまだ余っているのに表題まで丸められるため。 */
+.vd-seg-body { display: flex; gap: 1rem; align-items: baseline; }
+.vd-seg-title { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vd-seg-quote { flex: 0 100 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 今の行。文字起こし・章立て・コメントで同じ見え方(背景+太字)に揃える。hoverと同じ
    詳細度(0,2,0)で後ろに置いて勝たせる。 */
 .vd-seg.vd-seg-active {
@@ -4817,7 +5137,9 @@ input.vd-time {
   font-size: 0.68rem;
 }
 /* 音量bar。行の残り幅を全部使って、native controlsより長く掴みやすくする。 */
-.vd-volume { flex: 1 1 auto; min-inline-size: 0; accent-color: var(--accent-deep); cursor: pointer; }
+/* 再生の行の中に置くので、余りを全部取らせない(取らせると音量barだけが行の半分を占め、
+   同じ行の無音飛ばし・無言早送りが次の行へ落ちる)。 */
+.vd-volume { flex: 0 1 6rem; min-inline-size: 3rem; accent-color: var(--accent-deep); cursor: pointer; }
 .vd-volume-label { font-size: 0.62rem; color: var(--ink-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .vd-mute { flex: 0 0 auto; }
 .vd-mute.is-muted { color: var(--ink-muted); text-decoration: line-through; }

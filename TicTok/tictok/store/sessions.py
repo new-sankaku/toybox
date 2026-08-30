@@ -37,10 +37,15 @@ class SessionsMixin:
     契約の詳細はmodule docstringを参照。
     """
 
-    def _recompute_session_stats_locked(self, session_id: int) -> None:
+    def _recompute_session_stats_locked(self, session_id: int,
+                                        provenance: str = "recovered") -> None:
         """restore後、eventからstats_jsonのevent由来項目を再構成する。集計の定義は
         cleanup_stale_sessionsと厳密に一致させる(likes=count合計/gifts=gift_count合計等)。
-        viewers系はviewer_samplesのground truthから補う。"""
+        viewers系はviewer_samplesのground truthから補う。
+
+        provenanceは「なぜ作り直したか」をstats_jsonへ残すkey。既定の 'recovered' は
+        journalからの復元で、確定後に行が増えたことを表す。行が減る作り直し(接続時の
+        遡りの掃除など)を同じ名前で残すと、後から読んだときに増減が逆に読める。"""
         agg = self._conn.execute(
             "SELECT COALESCE(SUM(CASE WHEN kind='gift' THEN gift_count ELSE 0 END),0) gifts,"
             " COALESCE(SUM(CASE WHEN kind='gift' THEN diamonds ELSE 0 END),0) diamonds,"
@@ -73,7 +78,7 @@ class SessionsMixin:
             "subscribes": agg["subscribes"],
             "battles": agg["battles"],
             "events_total": agg["events_total"],
-            "recovered": True,
+            provenance: True,
         })
         if vw and vw["peak"] is not None:
             stats["viewers_peak"] = max(stats.get("viewers_peak") or 0, vw["peak"])
@@ -456,6 +461,19 @@ class SessionsMixin:
         }
 
     def session_summary(self, session_id: int) -> dict:
+        return self.sessions_summary([session_id])
+
+    def sessions_summary(self, session_ids: list) -> dict:
+        """複数sessionをまとめた貢献集計(1件なら従来のsession詳細と同じ)。
+
+        履歴の「マージ表示」はこの1本しか使えない。client側で各sessionの結果を足すのは
+        2つの理由で誤る: ①この一覧は ``LIMIT 100`` で切ってあるので、どのsessionでも
+        101位のuserは合算しても現れない ②名寄せの鍵 identity_key はAPIへ出しておらず、
+        @handleで突き合わせると改名したuserが別人に割れる。合算はSQLのGROUP BYで行う。"""
+        if not session_ids:
+            return {"users": [], "gifts": []}
+        ph = ",".join("?" * len(session_ids))
+        ids = tuple(session_ids)
         with self._lock:
             # 表示属性はその時(このSession)のsnapshotを優先し、欠けていればusers表(最新)へ
             # fallbackする。名寄せ(identity_key)と切り離すことで過去の見え方を保持する。
@@ -481,9 +499,9 @@ class SessionsMixin:
                 " LEFT JOIN event_strings av ON av.id = e.user_avatar_id"
                 " LEFT JOIN event_strings gbv ON gbv.id = e.user_gifter_badge_id"
                 " LEFT JOIN event_strings mbv ON mbv.id = e.user_member_badge_id"
-                " WHERE e.session_id = ? AND e.kind = 'gift'"
+                f" WHERE e.session_id IN ({ph}) AND e.kind = 'gift'"
                 " GROUP BY e.identity_key ORDER BY diamonds DESC, gifts DESC LIMIT 100",
-                (session_id,),
+                ids,
             ).fetchall()
             # gift_id/gift_imageはicon表示のための身元。gift_nameとは1対1なので、この
             # groupの中では代表値を1つ取れば足りる(gift_imageは古いeventでNULLになり得る
@@ -492,17 +510,17 @@ class SessionsMixin:
                 "SELECT identity_key AS key,"
                 " gift_name, SUM(gift_count) AS count, SUM(diamonds) AS diamonds,"
                 " MAX(gift_id) AS gift_id, MAX(gift_image) AS gift_image"
-                " FROM events WHERE session_id = ? AND kind = 'gift'"
+                f" FROM events WHERE session_id IN ({ph}) AND kind = 'gift'"
                 " GROUP BY identity_key, gift_name",
-                (session_id,),
+                ids,
             ).fetchall()
             gift_rows = self._conn.execute(
                 "SELECT gift_name AS name, SUM(gift_count) AS count, SUM(diamonds) AS diamonds,"
                 " MAX(CASE WHEN gift_count > 0 THEN diamonds / gift_count ELSE 0 END) AS diamonds_each,"
                 " MAX(gift_id) AS gift_id, MAX(gift_image) AS gift_image"
-                " FROM events WHERE session_id = ? AND kind = 'gift'"
+                f" FROM events WHERE session_id IN ({ph}) AND kind = 'gift'"
                 " GROUP BY gift_name ORDER BY diamonds DESC, count DESC LIMIT 100",
-                (session_id,),
+                ids,
             ).fetchall()
         items_by_user: dict = {}
         for row in item_rows:

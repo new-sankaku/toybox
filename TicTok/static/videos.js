@@ -66,7 +66,7 @@ const GIFT_ROW_GAP_PX = 2;
 const GIFT_LANE_RATIO = 0.85;
 // 拡大窓の幅の可動域(秒)。下限より詰めても0.1s刻みの波形が箱状になるだけで情報は増えない。
 const ZOOM_MIN_SPAN_SECONDS = 8;
-const ZOOM_DEFAULT_SPAN_SECONDS = 90;
+const ZOOM_DEFAULT_SPAN_SECONDS = 150;
 // wheel1段あたりの拡縮率と、左右移動1段で動く距離(窓幅に対する割合)。
 const ZOOM_WHEEL_FACTOR = 1.3;
 const ZOOM_PAN_STEP = 0.2;
@@ -88,6 +88,7 @@ const VIEW_PREF_KEY = "tictok.videos.view";
 const PLAY_RATE_PREF_KEY = "tictok.videos.playRate";
 const SKIP_PREF_KEY = "tictok.videos.skipSilence";
 const PACE_PREF_KEY = "tictok.videos.paceTalk";
+const GAIN_PREF_KEY = "tictok.videos.playbackGain";
 // 飛び先がbufferに在ると認めるのに要る先読み。着地してすぐ次のframeを出せない所へ跳ぶと、
 // 「跳んだのに止まっている」になる。buffer外へのseekは実測0.67〜259秒かかり予測できないので、
 // この判定は跳ぶ前に必ず通す(SILENCE_SKIP.md)。
@@ -132,6 +133,12 @@ const state = {
   waveBucketSeconds: 0.1,
   // 無音区間 [{start, end}]。波形と同じresponseで届き、snapとシーン選択の吸着先になる。
   silences: [],
+  // 声が出ている区間 [{start, end}]。VAD(server側の声profile)そのもので、波形の無音とは
+  // 別の根拠。文字起こしの秒を実際の声の縁へ寄せるのに使う(voiceIn/voiceOut)。
+  voiceSpans: [],
+  // 再生時に当てるgainの時系列。serverが録画を測って作った曲線そのもの
+  // ({step_seconds, gains, target_lufs, ...})で、録画のfileは書き換えられていない。
+  gain: null,
   // 無音skip再生。skipPlanはserverの計画そのもの({spans, skip_seconds, guard_seconds, ...})で、
   // skipSpansはその飛び先。判定はVAD(誰か喋っているか)で、波形とは別のresponseで届く。
   skipPlan: null,
@@ -539,6 +546,53 @@ function snippetNode(snippet) {
   return wrap;
 }
 
+// 意味検索の1行は「約25秒のpassage」であって1文ではない(先頭からwindow秒ぶんの発話・
+// コメントを束ねて埋め込んでいる)。行を開くとpassageの先頭へ飛ぶので、当たった文はその
+// 十数秒後ろに居る — 実測では passage span 中央値24.5秒に対し、狙った語は先頭から
+// +6.9〜+20.9秒 だった。IN/OUTもpassage全体になる。
+//
+// そこで本文を1文ずつ押せるようにする。passageの本文は文をそのまま改行で繋いだもので、
+// hit_idsと1対1に対応する(semantic._flush_passage)。押された文の秒はDBから引き直す
+// (indexは本文とvectorしか持たない)。対応が崩れているpassageだけは文に割らない —
+// 割ってしまうと押した文と飛ぶ先が別物になり、ズレの原因が増えるだけになる。
+function passageNode(hit) {
+  const lines = String(hit.snippet || "").split("\n");
+  const ids = hit.hit_ids || [];
+  if (ids.length !== lines.length) return snippetNode(hit.snippet);
+  const wrap = document.createElement("span");
+  wrap.className = "vd-passage";
+  lines.forEach((line, i) => {
+    const sentence = document.createElement("span");
+    sentence.className = "vd-sent";
+    sentence.dataset.hitId = String(ids[i]);
+    sentence.textContent = line;
+    wrap.appendChild(sentence);
+  });
+  return wrap;
+}
+
+// passageの中の1文を開く。秒はindexの写しではなくsearch_hitsから引き直す(文字起こしの
+// やり直しで動くのはそちら側で、意味検索のindexは古い秒を名乗り得る)。
+async function openSentence(hit, hitId, index) {
+  let row;
+  try {
+    const data = await apiSend("GET", `/api/search/hits?ids=${hitId}`);
+    row = (data.items || [])[0];
+  } catch (err) {
+    showError(err, "文の位置");
+    return;
+  }
+  if (!row) {
+    // 行が消えている = その録画は文字起こしをやり直した。passageの秒も古いので、
+    // 先頭へ飛ばして誤魔化さない。
+    showError(new Error("この文は検索indexにもうありません（文字起こしのやり直し後です）。"
+                        + "「意味検索indexを更新」を実行してください。"), "文の位置");
+    return;
+  }
+  await openHit({ ...hit, id: row.id, hit_ids: null, video_time: row.video_time,
+                  end_time: row.end_time, body: row.body, snippet: row.body }, index);
+}
+
 // 検索語なしの録画一覧。行はhitと同じ形(recording_id/unique_id/started_at/video_time)に
 // して先頭から開くだけなので、openHit以下の再生経路は検索hitと完全に共有できる。
 async function loadBrowse() {
@@ -862,7 +916,7 @@ function renderHits() {
         who.textContent = `${hit.nickname}: `;
         body.appendChild(who);
       }
-      body.appendChild(snippetNode(hit.snippet));
+      body.appendChild(hit.hit_ids ? passageNode(hit) : snippetNode(hit.snippet));
       // 意味検索は類似度が判断材料になるので種別欄に併記する(語で一致には無い値)。
       if (hit.score !== undefined) {
         const score = document.createElement("span");
@@ -899,12 +953,22 @@ function renderHits() {
         // 検索hitは内容(4列目)が余りを吸う。
         tr.cells[3].classList.add("vd-col-wide");
       }
-      const open = () => openHit(hit, index);
+      // 意味検索の行は文を押せる(passageNode)。押された文が在ればそちらへ、行の余白なら
+      // 従来どおりpassageの先頭へ開く。
+      const open = (event) => {
+        const target = event && event.target;
+        const sentence = target && target.closest ? target.closest(".vd-sent") : null;
+        if (sentence && sentence.dataset.hitId) {
+          openSentence(hit, Number(sentence.dataset.hitId), index);
+          return;
+        }
+        openHit(hit, index);
+      };
       tr.addEventListener("click", open);
       tr.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          open();
+          openHit(hit, index);
         }
       });
     },
@@ -920,6 +984,30 @@ function hitCutRange(hit) {
   const end = Number(hit.end_time);
   if (!isFinite(end) || end <= hit.video_time) return null;
   return [hit.video_time, end];
+}
+
+// 声の縁へ寄せてよいhitか。文字起こしの秒だけが「声より手前を指す」性質を持つ
+// (voiceIn/voiceOut参照)。commentの秒は発言が届いた時刻で、声とは無関係に決まる。
+function isTranscriptHit(hit) {
+  return !!hit && hit.source === "stt";
+}
+
+// 別の録画を開いた直後は声の判定がまだ届いていない。届いた時点で寄せ直す。
+// 動かすのは「これから通る無音を飛ばす」向きだけなので、その間に人が別の場所へ跳んで
+// いた場合は窓から外れて何も起きない。
+function reapplyVoiceSnap(hit) {
+  if (!isTranscriptHit(hit) || !state.current
+      || state.current.recording_id !== hit.recording_id) return;
+  const video = $("video");
+  const at = voiceIn(hit.video_time);
+  if (at > video.currentTime && at - video.currentTime <= VOICE_SNAP_WINDOW_SECONDS) {
+    video.currentTime = at;
+  }
+  const range = hitCutRange(hit);
+  // 人が範囲を打ち直していたら触らない。
+  if (range && state.cutIn === range[0] && state.cutOut === range[1]) {
+    setCutFromTranscript(range[0], range[1]);
+  }
 }
 
 async function openHit(hit, index) {
@@ -938,8 +1026,6 @@ async function openHit(hit, index) {
     state.hitIndex = found;
   }
   highlightHitRow();
-  $("player-head").textContent =
-    `${hit.unique_id} / ${fmtDateTime(hit.started_at)} / ${fmtDuration(hit.video_time)}`;
   $("player-status").textContent = "";
 
   if (!sameRecording) {
@@ -949,6 +1035,7 @@ async function openHit(hit, index) {
     setReviewControlEnabled(true);
     syncReviewControl(reviewStateOf(hit));
     // 別録画に移ったらIN/OUTは持ち越さない(別fileの秒数として無意味になるため)。
+    // 声の判定はまだ無いので、届いた時点でreapplyVoiceSnapが寄せ直す。
     setCut(...(range || [null, null]));
     state.heat = null;
     // 拡大窓も仕切り直す。前の録画で狭めた窓や追従OFFを引き継ぐと、開いた直後に
@@ -968,6 +1055,7 @@ async function openHit(hit, index) {
     loadBookmarks(hit.recording_id);
     loadThumbnails(hit.recording_id);
     loadWaveform(hit.recording_id);
+    loadGainCurve(hit.recording_id);
     loadSkipPlan(hit.recording_id);
     loadPacePlan(hit.recording_id);
     loadGifts(hit.recording_id);
@@ -980,8 +1068,11 @@ async function openHit(hit, index) {
     // 読み込んでいない<video>を再生しようとして無音のまま止まる。
     await reloadPlayback(false);
   } else {
-    video.currentTime = hit.video_time;
-    if (range) setCut(range[0], range[1]);
+    video.currentTime = isTranscriptHit(hit) ? voiceIn(hit.video_time) : hit.video_time;
+    if (range) {
+      if (isTranscriptHit(hit)) setCutFromTranscript(range[0], range[1]);
+      else setCut(range[0], range[1]);
+    }
     highlightActiveSegment();
     highlightActiveComment();
     syncPkPanel();
@@ -1050,6 +1141,9 @@ let hlsPlayer = null;
 // 読み込み要求の世代。録画・素材版を速く切り替えると前の要求の応答が後から届くので、
 // 最新の要求だけを採用する。
 let playbackToken = 0;
+// 再生listの引き直し(hlsPlaylistMayBeStale 参照)。ts結合で素材の置き場所が変わると、
+// 開いたままのpageは消えたsegmentを指すlistを持ち続ける。
+const playbackGate = hlsReloadGate();
 
 function detachHls() {
   if (!hlsPlayer) return;
@@ -1066,9 +1160,18 @@ function loadPlayback(playback, at, playing) {
     hlsPlayer = new window.Hls();
     hlsPlayer.loadSource(playback.url);
     hlsPlayer.attachMedia(video);
+    // 引き直しが効いた(bufferへ入った)ら、次の失敗もまた引き直してよい。
+    hlsPlayer.on(window.Hls.Events.FRAG_BUFFERED, () => playbackGate.reset());
     hlsPlayer.on(window.Hls.Events.ERROR, (_e, data) => {
       // hls.jsが握った失敗は<video>のerror eventにならないので、ここで理由を出す。
-      if (data.fatal) $("player-status").textContent = "この録画を再生できませんでした。";
+      if (!data.fatal) return;
+      // ts結合で素材の置き場所が変わっただけなら、listを引き直せば同じ位置から続けられる。
+      if (hlsPlaylistMayBeStale(data) && playbackGate.take()) {
+        $("player-status").textContent = "素材の置き場所が変わりました。再生listを取り直しています…";
+        reloadPlayback(true, true);
+        return;
+      }
+      $("player-status").textContent = "この録画を再生できませんでした。";
     });
   } else if (playback.mode === "hls" && !video.canPlayType("application/vnd.apple.mpegurl")) {
     $("player-status").textContent = "このBrowserはHLS再生に対応していません。";
@@ -1089,8 +1192,11 @@ function loadPlayback(playback, at, playing) {
 
 // 素材版を切り替えても尺と時間軸は同じ(焼き込み・Up出力は元録画と同じmedia軸で作る)ので、
 // 見ていた位置とIN/OUTはそのまま持ち越せる。
-async function reloadPlayback(keepTime) {
+// recoveringは失効したlistの引き直し。人が起こした読み込みだけが引き直しの権利を戻す
+// (引き直し自身が戻すと、直らない失敗で読み直し続けることになる)。
+async function reloadPlayback(keepTime, recovering = false) {
   if (!state.current) return;
+  if (!recovering) playbackGate.reset();
   const video = $("video");
   const at = keepTime ? video.currentTime : state.current.video_time;
   const playing = !video.paused;
@@ -1215,6 +1321,13 @@ async function loadTranscript(recordingId) {
   $("do-transcribe").disabled = true;
   renderSegments();
   highlightActiveSegment();
+  // 声の判定は文字起こしが在る録画でだけ要る(寄せる対象がその秒しかない)。初回は音声を
+  // 丸ごと読むので、文字起こしの無い録画まで作りに行かせない。
+  if (state.segments.length) {
+    loadVoiceSpans(recordingId).then(() => reapplyVoiceSnap(state.current));
+  } else {
+    state.voiceSpans = [];
+  }
 }
 
 async function transcribeCurrent() {
@@ -1347,7 +1460,7 @@ function selectSegmentRange(from, to) {
   state.selFrom = a;
   state.selTo = b;
   paintSelection();
-  setCut(state.segments[a].start, state.segments[b].end);
+  setCutFromTranscript(state.segments[a].start, state.segments[b].end);
 }
 
 // 追従scrollは今の行をpanelの中央へ置く。末尾に貼り付けると前後の文脈のうち「後」が
@@ -1426,6 +1539,77 @@ function snapToSegments(seconds, kind) {
   return best;
 }
 
+// ===== 文字起こしの秒を声の縁へ寄せる =====
+// whisperの語の時刻は**実際に声が出るより手前**を指す。実測(rid=1142の語頭1,143件を直前の
+// 無音の長さで層別)では中央値 0.24秒(無音0.5〜1秒) / 0.28秒(1〜2秒) / 0.33秒(2〜5秒) /
+// 0.37秒(5〜20秒) 早く、直前の無音が長いほど手前へ食い込む。語尾も同じ向きで、声が止まる
+// のは語末の0.16秒後だった。そのまま飛ぶと無音から始まり、そのままIN/OUTにすると頭に無音が
+// 入って語尾が切れる。再生の時間軸そのものは合っている(browserのframeと素材のframeが
+// 1 frame以内、鳴っている音との相互相関が0.00秒)ので、寄せるのは文字起こしの秒だけでよい。
+//
+// 寄せ先はVADの声区間(/voice)。文字起こしを書き換えないのは、字幕の焼き込みが同じ秒を
+// 読んでおり、字幕は少し早く出る方が読みやすいためである。
+//
+// 動かすのは**外側だけ**: INは後ろの声の頭まで進め、OUTは手前の声の尾まで伸ばす。内容を
+// 削る向きには動かさないので、寄せ損ねても失うものが無い。
+const VOICE_SNAP_WINDOW_SECONDS = 0.6;
+
+// secondsを含む(または直後の)声区間のindex。声区間はstart昇順で重ならない。
+function voiceSpanIndexAt(seconds) {
+  const spans = state.voiceSpans;
+  let low = 0;
+  let high = spans.length - 1;
+  let found = spans.length;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (spans[mid].end > seconds) {
+      found = mid;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+  return found;
+}
+
+// INを声の頭へ。secondsが無音の中に居て、その直後(窓の内)に声が始まるときだけ動かす。
+// 既に声の中に居るとき(文の途中の行)は動かさない — 次の声まで飛ばすと別の発話へ移る。
+function voiceIn(seconds) {
+  if (seconds === null || seconds === undefined || !state.voiceSpans.length) return seconds;
+  const span = state.voiceSpans[voiceSpanIndexAt(seconds)];
+  if (!span || span.start <= seconds) return seconds;
+  return span.start - seconds <= VOICE_SNAP_WINDOW_SECONDS ? span.start : seconds;
+}
+
+// OUTを声の尾へ。secondsが声の中に居て、その声が窓の内で終わるときだけ伸ばす。文の途中で
+// 切った選択(次の行が続く)は、声の終わりがまだ遠いので動かない。
+function voiceOut(seconds) {
+  if (seconds === null || seconds === undefined || !state.voiceSpans.length) return seconds;
+  const span = state.voiceSpans[voiceSpanIndexAt(seconds)];
+  if (!span || span.start > seconds) return seconds;
+  return span.end - seconds <= VOICE_SNAP_WINDOW_SECONDS ? span.end : seconds;
+}
+
+// 文字起こし由来の範囲をそのままIN/OUTへ入れる唯一の口。
+function setCutFromTranscript(inSec, outSec) {
+  setCut(voiceIn(inSec), voiceOut(outSec));
+}
+
+async function loadVoiceSpans(recordingId) {
+  state.voiceSpans = [];
+  try {
+    const data = await apiSend("GET", `/api/recordings/${recordingId}/voice`);
+    if (!state.current || state.current.recording_id !== recordingId) return;
+    state.voiceSpans = data.spans || [];
+  } catch (err) {
+    if (state.current && state.current.recording_id === recordingId) {
+      // 黙って寄せないでいると「直っていない」としか見えない。理由を出す。
+      $("player-status").textContent =
+        `声の判定を取得できませんでした（文字起こしの秒をそのまま使います）。${errorDetailText(err)}`;
+    }
+  }
+}
+
 // ===== 章立てpanel =====
 // 3時間級の録画を目次から辿るための一覧。表題はLLMが書くので誤りがあり得るうえ、その誤りは
 // その位置を見るまで分からない。そこで(1)行clickでその時刻へ必ず飛べるようにし、(2)表題の
@@ -1490,15 +1674,23 @@ function renderChapters() {
     time.className = "vd-seg-t";
     time.textContent = fmtDuration(chapter.start);
     const body = document.createElement("span");
-    body.className = "vd-cmt-body";
-    const title = document.createElement("div");
+    body.className = "vd-cmt-body vd-seg-body";
+    const title = document.createElement("span");
+    title.className = "vd-seg-title";
     title.textContent = chapter.title;
+    // 幅が足りない行は末尾を…で丸めるので、全文はhoverで読めるようにする。
+    title.title = chapter.title;
+    body.append(title);
     // 表題の根拠になったその位置の発話。これが表題と噛み合っていなければ、seekする前に
-    // 目次が外れていることに気付ける。
-    const quote = document.createElement("div");
-    quote.className = "vd-summary";
-    quote.textContent = chapter.quote || "";
-    body.append(title, quote);
+    // 目次が外れていることに気付ける。表題の下ではなく右へ置く ―― 下段に積むと、表題が
+    // 右端の手前で終わった直後に別の行が続くので、折り返した続きに読めてしまう。
+    if (chapter.quote) {
+      const quote = document.createElement("span");
+      quote.className = "vd-summary vd-seg-quote";
+      quote.textContent = chapter.quote;
+      quote.title = chapter.quote;
+      body.append(quote);
+    }
     row.append(time, body);
     fragment.appendChild(row);
   });
@@ -1740,9 +1932,11 @@ let pkGiftEmpty = null;
 // 再生位置で値が変わる所(スコアバーとリード差)。同じ戦の中ではここだけを書き換える。
 let pkLiveNodes = null;
 
-function buildGiftRow(gift, index) {
+function buildGiftRow(gift, index, punish) {
   const row = document.createElement("div");
-  row.className = "vd-gift";
+  // 勝利時間(PK終了後の演出中)に飛んだ分は帯を変える。同じ並びに混ぜたまま同じ顔で出すと、
+  // スコアに入らないコインがPKの貢献として読める。
+  row.className = punish ? "vd-gift vd-gift-punish" : "vd-gift";
   row.dataset.index = String(index);
   const time = document.createElement("span");
   time.className = "vd-seg-t";
@@ -1770,15 +1964,26 @@ function buildGiftRow(gift, index) {
   }
   row.append(who, name, diamonds);
   row.title = `${gift.nickname || gift.uid || ""}：${gift.name}×${fmtNum(gift.count)}`
-    + `（${fmtNum(gift.diamonds)}コイン）`;
+    + `（${fmtNum(gift.diamonds)}コイン）`
+    + (punish ? "／PK後の勝利時間（スコアには入りません）" : "");
   return row;
 }
 
+// PK欄が同じ戦を出し続ける終わり。PKの終了ではなく、その後の勝利(罰ゲーム)時間の終わり
+// まで。TikTokはPKが終わると勝敗の演出に入り、その間もギフトは飛び続けるので、終了と同時に
+// 欄を空にすると、その演出中に誰が何を投げたのかが読めなくなる。窓はserverが決める
+// (core.battle.punish_window_end: 実測の終了event、無ければ次のPK開始と180秒の早い方)。
+function battleShowEnd(battle) {
+  return battle.punish_end != null ? battle.punish_end : battle.end;
+}
+
 // 再生位置が入っているPK。窓は重ならない(serverが次の戦の開始で閉じる)ので最初の1つで
-// 決まる。戦数は多くて数十なので、二分探索にはしない。
+// 決まる。戦数は多くて数十なので、二分探索にはしない。勝利時間の終わりは次の戦の開始と
+// 同じ秒になり得るので、そこだけは開区間で見る(境目は次の戦のものとする)。
 function battleAtTime(now) {
   return (state.battles || []).find(
-    (battle) => now >= battle.start && now <= battle.end) || null;
+    (battle) => now >= battle.start
+      && (now <= battle.end || now < battleShowEnd(battle))) || null;
 }
 
 // 再生位置以前で最後のscore sample。seriesは時刻順で、窓の頭(battle.start)が最初の点
@@ -1833,7 +2038,7 @@ function buildPkScoreBar(battle, sample) {
 function pkOutsideTarget(now) {
   const battles = state.battles || [];
   return battles.find((battle) => battle.start > now)
-    || [...battles].reverse().find((battle) => battle.end < now)
+    || [...battles].reverse().find((battle) => battleShowEnd(battle) <= now)
     || null;
 }
 
@@ -1894,6 +2099,12 @@ function renderPkNow(battle, now) {
     partial.title = "このPKはこの録画に一部だけ入っています。";
     head.appendChild(partial);
   }
+  // PKが終わった後の勝利(罰ゲーム)時間。同じ戦を出し続けるので、今がPK中なのか演出中
+  // なのかを名乗らないと、止まったスコアバーが「今の点差」に見える。
+  const phase = document.createElement("span");
+  phase.className = "vd-pk-phase";
+  phase.hidden = true;
+  head.appendChild(phase);
   const gap = document.createElement("span");
   gap.className = "vd-pk-gap";
   head.appendChild(gap);
@@ -1921,7 +2132,25 @@ function renderPkNow(battle, now) {
   foot.title = foot.textContent;
   body.append(barHost, foot);
   box.append(head, body);
-  pkLiveNodes = { battle, barHost, gap, sample: undefined };
+  pkLiveNodes = { battle, barHost, gap, phase, punishing: null, sample: undefined };
+}
+
+// 勝利時間の名乗り。窓の終わりがTikTokの終了eventで実測できた戦と、次のPKの開始・実測
+// 上限(180秒)で閉じた目安の戦を区別する — 目安を実測と同じ顔で出すと、演出が早く切られた
+// 戦でも最後まで続いたように読める。
+function paintPkPhase(node, battle, punishing) {
+  node.hidden = !punishing;
+  if (!punishing) {
+    node.textContent = "";
+    node.title = "";
+    return;
+  }
+  node.textContent = battle.punish_measured ? "勝利時間" : "勝利時間（目安）";
+  node.title = battle.punish_measured
+    ? "PK終了後の勝利（罰ゲーム）時間です。終わりはTikTokの終了eventで実測しています。"
+      + "スコアはPKの確定値で止めています。"
+    : "PK終了後の勝利（罰ゲーム）時間です。終わりの合図が録れていないので、次のPKの開始と"
+      + "実測上限の180秒のうち早い方までを目安に出しています。スコアはPKの確定値です。";
 }
 
 // 再生位置で変わる所だけを書き換える。timeupdateは毎秒4回来るので、値が動いていない
@@ -1929,7 +2158,17 @@ function renderPkNow(battle, now) {
 function paintPkLive() {
   if (!pkLiveNodes) return;
   const battle = pkLiveNodes.battle;
-  const sample = battleSampleAt(battle, $("video").currentTime);
+  const now = $("video").currentTime;
+  const punishing = now > battle.end && battle.punish_end != null;
+  if (punishing !== pkLiveNodes.punishing) {
+    pkLiveNodes.punishing = punishing;
+    paintPkPhase(pkLiveNodes.phase, battle, punishing);
+  }
+  // 勝利時間のバーは確定scoreの時点で止める。score_seriesはPK後も続き、相手が枠から
+  // 抜けると敵陣scoreが落ちて0対0まで潰れるので、そのまま引くと勝った戦が引き分けに
+  // 見える(確定時点はserverが同じruleで決めた settled_at)。
+  const at = punishing ? (battle.settled_at != null ? battle.settled_at : battle.end) : now;
+  const sample = battleSampleAt(battle, at);
   if (sample === pkLiveNodes.sample) return;
   pkLiveNodes.sample = sample;
   pkLiveNodes.barHost.replaceChildren(buildPkScoreBar(battle, sample));
@@ -1966,23 +2205,34 @@ function renderPkGifts(battle) {
   }
   state.gifts.forEach((gift, index) => {
     // 帰属はserverが貢献集計と同じ窓で決めている(画面とBattle cardで同じgiftが別のPKへ
-    // 数えられないようにするため)。ここで時刻から引き直さない。
-    if (gift.battle === battle.ordinal) pkGiftItems.push({ gift, index });
+    // 数えられないようにするため)。ここで時刻から引き直さない。punishはその戦の勝利時間に
+    // 飛んだ分で、窓はPKの外なので貢献(battle)とは重ならない。
+    if (gift.battle === battle.ordinal) pkGiftItems.push({ gift, index, punish: false });
+    else if (gift.punish === battle.ordinal) pkGiftItems.push({ gift, index, punish: true });
   });
   const count = document.createElement("span");
+  // 勝利時間ぶんは別枠で数える。1件も無ければ出さない(常に0件と出ていると、演出中の
+  // ギフトを取りこぼしているのか元から無いのかが読めない)。
+  const punishSum = document.createElement("span");
+  punishSum.className = "vd-pk-punish-sum";
+  punishSum.hidden = true;
   const coin = document.createElement("span");
   coin.className = "vd-pk-coin";
-  head.append(count, coin);
+  head.append(count, punishSum, coin);
   head.title = "この配信者の枠へ飛んだギフトです（相手の枠のギフトは含みません）。"
-    + "「ここまで / この戦の合計」で数えています。";
+    + "「ここまで / この戦の合計」で数えています。PK終了後の勝利時間に飛んだ分は"
+    + "スコアにも貢献にも入らないので、別に数えます。";
   // 行は先に全部作っておき、DOMへは再生位置まで届いた分だけを入れる(下のsyncPkGiftFeed)。
   // 作るのを都度にすると、巻き戻しのたびに同じ行を作り直すことになる。
-  pkGiftItems.forEach((item) => pkGiftRows.push(buildGiftRow(item.gift, item.index)));
+  pkGiftItems.forEach(
+    (item) => pkGiftRows.push(buildGiftRow(item.gift, item.index, item.punish)));
   pkGiftHead = {
     count,
     coin,
-    // その戦の合計。行が増えていく間、あと何件・いくら来るのかがこれで読める。
-    totalCoins: pkGiftItems.reduce((sum, item) => sum + item.gift.diamonds, 0),
+    punish: punishSum,
+    // その戦の合計。行が増えていく間、あと何件・いくら来るのかがこれで読める。PKと勝利時間は
+    // 別々に数える(勝利時間のコインはスコアにも貢献にも入らない)。
+    total: giftTally(pkGiftItems),
   };
   paintPkGiftHead(0);
   const empty = document.createElement("div");
@@ -2036,15 +2286,34 @@ function syncPkGiftFeed() {
   stickPkGiftsToBottom();
 }
 
+// PKぶんと勝利時間ぶんの件数・コインを数える。
+function giftTally(items) {
+  const tally = { count: 0, coins: 0, punishCount: 0, punishCoins: 0 };
+  items.forEach((item) => {
+    if (item.punish) {
+      tally.punishCount += 1;
+      tally.punishCoins += item.gift.diamonds;
+    } else {
+      tally.count += 1;
+      tally.coins += item.gift.diamonds;
+    }
+  });
+  return tally;
+}
+
 // 見出しは「ここまで / この戦の合計」。合計を落とすと、あと何件来るのかが読めない。
 function paintPkGiftHead(shown) {
   if (!pkGiftHead) return;
-  const coins = pkGiftItems.slice(0, shown)
-    .reduce((sum, item) => sum + item.gift.diamonds, 0);
+  const here = giftTally(pkGiftItems.slice(0, shown));
+  const total = pkGiftHead.total;
   pkGiftHead.count.textContent =
-    `味方へのギフト ${fmtNum(shown)} / ${fmtNum(pkGiftItems.length)}件`;
+    `味方へのギフト ${fmtNum(here.count)} / ${fmtNum(total.count)}件`;
   pkGiftHead.coin.textContent =
-    `${fmtNum(coins)} / ${fmtNum(pkGiftHead.totalCoins)} コイン`;
+    `${fmtNum(here.coins)} / ${fmtNum(total.coins)} コイン`;
+  pkGiftHead.punish.hidden = total.punishCount === 0;
+  pkGiftHead.punish.textContent = total.punishCount === 0 ? ""
+    : `勝利時間 ${fmtNum(here.punishCount)} / ${fmtNum(total.punishCount)}件`
+      + ` ${fmtNum(here.punishCoins)} / ${fmtNum(total.punishCoins)} コイン`;
 }
 
 // 追従ONの間は下端に貼り付ける。積み上がる一覧では「今の行」は常に一番下で、
@@ -2252,6 +2521,12 @@ async function toggleCommentBookmark(comment, button) {
   }
 }
 
+// 見どころ1件を塗る色。切り抜き候補だけ別の役の色で、表の行色と同じ根拠(origin)で選ぶ。
+// 波形の上と一覧の行で違う色になると、同じ物を指していることが読めない。
+function markToken(mark) {
+  return isPickMark(mark) ? "--pick" : "--ramp";
+}
+
 // heat bar上のmarker。点は逆三角、範囲は下端の帯にして、IN/OUTの緑赤とは別の色で描く。
 function drawBookmarks(ctx, width, height, duration) {
   if (!state.bookmarks.length) return;
@@ -2260,7 +2535,7 @@ function drawBookmarks(ctx, width, height, duration) {
   state.bookmarks.forEach((mark) => {
     const x = toX(mark.start);
     if (x < 0 || x > width) return;
-    ctx.fillStyle = cssTokenAlpha("--ramp", 0.85);
+    ctx.fillStyle = cssTokenAlpha(markToken(mark), 0.85);
     if (mark.end !== null && mark.end !== undefined) {
       ctx.fillRect(x, top, Math.max(2, toX(mark.end) - x), BOOKMARK_LANE_PX);
       return;
@@ -2281,7 +2556,6 @@ function drawBookmarks(ctx, width, height, duration) {
 // 全尺barと拡大窓が別の写像を渡してくる。
 function drawMarkBands(ctx, top, bottom, width, toX, alpha) {
   if (!state.bookmarks.length) return;
-  ctx.fillStyle = cssTokenAlpha("--ramp", alpha);
   state.bookmarks.forEach((mark) => {
     if (mark.end === null || mark.end === undefined) return;
     const x0 = toX(mark.start);
@@ -2289,6 +2563,7 @@ function drawMarkBands(ctx, top, bottom, width, toX, alpha) {
     if (x1 < 0 || x0 > width) return;
     const left = Math.max(0, x0);
     const right = Math.min(width, x1);
+    ctx.fillStyle = cssTokenAlpha(markToken(mark), alpha);
     ctx.fillRect(left, top, Math.max(1, right - left), bottom - top);
   });
 }
@@ -2297,9 +2572,9 @@ function drawMarkBands(ctx, top, bottom, width, toX, alpha) {
 // ―― 窓の縁に線を引くと、そこが範囲の切れ目だと誤読される。
 function drawMarkEdges(ctx, top, bottom, width, toX) {
   if (!state.bookmarks.length) return;
-  ctx.fillStyle = cssTokenAlpha("--ramp", 0.9);
   state.bookmarks.forEach((mark) => {
     if (mark.end === null || mark.end === undefined) return;
+    ctx.fillStyle = cssTokenAlpha(markToken(mark), 0.9);
     [toX(mark.start), toX(mark.end)].forEach((x) => {
       if (x < 0 || x > width) return;
       ctx.fillRect(x - 1, top, 2, bottom - top);
@@ -2342,6 +2617,28 @@ function isRanged(mark) {
 // 埋めるので既定では出さない(消えているのではなく隠れているだけ)。
 function isAutoMark(mark) {
   return mark.origin === "auto";
+}
+
+// 出所の名乗り。manualは人が付けた既定なので何も言わない(全行に「手動」と書くと、
+// 名乗りが情報でなく地になる)。
+const MARK_ORIGIN_LABELS = { auto: "自動", pick: "切り抜き候補" };
+
+function markOriginLabel(mark) {
+  return MARK_ORIGIN_LABELS[mark.origin] || "—";
+}
+
+// 機械が「ここを切り抜く価値がある」と推した行。章立て(再生画面の目次)から選ばれたもので、
+// 色を変えて出す唯一の根拠がこれである ―― 尺の有無で色を変えると、人が範囲を詰めた
+// 見どころまで候補の色になる。
+function isPickMark(mark) {
+  return mark.origin === "pick";
+}
+
+// 出所の列を出すかどうか。自動生成を隠している間でも、章・切り抜き候補が並んでいれば
+// その列は読む物を持つ。「自動を出す」の設定だけで列を畳むと、色の付いた行が並んでいるのに
+// 根拠の列が消える。
+function hasOriginToShow(rows) {
+  return rows.some((mark) => markOriginLabel(mark) !== "—");
 }
 
 // グループ選択と「自動生成も出す」を掛けた表示対象。グループを選んでいる間はposition順
@@ -2416,7 +2713,10 @@ function bindGroupMemo(inputId, statusId) {
 // 何を並べているかはこの1行が持つ(棚の反転だけでは、表の側から読めない)。
 function renderMarksHead() {
   const grouped = isGroupSelected();
-  const group = selectedGroup();
+  // 一覧より先にこの再描画が走る瞬間があるので(型の読み込みが呼ぶ)、選択中のグループが
+  // まだ手元に無いことがある。名前はgroupNameOfへ通して、その瞬間でも選択が外れたように
+  // 見せない(見出しとbuttonのtooltipで別々に落ちないよう、1つの値から名乗る)。
+  const groupName = grouped ? groupNameOf(Number(state.groupSel)) : "";
   const rows = visibleMarks();
   const ranged = rows.filter(isRanged);
   // 対象は「選択があれば選択・無ければ表示中の全件」で切り替わるので、どちらで走るかを
@@ -2431,8 +2731,8 @@ function renderMarksHead() {
   $("cuts-scope").textContent = hasMarkSelection()
     ? `対象: 選択中の${fmtNum(picked.length)}件（${groupScopeLabel(state.groupSel)}${excluded}）`
     : `対象: ${groupScopeLabel(state.groupSel)}の${fmtNum(picked.length)}件${excluded}`;
-  $("marks-list-title").textContent = group
-    ? `■ ${group.name} ／ 見どころ（書き出し順）`
+  $("marks-list-title").textContent = grouped
+    ? `■ ${groupName} ／ 見どころ（書き出し順）`
     : "■ 見どころ";
   const exportButton = $("cuts-export");
   exportButton.disabled = picked.length === 0;
@@ -2455,7 +2755,7 @@ function renderMarksHead() {
     : !workPresetsReady
       ? "作品の型がありません。設定画面の「shortの型」で作成してください。"
       : grouped
-        ? `「${group.name}」の尺のある${fmtNum(ranged.length)}件を、テロップを焼いて間を詰めた1本の作品にします`
+        ? `「${groupName}」の尺のある${fmtNum(ranged.length)}件を、テロップを焼いて間を詰めた1本の作品にします`
           + "（行の選択には従いません）。連結と違い全編を焼き直すので時間がかかります。"
         : "グループを選んでください。作品はグループ1件が単位です。";
 }
@@ -2733,7 +3033,7 @@ function renderMarks() {
   // 中身が「—」の列に幅を割かない。
   const table = $("mark-table");
   table.classList.toggle("vd-cutlist-flat", !grouped);
-  table.classList.toggle("vd-hide-origin", !state.showAuto);
+  table.classList.toggle("vd-hide-origin", !hasOriginToShow(rows));
   // 表示から消えた行の選択は捨てる(見えない行への一括操作を残さない)。
   const visibleIds = new Set(rows.map((mark) => mark.id));
   state.marksSelected = new Set([...state.marksSelected].filter((id) => visibleIds.has(id)));
@@ -2798,7 +3098,7 @@ function renderMarks() {
         watch,
         pick,
         grouped ? String(rowNumber) : "—",
-        isAutoMark(mark) ? "自動" : "—",
+        markOriginLabel(mark),
         identityCell(mark.unique_id, cont),
         identityCell(fmtYmd(mark.recording_started_at), cont),
         markRangeInput(mark, "start"),
@@ -2811,6 +3111,10 @@ function renderMarks() {
     [2, 6, 7],
     (tr, mark, index) => {
       if (continuesRecording(rows, index)) tr.classList.add("vd-cont");
+      // 切り抜き候補の色。出所の列(4列目)へclassを載せてから行へ付ける ―― 塗るのは
+      // 左の縦線と、そう判断した根拠の列だけである。
+      if (tr.cells[3]) tr.cells[3].classList.add("mark-origin");
+      if (isPickMark(mark)) tr.classList.add("row-pick");
       tr.dataset.playKey = String(mark.id);
       bindRowDrag(tr, "marks", mark.id);
       // 並べ替えはグループを選んでいる間だけ。「全て」「未分類」では順が定まらないので、
@@ -2989,6 +3293,8 @@ function createInlinePlayer(prefix, noun, onWatch) {
   let watching = null;
   // 範囲付きの終端。ここで一度止める。nullなら止めない。
   let stopAt = null;
+  // 再生listの引き直し(hlsPlaylistMayBeStale 参照)。
+  const gate = hlsReloadGate();
 
   // 右列は畳まない(畳むと観るたび左の表幅が動き、行を追えなくなる)。playerを下げている
   // 間は同じ場所に案内を出し、列そのものは残す。
@@ -3017,58 +3323,44 @@ function createInlinePlayer(prefix, noun, onWatch) {
 
   // 位置決めは尺が分かってからでないと効かない。読み込み途中なら分かった時点で入れる。
   // 待っている間に別の行へ移っていたら、こちらの位置は古いので捨てる。
-  function seekTo(at, want) {
+  // resumeがfalseなら位置だけ入れる — 止めてあった再生を、listの引き直しのついでに
+  // 始めてしまわないため。
+  function seekTo(at, want, resume = true) {
     const video = el("video");
-    if (video.readyState >= 1) {
+    const place = () => {
       video.currentTime = at;
-      video.play().catch(() => {});
+      if (resume) video.play().catch(() => {});
+    };
+    if (video.readyState >= 1) {
+      place();
       return;
     }
     video.addEventListener(
       "loadedmetadata",
       () => {
         if (want !== token) return;
-        video.currentTime = at;
-        video.play().catch(() => {});
+        place();
       },
       { once: true },
     );
   }
 
-  async function play(item) {
-    // 本編playerと同時には鳴らさない。画面は別でも音は重なる。
-    $("video").pause();
+  // 録画を読み込み直して ``at`` から観る。playlistを持ち直す経路はここだけ。
+  // recoveringは失効したlistの引き直し(hlsPlaylistMayBeStale 参照)で、人が起こした
+  // 読み込みだけが引き直しの権利を戻す。
+  async function open(recordingId, at, { resume = true, recovering = false } = {}) {
     const video = el("video");
-    const hasRange = item.end !== null && item.end !== undefined;
-    watching = item;
-    stopAt = hasRange ? item.end : null;
-    stage(true);
-    // 印は読み込みの前に移す。HLSを張り直す数秒のあいだ前の行が「今の行」を名乗ったままだと、
-    // 見出し(play-head)と表の印が別々の行を指す。
-    if (onWatch) onWatch();
-    // 素材版が元録画固定であることを名乗る。シーン検索側で「焼き込み」を選んで作業した後、
-    // ここで出来を確かめるつもりで観ると素のままの映像が出て、焼き込みが失敗していると
-    // 誤読する。切り替えて確かめる先(シーン検索視聴)も同じ場所で案内する。
-    const head = el("play-head");
-    head.textContent =
-      `${item.unique_id} / ${fmtDateTime(item.recording_started_at)} / ${fmtDuration(item.start)}`
-      + (hasRange ? ` - ${fmtDuration(item.end)}` : "")
-      + ` / 素材: ${VARIANT_LABELS.source}`;
-    head.title = "この場での再生は常に元録画です（焼き込み・Up出力の出来は確かめられません）。";
-    // 同じ録画の中を移るだけなら読み込み直さない(HLSを張り直すと数秒待たされる)。
-    if (loadedId === item.recording_id) {
-      say("");
-      seekTo(item.start, (token += 1));
-      return;
-    }
-    say("読み込み中…");
+    if (!recovering) gate.reset();
+    say(recovering
+      ? "素材の置き場所が変わりました。再生listを取り直しています…"
+      : "読み込み中…");
     const want = (token += 1);
     let playback;
     try {
       // 素材版は元録画に固定する。切り出し素材の指定(clip-variant)は出来上がりの確認用で、
       // どの場面かを確かめるのとは目的が違う。
       playback = await apiSend(
-        "GET", `/api/recordings/${item.recording_id}/playback?variant=source`);
+        "GET", `/api/recordings/${recordingId}/playback?variant=source`);
     } catch (err) {
       // 見出し(play-head)は既に新しい行を名乗っている。前の録画の映像を残すと、見出しと
       // 映像が別の場面を指したままになり、どの場面を観ているのか読めなくなる。
@@ -3094,9 +3386,17 @@ function createInlinePlayer(prefix, noun, onWatch) {
       hls = new window.Hls();
       hls.loadSource(playback.url);
       hls.attachMedia(video);
+      // 引き直しが効いた(bufferへ入った)ら、次の失敗もまた引き直してよい。
+      hls.on(window.Hls.Events.FRAG_BUFFERED, () => gate.reset());
       hls.on(window.Hls.Events.ERROR, (_e, data) => {
         // hls.jsが握った失敗は<video>のerror eventにならないので、ここで理由を出す。
-        if (data.fatal) say("この録画を再生できませんでした。");
+        if (!data.fatal) return;
+        // ts結合で素材の置き場所が変わっただけなら、listを引き直せば同じ位置から続く。
+        if (hlsPlaylistMayBeStale(data) && loadedId !== null && gate.take()) {
+          open(loadedId, video.currentTime, { resume: !video.paused, recovering: true });
+          return;
+        }
+        say("この録画を再生できませんでした。");
       });
     } else if (playback.mode === "hls" && !video.canPlayType("application/vnd.apple.mpegurl")) {
       say("このBrowserはHLS再生に対応していません。");
@@ -3104,9 +3404,37 @@ function createInlinePlayer(prefix, noun, onWatch) {
     } else {
       video.src = playback.url;
     }
-    loadedId = item.recording_id;
+    loadedId = recordingId;
     say(playback.mode === "hls" ? "" : "この録画は.tsが残っていないため、mp4を再生しています。");
-    seekTo(item.start, want);
+    seekTo(at, want, resume);
+  }
+
+  async function play(item) {
+    // 本編playerと同時には鳴らさない。画面は別でも音は重なる。
+    $("video").pause();
+    const hasRange = item.end !== null && item.end !== undefined;
+    watching = item;
+    stopAt = hasRange ? item.end : null;
+    stage(true);
+    // 印は読み込みの前に移す。HLSを張り直す数秒のあいだ前の行が「今の行」を名乗ったままだと、
+    // 見出し(play-head)と表の印が別々の行を指す。
+    if (onWatch) onWatch();
+    // 素材版が元録画固定であることを名乗る。シーン検索側で「焼き込み」を選んで作業した後、
+    // ここで出来を確かめるつもりで観ると素のままの映像が出て、焼き込みが失敗していると
+    // 誤読する。切り替えて確かめる先(シーン検索視聴)も同じ場所で案内する。
+    const head = el("play-head");
+    head.textContent =
+      `${item.unique_id} / ${fmtDateTime(item.recording_started_at)} / ${fmtDuration(item.start)}`
+      + (hasRange ? ` - ${fmtDuration(item.end)}` : "")
+      + ` / 素材: ${VARIANT_LABELS.source}`;
+    head.title = "この場での再生は常に元録画です（焼き込み・Up出力の出来は確かめられません）。";
+    // 同じ録画の中を移るだけなら読み込み直さない(HLSを張り直すと数秒待たされる)。
+    if (loadedId === item.recording_id) {
+      say("");
+      seekTo(item.start, (token += 1));
+      return;
+    }
+    await open(item.recording_id, item.start);
   }
 
   return {
@@ -3686,6 +4014,124 @@ async function loadWaveform(recordingId) {
     }
   }
   drawTimeline();
+}
+
+// ===== 再生音量の均し =====
+// 配信ごと・場面ごとに音量が20 dB以上開くため、そのままだと静かな一人喋りに合わせると
+// battleで音が割れ、battleに合わせると喋りが聞こえない。録画のfileは書き換えず、serverが
+// 先に測っておいたgainの時系列(/gain)をGainNodeで当てて揃える。原本の音声はそのまま残り、
+// checkboxを切ればその場で素の音に戻る。
+//
+// 適用後のsample peakが天井を超えないことは曲線の作り方で保証されているので、limiterは
+// 置かない(media/loudness.py)。無言早送りが下げるvideo.volumeとは掛け算で重なるだけで、
+// どちらも相手を知らなくてよい。
+
+// AudioContextとMediaElementAudioSourceNodeは<video> 1つにつき1回しか作れない(2度目は
+// InvalidStateError)。録画を切り替えても同じ<video>を使い回すので、graphはmodule levelに
+// 1組だけ持つ。曲線が実際に要るまで作らないのは、作った時点で音声が必ずgraphを通るように
+// なるためで、使わない利用者の再生経路を変えない。
+let gainCtx = null;
+let gainNode = null;
+let gainFrame = 0;
+
+// graphを作れなかった理由。黙って素の音を流すと「揃っているつもりの揃っていない音」を
+// 聞かせることになるので、必ず名乗る。
+function buildGainGraph() {
+  if (gainNode) return "";
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return "このBrowserはWeb Audioに対応していないため、音量を揃えられません。";
+  try {
+    gainCtx = new Ctx();
+    const source = gainCtx.createMediaElementSource($("video"));
+    gainNode = gainCtx.createGain();
+    source.connect(gainNode);
+    gainNode.connect(gainCtx.destination);
+  } catch (err) {
+    gainCtx = null;
+    gainNode = null;
+    return `音量を揃える経路を作れませんでした: ${err.message}`;
+  }
+  return "";
+}
+
+// 曲線のうち``seconds``地点の値(dB)。刻みはserverが決めた``step_seconds``で、補間は要らない
+// (曲線は既にslewで滑らかにしてある)。
+function gainDbAt(seconds) {
+  const curve = state.gain;
+  if (!curve || !curve.gains || !curve.gains.length) return 0;
+  const step = Number(curve.step_seconds) || 0.1;
+  // 刻みちょうどの位置で1つ手前を引かないよう余裕を足す。0.3/0.1 は 2.9999… になるため、
+  // そのまま切り捨てると境界のたびにgainが1刻み遅れる。
+  const index = Math.floor(Math.max(0, seconds) / step + 1e-9);
+  return curve.gains[Math.min(index, curve.gains.length - 1)];
+}
+
+// 今の再生位置のgainをGainNodeへ当てる。倍率(無言早送り)が掛かっていても再生位置から引く
+// ので、速さを知る必要は無い。setTargetAtTimeで寄せるのは、pollの刻みが段差として出るのを
+// 避けるためで、曲線そのものを鈍らせる意図ではない(時定数は刻みより短い)。
+function applyGainNow() {
+  if (!gainNode || !gainCtx) return;
+  const on = $("playback-gain").checked && state.gain && state.gain.enabled !== false;
+  const db = on ? gainDbAt($("video").currentTime) : 0;
+  gainNode.gain.setTargetAtTime(Math.pow(10, db / 20), gainCtx.currentTime, 0.05);
+}
+
+// 再生中だけ回す。止まっている間は位置が動かないので、1回当てて降りる。
+function pumpGain() {
+  gainFrame = 0;
+  applyGainNow();
+  if (!$("video").paused) gainFrame = window.requestAnimationFrame(pumpGain);
+}
+
+function startGain() {
+  if (gainFrame) return;
+  gainFrame = window.requestAnimationFrame(pumpGain);
+}
+
+// 自動再生policyでAudioContextはsuspendedで生まれる。resumeを忘れると、graphを通した
+// 音声が丸ごと鳴らなくなる(音量が揃わないのではなく無音になる)。再生操作のたびに起こす。
+function resumeGainContext() {
+  if (gainCtx && gainCtx.state === "suspended") gainCtx.resume().catch(() => {});
+}
+
+function renderGainNote(message) {
+  $("gain-note").textContent = message;
+}
+
+async function loadGainCurve(recordingId) {
+  state.gain = null;
+  if (!$("playback-gain").checked) {
+    renderGainNote("");
+    applyGainNow();
+    return;
+  }
+  renderGainNote("音量を測定中…");
+  let data;
+  try {
+    data = await apiSend("GET", `/api/recordings/${recordingId}/gain`);
+  } catch (err) {
+    if (state.current && state.current.recording_id === recordingId) renderGainNote(err.message);
+    return;
+  }
+  if (!state.current || state.current.recording_id !== recordingId) return;
+  if (data.enabled === false) {
+    // 設定で切ってある。checkboxだけが有効に見えている状態を残さない。
+    renderGainNote("設定で「再生時に音量を揃える」が無効です。");
+    return;
+  }
+  const failure = buildGainGraph();
+  if (failure) {
+    renderGainNote(failure);
+    return;
+  }
+  state.gain = data;
+  resumeGainContext();
+  const gains = data.gains || [];
+  const low = Math.min(...gains);
+  const high = Math.max(...gains);
+  renderGainNote(gains.length ? `音量を揃えています（${low.toFixed(1)}〜${high.toFixed(1)} dB）` : "");
+  applyGainNow();
+  startGain();
 }
 
 // ===== 無音skip再生 =====
@@ -4297,20 +4743,27 @@ function secondsFromClientX(clientX) {
   return secondsFromRect(heat, heat.getBoundingClientRect(), clientX);
 }
 
-function showThumb(clientX) {
+// 全尺barと拡大窓で1つのthumbを使い回す。2枚持つと、片方を隠し忘れたときに2枚出る。
+// 出す先のwrapperへ移してから測る(thumbはwrapperに対する絶対配置)。
+// 拡大窓ではspriteの間隔(録画の尺で2〜45秒)より窓が狭いことがあり、絵は隣の秒のものに
+// なる。それでも「今どのあたりの場面か」は分かるので、粗いまま出す。
+function showThumb(barId, clientX) {
   const spec = state.sprite;
   const thumb = $("thumb");
+  const bar = $(barId);
+  const host = bar.parentElement;
+  if (thumb.parentElement !== host) host.appendChild(thumb);
   // 位置決めに要る寸法は、styleを書き始める前にまとめて読む。読みと書きが交互になると
-  // そのたびlayoutの再計算を待つことになる。thumbはwrapperに対する絶対配置なので、
-  // 先に測っても出し入れの影響を受けない。
-  const heat = $("heat");
-  const rect = heat.getBoundingClientRect();
-  const seconds = secondsFromRect(heat, rect, clientX);
+  // そのたびlayoutの再計算を待つことになる。
+  const rect = bar.getBoundingClientRect();
+  const seconds = barId === "zoom"
+    ? zoomSecondsFromClientX(clientX)
+    : secondsFromRect(bar, rect, clientX);
   if (!spec || seconds === null) {
     thumb.classList.add("hidden");
     return;
   }
-  const wrap = thumb.parentElement.getBoundingClientRect();
+  const wrap = host.getBoundingClientRect();
   const index = Math.min(spec.count - 1, Math.floor(seconds / spec.interval_seconds));
   const column = index % spec.columns;
   const row = Math.floor(index / spec.columns);
@@ -4326,6 +4779,10 @@ function showThumb(clientX) {
   const left = Math.min(wrap.width - spec.tile_width, Math.max(0, clientX - wrap.left - half));
   thumb.style.left = `${left}px`;
   thumb.style.bottom = `${rect.height + 4}px`;
+}
+
+function hideThumb() {
+  $("thumb").classList.add("hidden");
 }
 
 function seekFromHeat(clientX) {
@@ -4419,53 +4876,64 @@ const HEAT_CURSORS = {
   zoompan: "grab",
 };
 
-// 全尺bar上のpointer追従(cursorの形・thumbnail・drag)。pointermoveは1frameに何度も届く
-// (高refresh rateのmouseでは桁が違う)一方、出せる絵は1frameに1枚しかない。届いた最後の
-// 位置だけをframeの頭で処理する。
-let heatMoveEvent = null;
-let heatMoveFrame = null;
+// 全尺bar／拡大窓上のpointer追従(cursorの形・thumbnail・drag)。pointermoveは1frameに
+// 何度も届く(高refresh rateのmouseでは桁が違う)一方、出せる絵は1frameに1枚しかない。
+// 届いた最後の位置だけをframeの頭で処理する。掴めるbarは同時に1つなので溜め先も1つでよく、
+// どちらのbarの位置かをbarIdで持つ。
+let barMoveEvent = null;
+let barMoveBar = null;
+let barMoveFrame = null;
 
-function applyHeatMove(event) {
-  // dragMode自体がdown〜upの間だけ立つので、captureの成否には依存させない。
+function applyBarMove(barId, event) {
+  const onZoom = barId === "zoom";
+  // dragMode自体がdown〜upの間だけ立つので、captureの成否には依存させない。ただし
+  // dragを始めたbarでだけ動かす(掴んでいない側の換算で送ると範囲が飛ぶ)。
   if (dragMode) {
-    dragRange(event);
+    if (onZoom === dragOnZoom) dragRange(event);
   } else {
-    $("heat").style.cursor =
-      HEAT_CURSORS[hitTestHeat(event.clientX, event.clientY, event.pointerType)];
+    $(barId).style.cursor = HEAT_CURSORS[onZoom
+      ? hitTestZoom(event)
+      : hitTestHeat(event.clientX, event.clientY, event.pointerType)];
   }
-  showThumb(event.clientX);
+  showThumb(barId, event.clientX);
 }
 
 // 溜めてある位置を今すぐ反映する。dragの終わりは最後の位置まで入れてから確定させないと、
 // 離す直前の詰めが1frameぶん捨てられる。
-function flushHeatMove() {
-  if (heatMoveFrame !== null) {
-    cancelAnimationFrame(heatMoveFrame);
-    heatMoveFrame = null;
+function flushBarMove() {
+  if (barMoveFrame !== null) {
+    cancelAnimationFrame(barMoveFrame);
+    barMoveFrame = null;
   }
-  const event = heatMoveEvent;
-  heatMoveEvent = null;
-  if (event) applyHeatMove(event);
+  const event = barMoveEvent;
+  const barId = barMoveBar;
+  barMoveEvent = null;
+  barMoveBar = null;
+  if (event) applyBarMove(barId, event);
 }
 
 // barから出た/操作が取り消された場合。溜めてある位置は捨てる(thumbを隠した後に
 // 積み残しが動くと、離れているのに出たままになる)。
-function cancelHeatMove() {
-  if (heatMoveFrame !== null) {
-    cancelAnimationFrame(heatMoveFrame);
-    heatMoveFrame = null;
+function cancelBarMove() {
+  if (barMoveFrame !== null) {
+    cancelAnimationFrame(barMoveFrame);
+    barMoveFrame = null;
   }
-  heatMoveEvent = null;
+  barMoveEvent = null;
+  barMoveBar = null;
 }
 
-function scheduleHeatMove(event) {
-  heatMoveEvent = event;
-  if (heatMoveFrame !== null) return;
-  heatMoveFrame = requestAnimationFrame(() => {
-    heatMoveFrame = null;
-    const latest = heatMoveEvent;
-    heatMoveEvent = null;
-    if (latest) applyHeatMove(latest);
+function scheduleBarMove(barId, event) {
+  barMoveEvent = event;
+  barMoveBar = barId;
+  if (barMoveFrame !== null) return;
+  barMoveFrame = requestAnimationFrame(() => {
+    barMoveFrame = null;
+    const latest = barMoveEvent;
+    const bar = barMoveBar;
+    barMoveEvent = null;
+    barMoveBar = null;
+    if (latest) applyBarMove(bar, latest);
   });
 }
 
@@ -4509,7 +4977,7 @@ function finishRangeDrag(event) {
   const mode = dragMode;
   dragMode = null;
   // capture中はpointerleaveが来ないので、bar外で離してもthumbが残らないよう明示的に隠す。
-  $("thumb").classList.add("hidden");
+  hideThumb();
   if (!mode || mode === "seek" || mode === "zoompan") return;
   if (state.cutIn === null || state.cutOut === null) return;
   if (event.altKey) return;
@@ -4558,7 +5026,7 @@ function setCut(inSec, outSec) {
   $("preview-in").disabled = inSec === null || !state.current;
   $("preview-out").disabled = outSec === null || !state.current;
   syncAddMarkButton();
-  syncControlGroupNotes(valid);
+  syncControlGroupNotes();
   drawTimeline();
 }
 
@@ -4575,7 +5043,7 @@ function existingMarkFor(recordingId, start, end) {
 }
 
 // 記録の口は1つで、入力の状態によって入る物が変わる。何が入るのかをbutton自身に言わせる
-// —— 「見どころに記録」とだけ書いてあると、IN/OUTを引いた状態で押した人は点が入ったのか
+// —— 「見どころ記録」とだけ書いてあると、IN/OUTを引いた状態で押した人は点が入ったのか
 // 範囲が入ったのかを、押した後に一覧を見に行くまで確かめられない。
 // 既に同じ範囲が在るときは押せなくする。押しても成功と出るだけで、重複は一括書き出しで
 // 同じmp4が2本出るまで見えなかった。
@@ -4589,7 +5057,7 @@ function syncAddMarkButton() {
   button.disabled = !state.current || Boolean(twin);
   button.textContent = twin
     ? "記録済"
-    : (ranged ? "見どころに記録（尺あり）" : "見どころに記録（点）");
+    : (ranged ? "見どころ記録（尺あり）" : "見どころ記録（点）");
   button.title = twin
     ? `この範囲は既に見どころ（${groupNameOf(twin.group_id) || "未分類"}）にあります。`
     : (ranged
@@ -4606,7 +5074,7 @@ function currentClipLabel() {
 
 // 押せない理由を群の見出し横に1行で出す。button個々のtitleにしか無いと、hoverして回るまで
 // 「今なにができるか」が読めない。
-function syncControlGroupNotes(hasRange) {
+function syncControlGroupNotes() {
   // 拡大窓の操作は尺が決まるまで何も起こせない(panZoom/zoomByが無言でreturnする)。
   // 押せるまま残すと、押しても何も起きないbuttonになる。
   ["zoom-left", "zoom-right", "zoom-out", "zoom-in"].forEach((id) => {
@@ -4623,7 +5091,7 @@ function syncControlGroupNotes(hasRange) {
     return;
   }
   clipNote.textContent = "";
-  outNote.textContent = hasRange ? "" : "IN/OUTを決めると切り出しへ回せます";
+  outNote.textContent = "";
 }
 
 // IN/OUT欄の手打ちを確定する。空にすればその側を解除。読めない入力は元の値へ戻す
@@ -5343,7 +5811,7 @@ function openDestPicker() {
     item.append(tick, name, count);
     item.title = entry.value === "none"
       ? "グループに入れずに記録します。後から一覧のグループ欄で仕分けられます。"
-      : `以後の「見どころに記録」を「${entry.label}」へ入れます。`;
+      : `以後の「見どころ記録」を「${entry.label}」へ入れます。`;
 
     item.addEventListener("click", () => {
       closeRowMenu();
@@ -7051,7 +7519,8 @@ function renderSemantic(status) {
     const parts = [];
     if (stale) parts.push(`${fmtNum(stale)}件が張り直し後で検索から除外中`);
     if (unindexed) parts.push(`${fmtNum(unindexed)}件が未index`);
-    note.textContent = `${parts.join(" / ")}。indexを更新すると検索対象に戻ります。`;
+    // 自動でも埋まる(sweepの周期)ので、今すぐ要るかどうかをuserが決められるように書く。
+    note.textContent = `${parts.join(" / ")}。自動生成のsweepでも埋まりますが、今すぐ検索対象へ戻すならindexを更新してください。`;
   } else {
     note.textContent = "";
   }
@@ -7071,7 +7540,7 @@ async function loadSemantic() {
 // 種別のラベルはserver側のMEDIA_JOB_TITLESと同じ語を使う。画面ごとに言い換えると、
 // Job画面に並ぶjob titleと突き合わせられなくなる。
 const BULK_LABELS = {
-  transcribe: "文字起こし", laugh: "笑い声分析", voice: "無音skipの解析",
+  transcribe: "文字起こし", laugh: "笑い声分析", voice: "無音skipの解析", gain: "再生gain曲線",
   overlay: "焼き込み出力", upscale: "Up出力", reprocess: "再mp4化", audionorm: "音量正規化",
   pack: "ts結合", delete_mp4: "元mp4の削除",
 };
@@ -7093,8 +7562,8 @@ const BULK_SKIP_LABELS = {
 };
 // 表の列の並び。作る種別を先に、消す種別を最後に置く。BULK_LABELSのkey順に頼らない
 // (順序を持たないobjectに表の並びを預けると、種別を足したときに列が任意の位置へ入る)。
-const BULK_KIND_ORDER = ["transcribe", "laugh", "voice", "overlay", "upscale", "reprocess",
-  "audionorm", "pack", "delete_mp4"];
+const BULK_KIND_ORDER = ["transcribe", "laugh", "voice", "gain", "overlay", "upscale",
+  "reprocess", "audionorm", "pack", "delete_mp4"];
 // 種別ごとの「何に触れて何を残すか」。列見出しのhoverと、投入前の確認に出す。恒常的な
 // 説明を確認paneだけに置くと、押す前(=どの列を押すか選ぶとき)には読めない。
 const BULK_KIND_NOTES = {
@@ -7105,10 +7574,14 @@ const BULK_KIND_NOTES = {
     + "文字にしません）。コラボ・Battle中は数えません（相手の声が混ざり、どの笑いが配信者の"
     + "ものかを音から決められないため）。解析済みでも一覧へ入っていない録画・共演を外す前に"
     + "数えた録画は対象になり、その場合は数十msで終わります。",
-  voice: "音声から「誰か喋っているか」を解析します（VAD）。再生画面の「無音を飛ばす」と"
-    + "「無言を早送り」がこの解析を使い、無ければ最初に使った人がその場で待ちます"
+  voice: "音声から「誰か喋っているか」を解析します（VAD）。再生画面の「無音飛ばし」と"
+    + "「無言早送り」がこの解析を使い、無ければ最初に使った人がその場で待ちます"
     + "（40〜84分の録画で6〜13秒）。GPUは使わず、残すのは録画1本あたり数百kBのsidecarだけ"
     + "です。判定の閾値は使うたびに掛けるので、設定を変えても解析はやり直しになりません。",
+  gain: "再生時に音量を揃えるためのgain曲線を作ります。録画のfileは書き換えず、当てるべき音量の"
+    + "時系列だけをsidecarへ残すので、原本の音声はそのままです。無ければその録画は音量が"
+    + "揃わないまま再生されます（再生画面のcheckboxで切り替えられます）。GPUは使わず、"
+    + "2.9時間の録画で17秒・573kBです。目標ラウドネスを変えると作り直しになります。",
   overlay: "コメント・ギフトを映像へ焼き込んだmp4を作ります。再encodeのため、元動画と同程度"
     + "以上の容量を出力先に使います。",
   upscale: "AIで高画質化したmp4を作ります。再encodeのため、元動画と同程度以上の容量を"
@@ -7133,7 +7606,7 @@ const BULK_TRANSCRIBE_KIND = "transcribe";
 // 数字を動かすのかをここで引く。
 const BULK_DOMAIN_KINDS = { stt: "transcribe", laugh: "laugh", voice: "voice",
   overlay: "overlay", upscale: "upscale", reprocess: "reprocess",
-  audionorm: "audionorm", pack: "pack" };
+  audionorm: "audionorm", pack: "pack", gain: "gain" };
 // 失敗として扱うjobの終わり方。cancelledは人が止めた結果なので含めない(押した本人が
 // 知っていることを改めて出しても、本当に落ちた1本が埋もれるだけになる)。
 const FAILED_JOB_STATES = ["failed", "interrupted"];
@@ -7142,11 +7615,14 @@ const FAILED_JOB_STATES = ["failed", "interrupted"];
 const BULK_LAUGH_KIND = "laugh";
 // 音声から声の在る区間を解析する種別。笑い声分析と同じく出力fileを作らない。
 const BULK_VOICE_KIND = "voice";
+// 再生時に当てるgainの時系列を作る種別。録画のfileは書き換えず、残すのはsidecarだけ。
+const BULK_GAIN_KIND = "gain";
 // mp4を作らない種別。元mp4の合計を並べても確かめるべき数字にならないので、chipを分ける。
 const BULK_NO_MP4_KINDS = [BULK_PACK_KIND, BULK_TRANSCRIBE_KIND, BULK_LAUGH_KIND,
-  BULK_VOICE_KIND];
+  BULK_VOICE_KIND, BULK_GAIN_KIND];
 // 出力fileを作らない種別。disk空きの警告で投入を止める意味が無い。
-const BULK_NO_DISK_KINDS = [BULK_TRANSCRIBE_KIND, BULK_LAUGH_KIND, BULK_VOICE_KIND];
+const BULK_NO_DISK_KINDS = [BULK_TRANSCRIBE_KIND, BULK_LAUGH_KIND, BULK_VOICE_KIND,
+  BULK_GAIN_KIND];
 // 「作り直す」余地が無い種別。ts結合は冪等(束ね済みは何もしない)で、削除は一方通行。
 // 文字起こしは含めない — modelを替えたときや時刻mapの版が上がったときは文字起こしをやり直す。
 const BULK_NO_REDO_KINDS = [BULK_PACK_KIND, BULK_DELETE_KIND];
@@ -7812,7 +8288,11 @@ async function runBulk(button) {
 // (initSegmentedが.valueとchange eventを要素へ足すため、以降は<select>と同じに扱える)。
 const SEGMENTED = [
   "flt-mode", "flt-order", "flt-laugh-order", "flt-browse-order", "clip-variant", "cuts-variant",
-  "clip-mode", "cuts-mode", "play-rate", "review-state", "gops-filter"];
+  "clip-mode", "cuts-mode", "review-state", "gops-filter"];
+
+// 段が多く、意味が「大小」しかない群はpillではなくbarで出す。読み書きのI/Fは
+// segmented controlと同じなので、以降の扱い(applyRate・nudgeRate・bindPref)は変わらない。
+const SEG_BARS = ["play-rate"];
 
 // 表示設定の復元とuser操作時の保存。ここは値を入れるだけで、初期描画・初期fetchは
 // 起動側の既存の順序に任せる(bindPrefのonChangeはuser操作の時しか呼ばれないので、
@@ -7824,7 +8304,7 @@ const SEGMENTED = [
 // 再生位置、「出力済みも作り直す」(既存出力の上書き指定)、一括処理の種別
 // (集計の重い種別・消す種別が起動時に選ばれた状態になる)、拡大窓の追従と幅
 // (録画を開くたび既定へ戻す設計)、IN/OUTのループ(境界確認という一時的なmode)。
-// 文字起こし・コメントは見出しから畳める。どちらを読むかは作業の型なので、録画ごとでは
+// 文字起こし・章立て・コメント・PKは見出しから畳める。どれを読むかは作業の型なので、録画ごとでは
 // なく画面の設定として残す。0件で自動的に畳むのとは別classなので、文字起こしが届いた録画を
 // 開いても畳んだ選択は保たれる。
 const FOLD_BLOCKS = [
@@ -7843,6 +8323,14 @@ const FOLD_BLOCKS = [
     follow: "comment-follow",
     row: () => $("comments").children[state.commentIndex],
     pref: "tictok.videos.commentFold",
+  },
+  {
+    // 章立ては追従checkboxを持たない(目次は数十行で、探すのに追従が要らない)。
+    block: "chapter-block",
+    button: "chapter-fold",
+    list: "chapters",
+    row: () => $("chapters").children[state.chapterIndex],
+    pref: "tictok.videos.chapterFold",
   },
   {
     block: "pk-block",
@@ -7865,7 +8353,9 @@ function applyFold(conf) {
   // 中央へ置き直す(highlight系は行が変わらない限り何もしないので、ここから直接呼ぶ)。
   if (folded) return;
   if (conf.onOpen) conf.onOpen();
-  if (!$(conf.follow).checked || !conf.row) return;
+  // 追従checkboxを持たないblockは、開いたら常に今の行へ戻す。
+  const follow = conf.follow ? $(conf.follow) : null;
+  if ((follow && !follow.checked) || !conf.row) return;
   const row = conf.row();
   if (row) centerRowIn($(conf.list), row);
 }
@@ -7903,7 +8393,7 @@ function bindDisplayPrefs() {
   bindPref($("comment-follow"), "tictok.videos.commentFollow");
   // 追従を入れ直した時は、そこまで積んだ最新の行が見えるよう下端へ戻す。
   bindPref($("pk-follow"), "tictok.videos.pkFollow", () => stickPkGiftsToBottom());
-  // 文字起こし・コメント・PKの折り畳み。buttonなのでbindPrefのcontrolには載らない。
+  // 文字起こし・章立て・コメント・PKの折り畳み。buttonなのでbindPrefのcontrolには載らない。
   bindFoldBlocks();
   // 開閉した表示section。畳んだ節は次も畳んだまま開く。
   bindPref($("cuts-help-export"), "tictok.videos.cutsHelpExport");
@@ -7921,6 +8411,7 @@ function bindDisplayPrefs() {
 
 function bind() {
   SEGMENTED.forEach(initSegmented);
+  SEG_BARS.forEach(initSegBar);
   bindDisplayPrefs();
   // 録画を開くまで印は付けられない。
   setReviewControlEnabled(false);
@@ -8015,7 +8506,7 @@ function bind() {
       state.selFrom = null;
       state.selTo = null;
       paintSelection();
-      video.currentTime = state.segments[dragFrom].start;
+      video.currentTime = voiceIn(state.segments[dragFrom].start);
     }
     dragFrom = null;
   });
@@ -8091,6 +8582,13 @@ function bind() {
   video.addEventListener("playing", startTimelineFrames);
   video.addEventListener("pause", stopTimelineFrames);
   video.addEventListener("ended", stopTimelineFrames);
+  // 音量の均しも再生中だけ回す。resumeを再生のたびに呼ぶのは、自動再生policyでsuspendedの
+  // まま生まれたAudioContextを起こすため(起こさないとgraphを通した音声が丸ごと無音になる)。
+  video.addEventListener("play", () => { resumeGainContext(); startGain(); });
+  video.addEventListener("playing", () => { resumeGainContext(); startGain(); });
+  // 止めた位置・跳んだ先の値をその場で当てる。次に再生するまでloopは回らない。
+  video.addEventListener("pause", applyGainNow);
+  video.addEventListener("seeked", applyGainNow);
   // 止めた時点で速度と音量を戻す。rAF loopはここで止まるので、applyTalkPaceは
   // もう呼ばれない — 戻す役をloopに任せると、早送りの途中で止めた人は下がった音量の
   // まま取り残される。
@@ -8133,6 +8631,17 @@ function bind() {
   bindPref(showWave, WAVE_PREF_KEY, () => {
     if (state.current) loadWaveform(state.current.recording_id);
     else drawTimeline();
+  });
+
+  // 音量の均しは既定ON。配信ごとの音量差は観る目的に依らず邪魔で、録画を書き換えないので
+  // 切れば即座に素の音へ戻る。切ったことは記憶する。
+  const playbackGain = $("playback-gain");
+  playbackGain.checked = prefBool(GAIN_PREF_KEY, true);
+  bindPref(playbackGain, GAIN_PREF_KEY, () => {
+    // 切った側は即座に素の音へ戻す(次に再生するまで揃ったままにしない)。
+    applyGainNow();
+    if (state.current) loadGainCurve(state.current.recording_id);
+    else renderGainNote("");
   });
 
   // 無音skipは既定OFF。飛ばすかどうかは観る目的で変わる(切り所を探す時は飛ばして良く、
@@ -8196,21 +8705,21 @@ function bind() {
       dragBandLength = state.cutOut - state.cutIn;
     }
   });
-  heat.addEventListener("pointermove", scheduleHeatMove);
+  heat.addEventListener("pointermove", (event) => scheduleBarMove("heat", event));
   heat.addEventListener("pointerleave", () => {
-    cancelHeatMove();
-    $("thumb").classList.add("hidden");
+    cancelBarMove();
+    hideThumb();
   });
   heat.addEventListener("pointerup", (event) => {
     // 溜めてある最後の位置を入れてから確定する(離す直前の詰めを捨てない)。
-    flushHeatMove();
+    flushBarMove();
     heat.releasePointerCapture(event.pointerId);
     finishRangeDrag(event);
   });
   heat.addEventListener("pointercancel", () => {
-    cancelHeatMove();
+    cancelBarMove();
     dragMode = null;
-    $("thumb").classList.add("hidden");
+    hideThumb();
   });
   heat.addEventListener("dblclick", (event) =>
     selectSceneAt(secondsFromClientX(event.clientX)));
@@ -8255,14 +8764,13 @@ function bind() {
       dragBandLength = state.cutOut - state.cutIn;
     }
   });
-  zoom.addEventListener("pointermove", (event) => {
-    if (dragMode && dragOnZoom) {
-      dragRange(event);
-    } else if (!dragMode) {
-      zoom.style.cursor = HEAT_CURSORS[hitTestZoom(event)];
-    }
+  zoom.addEventListener("pointermove", (event) => scheduleBarMove("zoom", event));
+  zoom.addEventListener("pointerleave", () => {
+    cancelBarMove();
+    hideThumb();
   });
   zoom.addEventListener("pointerup", (event) => {
+    flushBarMove();
     zoom.releasePointerCapture(event.pointerId);
     finishRangeDrag(event);
     zoomDragWindow = null;
@@ -8271,10 +8779,12 @@ function bind() {
     drawTimeline();
   });
   zoom.addEventListener("pointercancel", () => {
+    cancelBarMove();
     dragMode = null;
     zoomDragWindow = null;
     dragOnZoom = false;
     zoom.style.cursor = "pointer";
+    hideThumb();
   });
   zoom.addEventListener("dblclick", (event) =>
     selectSceneAt(zoomSecondsFromClientX(event.clientX)));

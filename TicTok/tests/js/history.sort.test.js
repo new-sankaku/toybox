@@ -299,10 +299,13 @@ describe("history.js の絞り込みと並び替え", () => {
       page.set("allSessions", [{ ...SESSIONS[0], recording_count: 1 }]);
       win.renderTable();
       const cells = labels(doc.querySelector("#session-rows tr"));
+      // 行頭はマージ選択のcheck(labelは空)、その次が # 。
+      expect(cells[0]).toBe("");
+      expect(cells[1]).toBe("#00001");
       // # の次が操作の先頭群で、その右に 配信者・開始・時間・状態 が並ぶ。
-      expect(cells.slice(1, 3)).toEqual(["詳細", "焼き込み出力"]);
+      expect(cells.slice(2, 4)).toEqual(["詳細", "焼き込み出力"]);
       // 状態の次からが数値列(コインが先頭)。
-      expect(cells[7]).toBe("500");
+      expect(cells[8]).toBe("500");
       // 末尾はMemo(入力欄なので空文字)を挟んで残りの操作。
       expect(cells.slice(-3)).toEqual(["AI高画質", "字幕化", "削除"]);
     });

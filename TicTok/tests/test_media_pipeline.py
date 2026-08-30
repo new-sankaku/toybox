@@ -904,6 +904,71 @@ def test_transcription_puts_the_media_axis_at_zero_for_hls(tmp_path_factory):
         % (media[0], start))
 
 
+def _blank_audio_packets(path):
+    """``path``(TS)の音声PIDのpacketをすべて潰し、音声が1frameも復号できないsegmentに
+    する。潰した数を返す。
+
+    PMTは触らないので、音声streamは「在るがsample rateも channel数も名乗らない」状態に
+    なる — 先頭segmentの音声headerが読めない実録画と同じ形である。"""
+    import json
+
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0",
+         "-show_entries", "stream=id", "-of", "json", str(path)],
+        check=True, capture_output=True, text=True)
+    pid = int(json.loads(probe.stdout)["streams"][0]["id"], 16)
+    data = bytearray(path.read_bytes())
+    hit = 0
+    for off in range(0, len(data) - 187, 188):
+        if data[off] != 0x47:
+            continue
+        if (((data[off + 1] & 0x1F) << 8) | data[off + 2]) != pid:
+            continue
+        data[off + 4:off + 188] = b"\xff" * 184
+        hit += 1
+    path.write_bytes(bytes(data))
+    return hit
+
+
+def test_transcription_reads_the_sample_rate_from_the_decoded_frames(tmp_path_factory):
+    """先頭segmentの音声が読めない録画でも文字起こしは復号できる。
+
+    実配信で、HLSのplaylistを開いた直後の ``stream.rate`` が 0(channelsも0、profileも
+    unknown)になる録画が出た(rid=1070)。frameを1枚復号すればそこに 48000 が入っている
+    のに、開いた時点の値で割ると文字起こしが丸ごと ZeroDivisionError で落ちる。sample
+    rateは**復号したframe**から採らなければならない。"""
+    av = pytest.importorskip("av")
+
+    from tictok.core import layout
+    from tictok.media import hls_source
+    from tictok.record.transcription import _decode_audio_with_media_map
+
+    record_dir = tmp_path_factory.mktemp("recroot_stt_rate")
+    stem = "00004_fixture_20260101_150000"
+    hls = layout.session_dir(record_dir, stem, "fixture")
+    hls.mkdir(parents=True, exist_ok=True)
+    names = build_capture(hls, count=8)
+    # 潰すのは1本では足りない。demuxerは開くときに数秒ぶん先読みするので、健全な音声が
+    # その窓に入ると sample rate が埋まってしまい、再現したい状態にならない(実録画は
+    # 先頭16.3秒ぶんの音声が読めなかった)。
+    for name in names[:4]:
+        assert _blank_audio_packets(hls / name), "%s の音声packetを潰せていない" % name
+    mp4 = layout.mp4_path(record_dir, stem, "fixture")
+    mp4.parent.mkdir(parents=True, exist_ok=True)
+
+    with hls_source.ffmpeg_source(mp4, prefer_hls=True) as source:
+        with av.open(str(source.path), mode="r", metadata_errors="ignore") as probe:
+            declared = probe.streams.audio[0].rate
+        # fixtureそのものの番人。ここが 0 でなければ欠陥を再現できておらず、以下は
+        # 壊れた実装に対しても通ってしまう。
+        assert not declared, (
+            "開いた直後のstream.rateが%sで、再現したい状態(0)になっていない" % declared)
+        audio, _gapless, media, _drift = _decode_audio_with_media_map(str(source.path))
+
+    assert len(audio) > 0, "音声を1sampleも復号できていない"
+    assert media, "anchorが1つも作られていない"
+
+
 def test_finalize_leaves_the_recording_in_the_working_dir(hls_capture, tmp_path_factory):
     """確定は最終保存先へ移さない。最終保存先が設定済みでも素材は一時保存先に残る。
 

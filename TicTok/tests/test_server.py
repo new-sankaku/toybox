@@ -28,7 +28,7 @@ def server(env_guard):
     from tictok.api.routes import (ai, analytics, bulk, clips, media, monitors, pages,
                                    recordings, search, sessions, storage, streamers,
                                    system, ws)
-    from tictok.core import layout
+    from tictok.core import layout, sweep_signal
     from tictok.media import laugh_audio, smile
     from tictok.record import audio_norm, hls_pack
     from tictok.record.media_queue import JobDeferred
@@ -48,7 +48,8 @@ def server(env_guard):
                                recordings=recordings, search=search, sessions=sessions,
                                storage=storage, streamers=streamers, system=system, ws=ws),
         # objectそのものを差し替える先。実体は1つなので、どのmoduleから見ても同じ。
-        layout=layout, smile=smile, indexer=indexer, hls_pack=hls_pack,
+        layout=layout, sweep_signal=sweep_signal,
+        smile=smile, indexer=indexer, hls_pack=hls_pack,
         audio_norm=audio_norm, laugh_audio=laugh_audio, asyncio=_asyncio,
         Recorder=Recorder, HTTPException=HTTPException, JobDeferred=JobDeferred,
     )
@@ -315,6 +316,100 @@ def test_session_detail_carries_gift_icon_urls(server, client, gift_builder):
     assert summary["gift_icons"]["5655"] == "/api/gift-icon?gift_id=5655"
     assert summary["gifts"][0]["gift_id"] == 5655
     assert summary["users"][0]["items"]["Rose"]["gift_id"] == 5655
+
+
+# ---- 履歴のマージ表示 ----
+# 選んだSessionを1つの詳細としてまとめる。合算はSQLのGROUP BYでしか行わない — client側で
+# 各Sessionの結果を足すと、top100で切られたギフターが落ち、改名したuserが別人に割れる。
+
+
+def _merged_fixture(server, gift_builder):
+    """同じuserが2回の配信でGiftを投げ、3人目は片方だけに出る状況を作る。"""
+    storage = server.runtime.storage
+    first = storage.create_session("merged_host", 60)
+    second = storage.create_session("merged_host", 60)
+    for session_id, diamonds in ((first, 10), (second, 25)):
+        storage.add_event(session_id, gift_builder(
+            "Rose", diamonds=diamonds, at=100.0,
+            user={"user_id": "u-whale", "unique_id": "whale", "nickname": "クジラ",
+                  "avatar": "", "fans_level": 0, "gifter_level": 0,
+                  "gifter_badge": "", "member_badge": ""}))
+    storage.add_event(second, gift_builder(
+        "Lion", diamonds=7, at=120.0,
+        user={"user_id": "u-minnow", "unique_id": "minnow", "nickname": "小魚",
+              "avatar": "", "fans_level": 0, "gifter_level": 0,
+              "gifter_badge": "", "member_badge": ""}))
+    storage.flush()
+    storage.finalize_session(first, "ended", {
+        "gifts": 1, "diamonds": 10, "comments": 3, "likes_total": 5,
+        "battles": 1, "viewers_peak": 40}, [], [])
+    storage.finalize_session(second, "ended", {
+        "gifts": 2, "diamonds": 32, "comments": 4, "likes_total": 6,
+        "battles": 2, "viewers_peak": 12}, [], [])
+    return first, second
+
+
+def test_merged_sessions_adds_up_gifters_across_sessions(server, client, gift_builder):
+    first, second = _merged_fixture(server, gift_builder)
+    body = client.get(f"/api/sessions/merged?ids={first},{second}").json()
+
+    users = {u["unique_id"]: u for u in body["summary"]["users"]}
+    # 2回に分かれて投げた同じuserは1行に畳まれる(合算はidentity_keyのGROUP BY)。
+    assert users["whale"]["diamonds"] == 35
+    assert users["whale"]["gifts"] == 2
+    assert users["minnow"]["diamonds"] == 7
+    gifts = {g["name"]: g for g in body["summary"]["gifts"]}
+    assert gifts["Rose"]["diamonds"] == 35
+    assert gifts["Lion"]["diamonds"] == 7
+
+
+def test_merged_sessions_sums_stats_but_takes_the_max_of_viewers_peak(
+        server, client, gift_builder):
+    first, second = _merged_fixture(server, gift_builder)
+    stats = client.get(f"/api/sessions/merged?ids={first},{second}").json()["stats"]
+    assert stats["diamonds"] == 42
+    assert stats["comments"] == 7
+    assert stats["battles"] == 3
+    # 同時に居た人数は足し算にならない。合算ではなく最大のSessionの値。
+    assert stats["viewers_peak"] == 40
+
+
+def test_merged_sessions_route_is_not_shadowed_by_the_session_id_route(
+        server, client, gift_builder):
+    """"merged" が ``/api/sessions/{session_id}`` に食われると422になる。
+    route宣言の順序がこの仕様を支えている。"""
+    first, second = _merged_fixture(server, gift_builder)
+    assert client.get(f"/api/sessions/merged?ids={first},{second}").status_code == 200
+
+
+def test_merged_sessions_rejects_bad_input(server, client, gift_builder):
+    first, _ = _merged_fixture(server, gift_builder)
+    assert client.get("/api/sessions/merged?ids=").status_code == 400
+    assert client.get("/api/sessions/merged?ids=abc").status_code == 400
+    # 存在しないSessionを黙って捨てない(選んだ物と出た物が食い違う)。
+    assert client.get(f"/api/sessions/merged?ids={first},999999").status_code == 404
+
+
+def test_merged_sessions_tags_each_battle_with_its_own_streamer(
+        server, client, gift_builder):
+    """自陣がどちらかはownerで決まる。配信者を跨いだ選択では1つに決まらないので、
+    Battleごとにその配信者を連れて行く。"""
+    first, second = _merged_fixture(server, gift_builder)
+    storage = server.runtime.storage
+    storage.save_battles(first, [{"battle_id": 11, "start_time": 1000.0,
+                                  "own_score": 5, "opp_score": 1, "score_series": []}])
+    body = client.get(f"/api/sessions/merged?ids={first},{second}").json()
+    assert len(body["battles"]) == 1
+    assert body["battles"][0]["session_id"] == first
+    assert body["battles"][0]["owner"]["unique_id"] == "merged_host"
+
+
+def test_merged_export_csv_names_the_session_of_every_row(server, client, gift_builder):
+    first, second = _merged_fixture(server, gift_builder)
+    text = client.get(f"/api/sessions/merged/export.csv?ids={first},{second}").text
+    header = text.splitlines()[0].lstrip("\ufeff")
+    assert header.startswith("session_id,session_unique_id,time,kind")
+    assert f"{first},merged_host" in text and f"{second},merged_host" in text
 
 
 # シーン検索は語が無いと0件を返す。語なしで「録画をそのまま開く」導線がこの一覧なので、
@@ -937,6 +1032,53 @@ def test_pace_api_says_nothing_rather_than_guessing_when_the_voice_scan_fails(
     assert "model" in response.json()["detail"]
 
 
+def test_gain_api_returns_the_curve_the_player_applies(
+        client, server, make_srv_recording, monkeypatch):
+    """再生時に当てるgainの時系列。録画は書き換えないので、画面へ渡す曲線がこの機能の全部。"""
+    _, recording_id, _ = make_srv_recording()
+
+    async def fake_curve(path, params):
+        assert params["target_lufs"] == float(server.runtime.settings.get("audio_normalize_lufs"))
+        return {"step_seconds": 0.1, "duration_seconds": 0.3,
+                "gains": [0.0, 1.5, 3.0], "integrated_lufs": -20.0, **params}
+
+    monkeypatch.setattr(server.routes.recordings, "ensure_gain_curve", fake_curve)
+    body = client.get(f"/api/recordings/{recording_id}/gain").json()
+    assert body["enabled"] is True
+    assert body["gains"] == [0.0, 1.5, 3.0]
+    assert body["step_seconds"] == 0.1
+
+
+def test_gain_api_says_it_is_switched_off_rather_than_returning_a_flat_curve(
+        client, server, make_srv_recording, monkeypatch):
+    """無効時に0 dBの曲線を返すと、画面側は「揃えた結果たまたま0 dB」と区別が付かない。"""
+    _, recording_id, _ = make_srv_recording()
+    real_get = server.runtime.settings.get
+    monkeypatch.setattr(
+        server.runtime.settings, "get",
+        lambda key, *a: 0 if key == "playback_gain_enabled" else real_get(key, *a))
+    body = client.get(f"/api/recordings/{recording_id}/gain").json()
+    assert body == {"recording_id": recording_id, "enabled": False}
+
+
+def test_gain_api_reports_a_failed_measurement_instead_of_playing_unlevelled(
+        client, server, make_srv_recording, monkeypatch):
+    """測れなかったら503。素の音を黙って流すと、揃っていない音を揃ったものとして聞かせる。"""
+    _, recording_id, _ = make_srv_recording()
+
+    async def boom(path, params):
+        raise RuntimeError("ffmpegが見つかりません")
+
+    monkeypatch.setattr(server.routes.recordings, "ensure_gain_curve", boom)
+    response = client.get(f"/api/recordings/{recording_id}/gain")
+    assert response.status_code == 503
+    assert "ffmpeg" in response.json()["detail"]
+
+
+def test_gain_api_404s_for_an_unknown_recording(client):
+    assert client.get("/api/recordings/999999/gain").status_code == 404
+
+
 def test_pace_api_404s_for_an_unknown_recording(client):
     assert client.get("/api/recordings/999999/pace").status_code == 404
 
@@ -983,6 +1125,46 @@ def test_skip_api_says_nothing_rather_than_guessing_when_the_voice_scan_fails(
 
 def test_skip_api_404s_for_an_unknown_recording(client):
     assert client.get("/api/recordings/999999/skip").status_code == 404
+
+
+def test_voice_api_returns_the_speech_spans_for_snapping_transcript_seconds(
+        client, server, make_srv_recording, monkeypatch):
+    """声の区間そのものを返す。画面は文字起こしの秒をこの縁へ寄せる。
+
+    whisperの語の時刻は実際に声が出るより手前を指す(実測で 0.24〜0.37秒、直前の無音が
+    長いほど深く食い込む)ため、そのまま飛ぶと無音から再生が始まり、そのままIN/OUTにすると
+    頭に無音が入って語尾が切れる。閾値は早送りと同じ既定で、無音skipの厳しい閾値ではない
+    — 飛ばす判定と違い、ここは声の立ち上がりを早く見る方が安全である。"""
+    _, recording_id, _ = make_srv_recording()
+
+    async def fake_profile(path):
+        probs = [0.0] * 300
+        for i in list(range(0, 10)) + list(range(200, 210)):
+            probs[i] = 0.9
+        return {"interval_seconds": 0.1, "duration_seconds": 30.0, "probs": probs}
+
+    monkeypatch.setattr(server.routes.recordings.voice, "ensure_voice_profile", fake_profile)
+
+    body = client.get(f"/api/recordings/{recording_id}/voice").json()
+    assert body["spans"] == [{"start": 0.0, "end": 1.0}, {"start": 20.0, "end": 21.0}]
+    assert body["duration_seconds"] == 30.0
+
+
+def test_voice_api_says_nothing_rather_than_guessing_when_the_scan_fails(
+        client, server, make_srv_recording, monkeypatch):
+    """503。空の区間列は「声が1件も無い」＝寄せる先が無い、と読めてしまう。"""
+    _, recording_id, _ = make_srv_recording()
+
+    async def boom(path):
+        raise server.routes.recordings.voice.VoiceError("model が読めません")
+
+    monkeypatch.setattr(server.routes.recordings.voice, "ensure_voice_profile", boom)
+    response = client.get(f"/api/recordings/{recording_id}/voice")
+    assert response.status_code == 503
+
+
+def test_voice_api_404s_for_an_unknown_recording(client):
+    assert client.get("/api/recordings/999999/voice").status_code == 404
 
 
 def test_transcript_export_splits_srt_but_not_txt(client, server, make_srv_recording):
@@ -1486,6 +1668,52 @@ def test_gifts_carry_the_per_side_score_of_each_sample(
         [("own", 0), ("rival", 0)], [("own", 400), ("rival", 300)]]
 
 
+def test_gifts_carry_the_victory_time_window_measured_from_tiktok(
+        client, make_srv_recording, server):
+    """PK終了後の勝利(罰ゲーム)時間。終わりの合図(punish_end_time)が録れている戦は実測値を
+    そのまま返し、画面はそこまで同じ戦を出し続ける。"""
+    session_id, recording_id, _ = make_srv_recording()
+    started = server.runtime.storage.get_recording(recording_id)["started_at"]
+    battle = {**_battle(7, started + 60, started + 120),
+              "punish_end_time": started + 200}
+    _save_battle(server, session_id, [battle])
+    body = client.get(f"/api/recordings/{recording_id}/gifts").json()["battles"][0]
+    assert body["punish_end"] == pytest.approx(200, abs=0.1)
+    assert body["punish_measured"] is True
+
+
+def test_gifts_close_the_victory_time_at_the_next_battle_or_the_measured_ceiling(
+        client, make_srv_recording, server):
+    """合図が届かなかった戦は、次のPKの開始と実測上限(180秒)の早い方で閉じる。無制限に
+    開けると、次のPKが始まった後も前の戦を出し続けることになる。"""
+    session_id, recording_id, _ = make_srv_recording()
+    started = server.runtime.storage.get_recording(recording_id)["started_at"]
+    _save_battle(server, session_id, [
+        _battle(7, started + 10, started + 60),
+        _battle(8, started + 100, started + 150),
+    ])
+    battles = client.get(f"/api/recordings/{recording_id}/gifts").json()["battles"]
+    # 1戦目は次戦の開始(+100)で閉じ、2戦目は上限の180秒後(+330)まで。
+    assert battles[0]["punish_end"] == pytest.approx(100, abs=0.1)
+    assert battles[0]["punish_measured"] is False
+    assert battles[1]["punish_end"] == pytest.approx(330, abs=0.1)
+
+
+def test_gifts_of_the_victory_time_are_marked_but_not_counted_as_contributions(
+        client, make_srv_recording, server):
+    """勝利時間に飛んだギフトはスコアにも貢献にも入らない。panelが出せるよう帰属だけは
+    返すが、貢献の窓(battle)へ混ぜてはならない。"""
+    session_id, recording_id, _ = make_srv_recording()
+    started = server.runtime.storage.get_recording(recording_id)["started_at"]
+    _save_battle(server, session_id, [_battle(7, started + 20, started + 60)])
+    _add_gift(server, session_id, started + 40, 111)
+    _add_gift(server, session_id, started + 100, 222)
+    _add_gift(server, session_id, started + 250, 333)
+    body = client.get(f"/api/recordings/{recording_id}/gifts").json()
+    assert [(g["gift_id"], g["battle"], g["punish"]) for g in body["items"]] == [
+        (111, 1, None), (222, None, 1), (333, None, None)]
+
+
 def test_gift_icon_serves_the_pooled_image_with_its_real_type(client, server):
     """pool上のfileは形式を名前に持たない(<gift_id>.img)。中身と違うcontent-typeで
     名乗るとbrowserが黙って捨てる。"""
@@ -1542,6 +1770,33 @@ def test_add_bookmark_rejects_end_at_or_before_start(client, make_srv_recording)
     response = client.post(
         "/api/bookmarks", json={"recording_id": recording_id, "start": 5, "end": 5})
     assert response.status_code == 400
+
+
+def test_add_bookmark_records_origin(client, make_srv_recording):
+    """切り抜き候補は出所で名乗る。画面はこの値だけを根拠に色を決める。"""
+    _, recording_id, _ = make_srv_recording()
+    pick = client.post("/api/bookmarks", json={
+        "recording_id": recording_id, "start": 2.0, "end": 9.0, "origin": "pick"}).json()
+    assert pick["origin"] == "pick"
+    # 出所を書かない既定の経路(画面の「見どころに記録」)は人の物のまま。
+    manual = client.post(
+        "/api/bookmarks", json={"recording_id": recording_id, "start": 3.0}).json()
+    assert manual["origin"] == "manual"
+
+
+def test_add_bookmark_rejects_unknown_origin(client, make_srv_recording):
+    """知らない出所は入れない。画面が名乗りも色も持たない行になり、黙って混ざる。
+
+    章立ては見どころではないので ``chapter`` も通さない ―― 目次の置き場は
+    ai_analysis(kind=chapters)で、ここへ入れると同じ物が2つの表に分かれる。"""
+    _, recording_id, _ = make_srv_recording()
+    for origin in ("ai", "chapter"):
+        response = client.post("/api/bookmarks", json={
+            "recording_id": recording_id, "start": 1.0, "origin": origin})
+        assert response.status_code == 400
+    listed = client.get(
+        "/api/bookmarks", params={"recording_id": recording_id}).json()["items"]
+    assert listed == []
 
 
 def test_bookmark_without_end_is_a_point(client, make_srv_recording):
@@ -2008,6 +2263,40 @@ def test_search_ignores_unknown_sources_and_returns_no_hits(client):
     assert body["items"] == []
 
 
+def test_search_hits_api_returns_rows_in_time_order_for_a_passage(client, server,
+                                                                  make_srv_recording):
+    """意味検索のpassageを文へ開く口。1行=1文の秒をDBから引き直す。
+
+    passageは約25秒ぶんの発話を束ねた窓なので、行そのものへ飛ぶと当たった文の十数秒手前に
+    着地する(実測 +6.9〜20.9秒)。画面は押された文のidだけをここへ引きに来る。"""
+    session_id, recording_id, _ = make_srv_recording()
+    storage = server.runtime.storage
+    recording = storage.get_recording(recording_id)
+    common = {"unique_id": recording["unique_id"], "started_at": recording["started_at"],
+              "session_id": session_id}
+    storage.replace_search_hits(recording_id, "stt", [
+        {**common, "video_time": 30.0, "end_time": 31.0, "body": "うしろの文"},
+        {**common, "video_time": 10.0, "end_time": 11.0, "body": "まえの文"},
+    ])
+    # 画面が押すのはpassageの中の文のid。並びは渡した順ではなく時間順で返る。
+    ids = [row["id"] for row in storage.search_hits_for(recording_id, "stt")][::-1]
+    body = client.get("/api/search/hits", params={"ids": ",".join(str(i) for i in ids)}).json()
+    assert [item["body"] for item in body["items"]] == ["まえの文", "うしろの文"]
+    assert [item["video_time"] for item in body["items"]] == [10.0, 30.0]
+
+
+def test_search_hits_api_rejects_ids_that_are_not_numbers(client):
+    """idをそのままSQLへ渡さない。"""
+    assert client.get("/api/search/hits", params={"ids": "1,abc"}).status_code == 400
+    assert client.get("/api/search/hits", params={"ids": " "}).status_code == 400
+
+
+def test_search_hits_api_omits_rows_that_no_longer_exist(client):
+    """消えた行は捏造しない。画面は「indexが古い」と言える。"""
+    body = client.get("/api/search/hits", params={"ids": "999999"}).json()
+    assert body["items"] == []
+
+
 def test_avatar_proxy_rejects_non_allowlisted_host(client):
     response = client.get("/api/avatar", params={"u": "http://evil.example/a.jpg"})
     assert response.status_code == 400
@@ -2055,6 +2344,61 @@ def test_comment_analysis_post_is_503_when_ai_is_disabled(client, make_srv_recor
     response = client.post(f"/api/sessions/{session_id}/comment-analysis")
     assert response.status_code == 503
     assert "AI機能が無効" in response.json()["detail"]
+
+
+def test_chapters_get_returns_empty_without_running_the_model(client, make_srv_recording):
+    """章立てのGETは保存済みだけを返す。まだ作っていない録画でも200で空 ―― 404にすると
+    画面は「まだ作っていない」と「録画が無い」を同じ赤い文言で出すことになる。"""
+    _, recording_id, _ = make_srv_recording()
+    body = client.get(f"/api/recordings/{recording_id}/chapters").json()
+    assert body["chapters"] == []
+    assert body["cached"] is False
+    assert body["model"] is None
+
+
+def test_chapters_get_is_404_for_a_missing_recording(client):
+    assert client.get("/api/recordings/999999/chapters").status_code == 404
+
+
+def test_chapters_post_is_503_when_ai_is_disabled(client, make_srv_recording):
+    """待たされる生成はAIが無効なら手前で断る(文字起こしの有無を見るより先)。"""
+    _, recording_id, _ = make_srv_recording()
+    response = client.post(f"/api/recordings/{recording_id}/chapters")
+    assert response.status_code == 503
+    assert "AI機能が無効" in response.json()["detail"]
+
+
+def test_chapters_export_renders_saved_chapters(server, client, make_srv_recording):
+    """保存済みの章を説明欄用textとVTTで書き出す。整形はserverの1箇所だけが持つので、
+    画面の「説明欄用をcopy」はこの応答をそのまま貼れる。"""
+    _, recording_id, _ = make_srv_recording()
+    server.runtime.storage.save_ai_analysis(
+        "chapters", "recording", str(recording_id), session_id=None, model="m",
+        prompt_version=1, input_signature="sig",
+        payload={"chapters": [{"start": 0.0, "end": 90.0, "title": "オープニング"},
+                              {"start": 90.0, "end": 200.0, "title": "本題"}]})
+    text = client.get(f"/api/recordings/{recording_id}/chapters/export",
+                      params={"format": "txt"})
+    assert text.text == "0:00 オープニング\n1:30 本題\n"
+    vtt = client.get(f"/api/recordings/{recording_id}/chapters/export",
+                     params={"format": "vtt"})
+    assert vtt.text.startswith("WEBVTT")
+    assert "オープニング" in vtt.text
+
+
+def test_chapters_export_is_404_without_chapters(client, make_srv_recording):
+    """空のfileを掴ませない。書き出せる章が無いことは、中身の無いfileではなく応答で言う。"""
+    _, recording_id, _ = make_srv_recording()
+    response = client.get(f"/api/recordings/{recording_id}/chapters/export",
+                          params={"format": "txt"})
+    assert response.status_code == 404
+
+
+def test_chapters_export_rejects_an_unknown_format(client, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    response = client.get(f"/api/recordings/{recording_id}/chapters/export",
+                          params={"format": "srt"})
+    assert response.status_code == 400
 
 
 def test_streamer_ranking_route_returns_the_latest_period_by_default(server, client):
@@ -3726,6 +4070,71 @@ async def test_pack_job_is_idempotent_for_material_that_is_already_packed(
     assert result["reason"] == "already_packed" and result["packed"] is False
 
 
+def _queued_kinds(server, recording_id) -> set:
+    return {row["kind"] for row in server.runtime.storage.list_media_jobs(limit=200)
+            if row["recording_id"] == recording_id}
+
+
+async def test_pack_job_queues_the_sidecars_of_the_recording_it_just_packed(
+        server, monkeypatch, pack_recording):
+    """ts結合の直後にsidecarを積むこと。
+
+    sweepはts結合待ちの録画にsidecarを積まないので、束ね終わった録画を拾うのは次の周期に
+    なる。確定から波形が出るまでが「静穏待ち + 周期 × 2」になっていた。"""
+    recording, _path, _seg = pack_recording()
+    _fake_pack(server, monkeypatch)
+    result = await _run_pack(server, recording["id"])
+    assert result["packed"] is True
+    # 種別を数え上げるのはsweepと同じ表(fsfacts)。ここに書き写すと、種別を足した側だけが
+    # 増えてtestが古い集合を守り続ける。
+    kinds = set(server.fsfacts.SIDECAR_SWEEP_SETTINGS)
+    assert set(result["sidecars_queued"]) == kinds
+    assert kinds <= _queued_kinds(server, recording["id"])
+
+
+async def test_pack_job_does_not_queue_sidecars_when_nothing_was_repacked(
+        server, monkeypatch, pack_recording):
+    """already_packedは.tsが1 byteも変わっておらず、cacheの指紋も外れない。積む理由が無い
+    (この録画のsidecarはsweepの通常の候補選びが拾う)。"""
+    recording, _path, _seg = pack_recording(packed=True)
+    _fake_pack(server, monkeypatch)
+    result = await _run_pack(server, recording["id"])
+    assert result["packed"] is False
+    assert "sidecars_queued" not in result
+    assert not (set(server.fsfacts.SIDECAR_SWEEP_SETTINGS)
+                & _queued_kinds(server, recording["id"]))
+
+
+async def test_pack_job_honours_the_per_kind_off_switch_when_queueing_sidecars(
+        server, monkeypatch, pack_recording):
+    """本数0はその種別の自動生成を行わない指定。sweepと同じように、この経路でも止まること。"""
+    recording, _path, _seg = pack_recording()
+    _fake_pack(server, monkeypatch)
+    real_get = server.runtime.settings.get
+    monkeypatch.setattr(
+        server.runtime.settings, "get",
+        lambda key, *a: 0 if key == "sprite_sweep_per_start" else real_get(key, *a))
+    result = await _run_pack(server, recording["id"])
+    assert (set(result["sidecars_queued"])
+            == set(server.fsfacts.SIDECAR_SWEEP_SETTINGS) - {"sprite"})
+    assert "sprite" not in _queued_kinds(server, recording["id"])
+
+
+async def test_pack_job_stays_successful_when_the_sidecars_cannot_be_queued(
+        server, monkeypatch, pack_recording):
+    """束ね直しは既に完了している。後始末の失敗で成功したjobをfailedにすると、再実行の
+    たびにalready_packedで空回りする行が残る。"""
+    recording, _path, _seg = pack_recording()
+    _fake_pack(server, monkeypatch)
+
+    async def _boom(*_a, **_kw):
+        raise RuntimeError("queue is down")
+
+    monkeypatch.setattr(server.media_jobs, "_enqueue_media_job", _boom)
+    result = await _run_pack(server, recording["id"])
+    assert result["packed"] is True and "sidecars_queued" not in result
+
+
 async def test_pack_job_surfaces_the_reason_it_could_not_pack(
         server, monkeypatch, pack_recording):
     """pack_sessionは失敗しても元を触らない。理由をそのまま出さないと、容量なのか検証で
@@ -4132,11 +4541,16 @@ async def test_the_sweep_loop_repeats_and_widens_after_a_saturated_run(server, m
     real_get = server.runtime.settings.get
     monkeypatch.setattr(server.runtime.settings, "get",
                         lambda key, *a: values.get(key, real_get(key, *a)))
-    seen = []
+    server.sweep_signal.clear()
+    clock = {"now": time.time()}
+    monkeypatch.setattr(server.startup.time, "time", lambda: clock["now"])
+    seen, starts, cycles = [], [], []
     verdicts = iter([True, False, False])
 
     async def _fake_sweep(after=None, since=0.0):
         seen.append(since)
+        starts.append(clock["now"])
+        cycles.append(0.0)
         return next(verdicts)
 
     monkeypatch.setattr(server.startup, "_run_sweep", _fake_sweep)
@@ -4145,9 +4559,12 @@ async def test_the_sweep_loop_repeats_and_widens_after_a_saturated_run(server, m
         pass
 
     async def _fake_sleep(seconds):
-        assert seconds == 30 * 60, "設定した間隔で待っていない"
+        # 待ちは細切れになる(確定した録画の合図で早く起きられるようにするため)。
+        # 見るのは1回の刻みではなく、1周期で待った合計。
         if len(seen) >= 3:
             raise _Stop
+        cycles[-1] += seconds
+        clock["now"] += seconds
 
     monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
     with pytest.raises(_Stop):
@@ -4155,7 +4572,67 @@ async def test_the_sweep_loop_repeats_and_widens_after_a_saturated_run(server, m
 
     assert seen[0] == 0.0, "起動直後の1回目が全件になっていない"
     assert seen[1] == 0.0, "上限まで積んだ回の次が全件へ戻っていない"
-    assert 0 < seen[2] <= time.time() - 15 * 60, "前回以降へ絞れていない(静穏待ちのぶん遡る)"
+    assert seen[2] == starts[1] - 15 * 60, "前回以降へ絞れていない(静穏待ちのぶん遡る)"
+    assert cycles[:2] == [30 * 60, 30 * 60], "設定した間隔で待っていない"
+
+
+@pytest.mark.asyncio
+async def test_a_finished_recording_wakes_the_sweep_before_the_interval(server, monkeypatch):
+    """確定した録画の合図が届いたら、静穏待ちが明けた時点でsweepを起こすこと。
+
+    合図が効かないと、確定から候補になるまで15分なのに次に見に来るのが30分後になり、
+    待ち時間の大半が「候補なのに誰も見に来ていない時間」になる。"""
+    import asyncio
+
+    values = {"sweep_interval_minutes": 30, "pack_sweep_quiet_minutes": 15}
+    real_get = server.runtime.settings.get
+    monkeypatch.setattr(server.runtime.settings, "get",
+                        lambda key, *a: values.get(key, real_get(key, *a)))
+    server.sweep_signal.clear()
+    clock = {"now": 10_000.0}
+    monkeypatch.setattr(server.startup.time, "time", lambda: clock["now"])
+
+    async def _fake_sleep(seconds):
+        clock["now"] += seconds
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+
+    # 5分前に終わった録画。候補になるのは静穏待ちの明ける残り10分後で、定期の30分より早い。
+    server.sweep_signal.note_recording_finished(clock["now"] - 5 * 60)
+    started = clock["now"]
+    await server.startup._wait_next_sweep(30)
+    waited = clock["now"] - started
+    assert 10 * 60 <= waited < 11 * 60, f"静穏待ちが明けた時点で起きていない（{waited}秒待った）"
+    assert server.sweep_signal.earliest() is None, "候補として見た合図が残っている"
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_keeps_the_signal_of_a_recording_still_inside_the_quiet_wait(
+    server, monkeypatch
+):
+    """定期のsweepで起きた回は、まだ静穏待ちの明けていない録画の合図を捨てないこと。
+
+    1回のsweepで全部捨てると、その録画は「早く起きる」対象から外れて次の定期まで待つ —
+    合図を置いた意味がそこで消える。"""
+    import asyncio
+
+    values = {"sweep_interval_minutes": 1, "pack_sweep_quiet_minutes": 15}
+    real_get = server.runtime.settings.get
+    monkeypatch.setattr(server.runtime.settings, "get",
+                        lambda key, *a: values.get(key, real_get(key, *a)))
+    server.sweep_signal.clear()
+    clock = {"now": 10_000.0}
+    monkeypatch.setattr(server.startup.time, "time", lambda: clock["now"])
+
+    async def _fake_sleep(seconds):
+        clock["now"] += seconds
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+
+    ended = clock["now"]
+    server.sweep_signal.note_recording_finished(ended)
+    await server.startup._wait_next_sweep(1)  # 定期の1分で起きる。静穏待ちはまだ明けていない。
+    assert server.sweep_signal.earliest() == ended, "静穏待ち中の合図が捨てられている"
 
 
 # ===== reel(切り出しの連結) =====
@@ -4427,3 +4904,85 @@ def test_clip_render_route_409s_when_every_overlay_layer_is_off(
         "start": 0.0, "end": 5.0, "variant": "overlay",
     })
     assert response.status_code == 409
+
+
+# ===== 意味検索indexの自動構築 =====
+
+
+def _semantic_ready(server, monkeypatch, pending=5):
+    """埋め込みserverが使え、未indexがpending件ある状態にする。"""
+    search = server.startup.routes_search
+    monkeypatch.setattr(search.semantic, "semantic_available", lambda: True)
+    monkeypatch.setattr(search.semantic, "build_running", lambda: False)
+    monkeypatch.setattr(search.semantic, "pending_groups", lambda storage: pending)
+    monkeypatch.setattr(search, "_auto_retry_at", 0.0)
+    return search
+
+
+async def _settle(server):
+    """起こしたbuildのtaskと、その後のdone callbackまで走らせる。"""
+    await server.asyncio.gather(*list(server.runtime._semantic_build_tasks))
+    await server.asyncio.sleep(0)
+
+
+async def test_the_sweep_starts_the_semantic_build_for_unindexed_groups(server, monkeypatch):
+    """未indexが残っていれば、人が「indexを更新」を押さなくても構築が始まること。
+
+    ここが無いと、文字起こしが終わった録画は意味検索から抜け落ちたまま貯まり続ける
+    (実測185 group)。"""
+    search = _semantic_ready(server, monkeypatch)
+    started = []
+
+    async def _fake_build():
+        started.append(1)
+        return True
+
+    monkeypatch.setattr(search, "_run_semantic_build", _fake_build)
+
+    await server.startup._sweep_semantic_index()
+    await _settle(server)
+
+    assert started, "未indexが残っているのに構築を起こしていない"
+
+
+async def test_the_sweep_leaves_the_semantic_index_alone_when_turned_off(server, monkeypatch):
+    """設定0はこの自動処理を行わない指定。他のsweep種別と同じく必ず効くこと。"""
+    search = _semantic_ready(server, monkeypatch)
+    started = []
+
+    async def _fake_build():
+        started.append(1)
+        return True
+
+    monkeypatch.setattr(search, "_run_semantic_build", _fake_build)
+    real_get = server.runtime.settings.get
+    monkeypatch.setattr(
+        server.runtime.settings, "get",
+        lambda key, *a: 0 if key == "semantic_sweep_enabled" else real_get(key, *a))
+
+    await server.startup._sweep_semantic_index()
+
+    assert not started, "自動処理を止めているのに構築を起こしている"
+
+
+async def test_the_semantic_autobuild_backs_off_after_a_failure(server, monkeypatch):
+    """失敗した直後の周期では起こし直さないこと。
+
+    埋め込みserverが落ちている間は何度起こしても同じ所で失敗し、直せるのは人だけなので、
+    sweepの周期ごとに同じ失敗の行が台帳へ積み上がる。"""
+    search = _semantic_ready(server, monkeypatch)
+    outcomes = [False]
+
+    async def _fake_build():
+        return outcomes.pop()
+
+    monkeypatch.setattr(search, "_run_semantic_build", _fake_build)
+
+    assert await search.start_build_if_pending() == 5
+    await _settle(server)
+
+    assert await search.start_build_if_pending() == 0, "失敗した直後にまた起こしている"
+    monkeypatch.setattr(search, "_auto_retry_at", 0.0)
+    outcomes.append(True)
+    assert await search.start_build_if_pending() == 5, "待ちが明けても起こさない"
+    await _settle(server)

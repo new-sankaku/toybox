@@ -4,7 +4,7 @@
 lifespanのcommentが理由を持っている。派生物のsweepが「finalizeでやると落ちたときに誰も
 再開しない」の答えとして置かれていることも同様(``_run_sweep`` / ``_sweep_loop_bg`` 参照)。
 
-依存は runtime / files / fsfacts / disk / media_jobs。
+依存は runtime / files / fsfacts / disk / media_jobs / routes.search(意味検索indexの構築)。
 """
 
 import asyncio
@@ -19,6 +19,7 @@ from tictok.core.config import (get_media_job_auto_requeue_limit, get_media_job_
 from tictok.core import perf
 from tictok.core import layout
 from tictok.core import orphan_capture
+from tictok.core import sweep_signal
 from tictok.record.recorder import (ffmpeg_available, ffprobe_available,
     reclaim_pending_normalizations, recover_interrupted_recordings)
 # 文字起こしは必ず別processで走らせる。serverでCTranslate2を読むと、torch(焼き込み・Up出力)
@@ -36,6 +37,8 @@ from tictok.api import files
 from tictok.api import fsfacts
 from tictok.api import media_jobs
 from tictok.api import runtime
+# 意味検索indexの構築を起こすため。routes.searchはstartupをimportしないので循環しない。
+from tictok.api.routes import search as routes_search
 
 
 async def _restore_reprocess_backup(job: dict) -> Optional[str]:
@@ -165,9 +168,7 @@ async def _reclaim_normalizations_bg():
 # よい理由が無いため(文字起こしは同じ台帳だが本数で区切らないので_sweep_transcriptionsが持つ)。
 SWEEP_LIMIT_SETTINGS = {
     "pack": "pack_sweep_per_start",
-    "waveform": "waveform_sweep_per_start",
-    "sprite": "sprite_sweep_per_start",
-    "voice": "voice_sweep_per_start",
+    **fsfacts.SIDECAR_SWEEP_SETTINGS,
 }
 
 # 自動では積み直さないstate。理由はstorage.media_job_recording_ids_in_statesを参照。
@@ -180,6 +181,15 @@ SWEEP_SCAN_LIMIT = 5000
 # 定期sweepを止めている(間隔0)あいだ、設定を読み直す間隔。設定は画面から変えられるので、
 # taskは畳まず待つだけにする(畳むと、有効へ戻しても次の起動まで繰り返しが復活しない)。
 SWEEP_IDLE_POLL_SECONDS = 60.0
+
+# 確定した録画の合図(``core.sweep_signal``)を見に行く間隔。待つのは分単位で、費やすのは
+# timer 1本ぶんである。asyncio.Eventで起こさないのは、module levelのEventが最初に使われた
+# loopへ束縛され(3.10の_LoopBoundMixin)、loopを作り直すtestで使えなくなるため。
+SWEEP_SIGNAL_POLL_SECONDS = 30.0
+
+# 静穏待ちが明ける時刻に対して置く余裕。``_sidecar_sweep_ready`` の判定は「終了時刻が
+# now - 静穏 以前」なので、境界ちょうどに起きると読みの誤差で1回空振りする。
+SWEEP_SIGNAL_MARGIN_SECONDS = 5.0
 
 
 def _pack_sweep_ready(row: dict, quiet: float) -> bool:
@@ -322,6 +332,39 @@ async def _sweep_transcriptions(since: float = 0.0) -> dict:
         rows, priority=media_jobs.SWEEP_JOB_PRIORITY, sweep=True)
 
 
+async def _sweep_semantic_index() -> None:
+    """意味検索indexの未反映ぶんを、この周期で埋め込ませる。
+
+    波形やサムネと違い、この派生物は**素材ではなく他の派生物の上に建つ**。材料は
+    search_hits(文字起こしとcommentのindexが書く)なので、録画が確定した時点ではまだ
+    文字起こしが無く、確定を合図に起こしても大半のgroupは取り残される。周期のsweepなら、
+    文字起こしが終わった次の回で自然に拾える — 「finalizeでやると落ちたときに誰も
+    再開しない」に対する答えは、ここでも同じである。
+
+    起こすだけで自分では走らせない(``routes_search.start_build_if_pending``)。構築は
+    数十万passageで数時間に及ぶことがあり、待つとその間ずっと次のsweep(波形・文字起こし)が
+    止まる。
+
+    失敗しても他の種別の投入は続ける。indexの都合(埋め込みserverが落ちている、sidecarの
+    sqliteが読めない)で波形もサムネも積まれなくなるのは、原因と被害が釣り合わない。"""
+    if not int(runtime.settings.get("semantic_sweep_enabled")):
+        return
+    try:
+        pending = await routes_search.start_build_if_pending()
+    except Exception:
+        runtime.logger.exception(
+            "意味検索indexの自動構築を起こせませんでした（未indexはそのまま残ります）",
+            extra={"event": "search.semantic_sweep_failed", "ctx": {}},
+        )
+        return
+    if pending:
+        runtime.logger.info(
+            "意味検索indexの構築を開始しました（未反映 %d group）", pending,
+            extra={"event": "search.semantic_sweep_started",
+                   "ctx": {"pending_groups": pending}},
+        )
+
+
 async def _run_sweep(after=None, since: float = 0.0) -> bool:
     """まだ作られていない派生物を少しずつqueueへ積む。上限まで積んだ種別があるか、ts結合待ちで
     sidecarを見送った録画があればTrueを返す。
@@ -361,6 +404,10 @@ async def _run_sweep(after=None, since: float = 0.0) -> bool:
                 extra={"event": "stt.sweep_queued",
                        "ctx": {"queued": stt["added"], "candidates": stt["candidates"]}},
             )
+        # 意味検索indexは文字起こし・commentのindexの上に建つので、今積んだ文字起こしは
+        # まだ材料になっていない。ここで埋めるのは前回までに揃ったぶんで、今積んだぶんは
+        # 次の周期が拾う。
+        await _sweep_semantic_index()
         if not limits:
             return False
         candidates = await asyncio.to_thread(_sweep_candidates, limits, since)
@@ -403,6 +450,33 @@ async def _run_sweep(after=None, since: float = 0.0) -> bool:
         return True
 
 
+async def _wait_next_sweep(minutes: int) -> None:
+    """次のsweepまで待つ。定期の間隔と、確定した録画が候補に入る時刻の**早い方**で起きる。
+
+    合図が無ければ従来どおり間隔ぶん眠るだけである。合図があるときに縮めるのは、確定から
+    候補になるまでが静穏待ち(既定15分)なのに対し、それを拾う周期が既定30分あって、待ち時間の
+    大半が「候補なのに誰も見に来ていない時間」だったため。
+
+    目標時刻は寝ている最中に**早くなる**(録画は待っている間にも終わる)ので、一度計算して
+    そこまで眠るのではなく、数十秒ごとに引き直す。
+
+    起きたら、静穏待ちの明けた合図だけを捨てる。1回のsweepで全部捨てると、まだ静穏中の
+    録画が「早く起きる」対象から外れ、合図を置いた意味がそこで消える。"""
+    period = minutes * 60 if minutes > 0 else SWEEP_IDLE_POLL_SECONDS
+    deadline = time.time() + period
+    while True:
+        quiet = int(runtime.settings.get("pack_sweep_quiet_minutes")) * 60
+        finished = sweep_signal.earliest()
+        target = deadline
+        if finished is not None:
+            target = min(target, finished + quiet + SWEEP_SIGNAL_MARGIN_SECONDS)
+        remaining = target - time.time()
+        if remaining <= 0:
+            sweep_signal.consume(time.time() - quiet)
+            return
+        await asyncio.sleep(min(remaining, SWEEP_SIGNAL_POLL_SECONDS))
+
+
 async def _sweep_loop_bg(after=None):
     """起動後に1回、以降は設定した間隔で ``_run_sweep`` を回す。
 
@@ -417,6 +491,10 @@ async def _sweep_loop_bg(after=None):
         保たれる(``_awaiting_pack``)。
       - 静穏待ち(pack_sweep_quiet_minutes)や失敗録画の除外といった候補の規則が1箇所に残る。
       - 確定callbackは1回きりで、そこで落ちれば誰も再開しない。周期なら次で収束する。
+
+    確定callbackが行うのは**この周期を早く起こすこと**だけで(``core.sweep_signal``)、
+    積むかどうかは上の規則がそのまま決める。合図が届かなくても定期の周期が同じ結果へ収束
+    する — 早い経路を足しても、遅い経路が唯一の正解のまま残る。
 
     2回目以降は前回のsweep以降に終わった録画だけを見る(``since``)。全件走査は録画ごとに
     fileの確認を伴い、作り終えた後はlimitが埋まらないので毎回最後まで走ることになる。
@@ -435,7 +513,7 @@ async def _sweep_loop_bg(after=None):
         else:
             # 止めているあいだに終わった録画がある。再開するときは全件から見直す。
             since = 0.0
-        await asyncio.sleep(minutes * 60 if minutes > 0 else SWEEP_IDLE_POLL_SECONDS)
+        await _wait_next_sweep(minutes)
 
 
 async def _backfill_search_index_bg():

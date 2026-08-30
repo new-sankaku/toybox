@@ -417,6 +417,30 @@ class TranscriptsMixin:
                                   "end_time": row["end_time"]}
         return out
 
+    def search_hit_rows(self, hit_ids: list) -> list:
+        """id指定で複数行を ``video_time`` 昇順で返す。意味検索のpassageを文へ開くのに使う。
+
+        passageは複数の発話・コメントを束ねた約25秒の窓なので、行そのものへ飛ぶと当たった
+        文の手前から始まる。中の1文を選べるようにするため、画面が押した文のidだけをここへ
+        引きに来る。位置は ``search_hit_times`` と同じ理由でDB側が唯一の権威である。
+
+        存在しないidは戻り値に現れない(消えた行を捏造しない)。"""
+        if not hit_ids:
+            return []
+        reader = self._read_connection()
+        out: list = []
+        for start in range(0, len(hit_ids), 500):
+            chunk = [int(h) for h in hit_ids[start : start + 500]]
+            rows = reader.execute(
+                "SELECT id, source, recording_id, session_id, unique_id, started_at,"
+                " video_time, end_time, nickname, body FROM search_hits WHERE id IN (%s)"
+                % ",".join("?" * len(chunk)),
+                chunk,
+            ).fetchall()
+            out.extend(dict(row) for row in rows)
+        out.sort(key=lambda row: row["video_time"])
+        return out
+
     def search_hit_groups(self) -> list:
         """(recording_id, source)ごとの件数と最大id。意味検索の差分build判定に使う。
 

@@ -80,6 +80,7 @@ function installVendorStubs(win, calls) {
     ERROR: "hlsError",
     LEVEL_SWITCHED: "hlsLevelSwitched",
     FRAG_CHANGED: "hlsFragChanged",
+    FRAG_BUFFERED: "hlsFragBuffered",
   };
   HlsStub.ErrorTypes = {
     NETWORK_ERROR: "networkError",

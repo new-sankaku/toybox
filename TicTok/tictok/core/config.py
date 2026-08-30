@@ -305,6 +305,24 @@ def get_resolver_timeout_ms() -> int:
     return _env_int("TICTOK_RESOLVER_TIMEOUT_MS", 20000)
 
 
+def get_resolver_restart_after_failures() -> int:
+    """browserを作り直すまでの連続失敗回数。playwrightのdriver processが死ぬと、以後の
+    呼び出しは同じ例外を返し続けてlive検出が永久に止まるため、監視側から作り直す。"""
+    return _env_int("TICTOK_RESOLVER_RESTART_AFTER_FAILURES", 3)
+
+
+def get_resolver_restart_cooldown_seconds() -> float:
+    """作り直しの最短間隔。chromiumを起動できない状態が続くとき、probeごとに起動を
+    試み続けないための下限。"""
+    return _env_float("TICTOK_RESOLVER_RESTART_COOLDOWN_SECONDS", 30.0)
+
+
+def get_resolver_close_timeout_seconds() -> float:
+    """resolverを閉じる各段(context/browser/playwright)の待ち上限。driverが応答しない
+    ときに停止処理そのものが止まるのを防ぐ。"""
+    return _env_float("TICTOK_RESOLVER_CLOSE_TIMEOUT_SECONDS", 10.0)
+
+
 def get_sign_api_key() -> str:
     """EulerStream sign server API key. Empty string means anonymous tier."""
     return os.environ.get("TICTOK_EULER_API_KEY", "").strip()
@@ -483,6 +501,27 @@ def get_log_slow_analytics_payload_ms() -> float:
 def get_log_ffmpeg_stderr_chars() -> int:
     """Characters of ffmpeg stderr retained on failure. The cause is at the tail."""
     return _env_int("TICTOK_LOG_FFMPEG_STDERR_CHARS", 800)
+
+
+def get_record_source_probe_seconds() -> float:
+    """1 segmentも書けずに失敗した録画のあと、源が今何を返しているのかを測る秒数。0で無効。
+
+    捕捉processは -loglevel warning で走るため、「接続は張れているのにpacketが来ない」型の
+    失敗はstderrに何も残さない(実測 2026-08-25 08:08〜08:13、5巡すべてstderr 0 byte)。この
+    測定だけが、源が出していないのか、こちら側が取りこぼしたのかを事後に区別できる。"""
+    return _env_float("TICTOK_RECORD_SOURCE_PROBE_SECONDS", 8.0)
+
+
+def get_record_source_probe_interval_seconds() -> float:
+    """同じ配信者について源の測定を繰り返さない間隔。復旧loopは失敗した録画を約1分ごとに
+    作り直すので、毎回測ると測定のぶんだけ復帰が遅れ、同じ内容がlogへ積み上がる。"""
+    return _env_float("TICTOK_RECORD_SOURCE_PROBE_INTERVAL_SECONDS", 600.0)
+
+
+def get_log_source_probe_chars() -> int:
+    """源の測定のstderrから残す文字数。stream構成・実際に流れたbyte数・frame数はいずれも
+    末尾に出るのでtailで足りる(実測 1.2KB で全体が収まる)。"""
+    return _env_int("TICTOK_LOG_SOURCE_PROBE_CHARS", 1200)
 
 
 def get_ffmpeg_loglevel() -> str:

@@ -66,15 +66,31 @@ def _playback_media_pts(src: Path, anchors: Optional[list]) -> Optional[list]:
     return [(0.0, 0.0), (media_end, media_end)] if media_end > 0 else None
 
 
-def build_time_mapper_sync(src: Path, started_at: float, ended_at: Optional[float]):
-    """wall-clock -> 再生の時間軸(秒)のmapperを同期で作る。
+def build_time_mapper_sync(src: Path, started_at: float, ended_at: Optional[float],
+                           video_duration: Optional[float] = None):
+    """wall-clock -> 再生の時間軸(秒)のmapperを同期で作る(ffprobeを掛けない版)。
 
-    ffprobeを避けるためvideo_durationは渡さない。media_ptsを持つ録画(現行recorderの
-    出力)ではmapperがそもそも参照しないので精度は変わらず、持たない旧録画では素の
-    wall offsetへ縮退する。heat barのように概位置で足りる用途のみに使うこと。"""
+    ``video_duration`` は**mp4が実在する録画では必ず渡すこと**(recordings.duration_seconds)。
+    media_ptsを持たない旧録画では、これがmedia(EXTINF累計)軸からmp4のPTS軸への唯一の
+    材料である。渡さないと media->pts が恒等へ落ち、mux inflationぶんだけ全ての秒が
+    前へ寄る ―― 実測(recording_id=56)で末尾693秒、中盤で約5分。commentと文字起こしの
+    video_timeは :func:`build_playback_mapper` が同じ尺を使って焼き付けてあるので、
+    渡さない側だけが別の軸に載り、gift iconとPKだけがズレる。
+
+    ffprobeを避けるぶん、30秒以上のPTSの穴(_probe_pts_gaps)だけは反映できない。穴を
+    持つ録画で秒を**焼き付ける**用途にはこれではなく build_playback_mapper を使うこと。"""
     anchors = _load_timing_anchors(src)
-    return _make_time_mapper(anchors, started_at, ended_at, None, None,
+    return _make_time_mapper(anchors, started_at, ended_at, video_duration, None,
                              _playback_media_pts(src, anchors))
+
+
+def mapper_video_duration(src: Path, recording: dict) -> Optional[float]:
+    """:func:`build_time_mapper_sync` へ渡す尺。
+
+    条件は :func:`build_playback_mapper` がffprobeを掛ける条件(``src.is_file()``)と同じに
+    する。素材(.ts)しか残っていない録画へmp4の尺を持ち込むと、playerが辿らない軸へ
+    eventを載せることになる。"""
+    return recording.get("duration_seconds") if src.is_file() else None
 
 
 def _axis_inputs(src: Path) -> tuple:

@@ -11,7 +11,8 @@ from urllib.parse import quote
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
-from tictok.core.battle import battle_type, gift_window_end, gift_window_fallback_duration
+from tictok.core.battle import (battle_type, gift_window_end, gift_window_fallback_duration,
+                                punish_window_end, resolve_result)
 from tictok.core.config import (get_laugh_comment_min_w_run,
                                 get_pace_reaction_threshold, get_skip_voice_threshold,
                                 get_voice_threshold)
@@ -22,6 +23,7 @@ from tictok.media import laugh_audio
 from tictok.media import smile
 from tictok.media.thumbnails import ensure_sprite, sprite_path
 from tictok.media import pace, skip, voice
+from tictok.media.loudness import curve_params, ensure_gain_curve
 from tictok.media.waveform import (ensure_audio_profile, ensure_waveform, level_peak,
     silence_spans, silent_ratio)
 from tictok.search import indexer
@@ -515,7 +517,8 @@ async def recording_locate_api(recording_id: int, at: float) -> dict:
         raise HTTPException(status_code=404, detail="録画が見つかりません。")
     path = files._resolved_recording_path(recording)
     to_pts = await asyncio.to_thread(
-        indexer.build_time_mapper_sync, path, recording["started_at"], recording.get("ended_at"))
+        indexer.build_time_mapper_sync, path, recording["started_at"], recording.get("ended_at"),
+        indexer.mapper_video_duration(path, recording))
     return {"recording_id": recording_id, "at": at,
             "video_time": round(max(0.0, to_pts(at)), 2)}
 
@@ -536,7 +539,8 @@ async def recording_heat_api(recording_id: int) -> dict:
     started_at = recording["started_at"]
     ended_at = recording.get("ended_at")
     to_pts = await asyncio.to_thread(
-        indexer.build_time_mapper_sync, path, started_at, ended_at)
+        indexer.build_time_mapper_sync, path, started_at, ended_at,
+        indexer.mapper_video_duration(path, recording))
     buckets = await asyncio.to_thread(
         runtime.storage.session_buckets,
         session_id,
@@ -588,16 +592,22 @@ def _battles_in_window(fought: list, started_at: float, ended_at) -> list:
         if window is None:
             continue
         start, end = window
-        if end < started_at or start > upper:
+        # PK後の勝利(罰ゲーム)時間まで含めて「この録画に掛かったか」を見る。PKが録画の頭の
+        # 直前に終わっていても、その勝利時間は録画に入っている。
+        punish = punish_window_end(battle, starts)
+        if max(end, punish or end) < started_at or start > upper:
             continue
         out.append({
             "battle": battle,
             "ordinal": ordinal,
             "start": start,
             "end": end,
+            "punish_end": punish,
             # giftの帰属窓はcore.battleのruleに従う(貢献集計と同じ窓でなければ、同じgiftが
             # 画面のpanelとBattle cardで別のPKのものとして数えられる)。
             "gift_window": (battle.get("start_time"), gift_window_end(battle, starts, fallback)),
+            # 勝利時間に飛んだgiftの窓。貢献には入らない(スコアに乗らない)ので上とは別に持つ。
+            "punish_window": (battle.get("end_time"), punish),
         })
     return out
 
@@ -619,17 +629,42 @@ def _gift_battle_ordinal(entries: list, at: float):
     return None
 
 
+def _gift_punish_ordinal(entries: list, at: float):
+    """gift 1件がどのPKの**勝利(罰ゲーム)時間**に飛んだか。どれにも入らなければNone。
+
+    PKが終わってからの窓なので貢献(_gift_battle_ordinal)とは重ならない。再生画面が
+    PK終了後もその戦のギフト欄を出し続けるためだけの帰属で、スコア・貢献には入らない。"""
+    for entry in entries:
+        start, end = entry["punish_window"]
+        if start is None or end is None or not (start < at <= end):
+            continue
+        return entry["ordinal"]
+    return None
+
+
 def _battle_payload(entry: dict, to_pts, started_at: float, ended_at) -> dict:
     """1戦ぶんの表示data。時刻はすべて動画の秒(score推移をplayerの位置と重ねるため)。"""
     battle = entry["battle"]
     upper = ended_at if ended_at is not None else float("inf")
     participants = battle.get("participants") or []
+    settled = resolve_result(battle)
     return {
         "battle_id": battle.get("battle_id") or 0,
         "ordinal": entry["ordinal"],
         "type": battle.get("type") or battle_type(participants),
         "start": round(max(0.0, to_pts(entry["start"])), 2),
         "end": round(max(0.0, to_pts(entry["end"])), 2),
+        # PK終了後の勝利(罰ゲーム)時間の終わり。再生画面はここまで同じ戦を出し続ける
+        # (PKが終わった瞬間に欄が空になると、勝敗の演出中に飛んだギフトが読めない)。
+        "punish_end": (round(max(0.0, to_pts(entry["punish_end"])), 2)
+                       if entry["punish_end"] is not None else None),
+        # その終わりがTikTokの終了eventで実測できたか。できていない戦は次のPKの開始と
+        # 実測上限(180秒)で閉じた**目安**なので、画面はその旨を名乗る。
+        "punish_measured": battle.get("punish_end_time") is not None,
+        # 確定scoreを採ったsampleの時刻。PK終了後もscore_seriesは続く(相手が枠から抜けると
+        # 0へ落ちる)ので、勝利時間のバーはこの時刻の値で止める。
+        "settled_at": (round(max(0.0, to_pts(settled["at"])), 2)
+                       if settled.get("at") is not None else None),
         # 録画を跨いだPK。この録画には片側しか映っていないことを名乗らないと、途中から
         # 立ち上がる曲線が「そのPKの全体」に見える。
         "partial": bool(entry["start"] < started_at or entry["end"] > upper),
@@ -711,7 +746,8 @@ async def recording_gifts_api(recording_id: int) -> dict:
     started_at = recording["started_at"]
     ended_at = recording.get("ended_at")
     to_pts = await asyncio.to_thread(
-        indexer.build_time_mapper_sync, path, started_at, ended_at)
+        indexer.build_time_mapper_sync, path, started_at, ended_at,
+        indexer.mapper_video_duration(path, recording))
     rows = await asyncio.to_thread(
         runtime.storage.iter_events, session_id, started_at, ended_at, ["gift"])
     # 収集中のsessionはBattleがまだDBに無い(session終了時にしか永続化されない)。録画中の
@@ -734,6 +770,7 @@ async def recording_gifts_api(recording_id: int) -> dict:
             "nickname": row.get("user_nickname") or "",
             "uid": row.get("user_unique_id") or row.get("user_nickname") or "",
             "battle": _gift_battle_ordinal(entries, at),
+            "punish": _gift_punish_ordinal(entries, at),
         })
         if gift_id and gift_id not in icons:
             url = await asyncio.to_thread(
@@ -784,6 +821,36 @@ async def recording_waveform_api(recording_id: int) -> dict:
     result["silences"] = silence_spans(profile)
     result["recording_id"] = recording_id
     return result
+
+
+@router.get("/api/recordings/{recording_id}/gain")
+async def recording_gain_api(recording_id: int) -> dict:
+    """再生時に当てるgainの時系列(media/loudness.py)。
+
+    録画のfileは書き換えず、画面側がGainNodeでこれを当てる。配信ごと・場面ごとの音量差が
+    そこで揃い、原本の音声はそのまま残る。曲線は ``step_seconds`` 刻みのdBで、適用後の
+    sample peakが天井を超えないことは曲線の作り方で保証されている(再生側にlimiterは要らない)。
+
+    無効設定なら ``enabled: false`` だけを返す。曲線を返しておいて画面側に当てさせない形に
+    すると、設定を切ったのに音が変わる/変わらないの判断が2箇所に分かれる。
+
+    初回は音声を丸ごと測るため時間がかかる(実測: 2.9時間の録画で19秒)。sweepが先に作って
+    いるのが通常で、ここが実際に測るのは作られる前に開いた録画だけ。"""
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    if not int(runtime.settings.get("playback_gain_enabled") or 0):
+        return {"recording_id": recording_id, "enabled": False}
+    # 判定は素材まで含める。曲線は hls_source 経由で .ts から測れるので、mp4の有無で断ると
+    # 新しい録画すべてで音量が揃わない(波形と同じ理由)。
+    if not files._recording_source_exists(recording):
+        raise HTTPException(status_code=404, detail="録画fileが存在しません。")
+    path = files._resolved_recording_path(recording)
+    try:
+        curve = await ensure_gain_curve(path, curve_params(runtime.settings))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"recording_id": recording_id, "enabled": True, **curve}
 
 
 @router.get("/api/recordings/{recording_id}/pace")
@@ -862,6 +929,42 @@ async def recording_skip_api(recording_id: int) -> dict:
     plan["has_reactions"] = bool(laugh and laugh.get("reaction_probs"))
     plan["recording_id"] = recording_id
     return plan
+
+
+@router.get("/api/recordings/{recording_id}/voice")
+async def recording_voice_api(recording_id: int) -> dict:
+    """声が出ている区間(media/voice.py)。文字起こしの秒を声の縁へ寄せるのに使う。
+
+    whisperの語の時刻は**実際に声が出るより手前を指す**。実測(rid=1142, 語頭1,143件を
+    直前の無音の長さで層別)では中央値で 0.24秒(無音0.5〜1秒) / 0.28秒(1〜2秒) /
+    0.33秒(2〜5秒) / 0.37秒(5〜20秒) 早く、直前の無音が長いほど手前へ食い込む。語尾も
+    同じ向きで、声が止まるのは語末の 0.16秒 後だった。そのまま飛ぶと無音から再生が始まり、
+    そのままIN/OUTにすると頭に無音が入り語尾が切れる。
+
+    閾値は早送りと同じ既定値(get_voice_threshold)。無音skipの閾値は「飛ばしたものは
+    戻らない」ぶん厳しく、声の立ち上がりを遅く見るのでここでは使わない。
+
+    初回は音声を丸ごと読む(実測: 40〜84分の録画で6〜13秒)。cache済みなら即返る。"""
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    if not files._recording_source_exists(recording):
+        raise HTTPException(status_code=404, detail="録画fileが存在しません。")
+    path = files._resolved_recording_path(recording)
+    try:
+        profile = await voice.ensure_voice_profile(path)
+    except voice.VoiceError as exc:
+        # 空の区間列を返さない。「声が1つも無い」と読まれると、寄せない理由が画面から
+        # 消えて「直っていない」と見える。
+        raise HTTPException(status_code=503, detail=str(exc))
+    except hls_source.SourceMissing:
+        raise HTTPException(status_code=404, detail="録画fileが存在しません。")
+    return {
+        "recording_id": recording_id,
+        "spans": voice.speech_spans(profile),
+        "interval_seconds": profile.get("interval_seconds"),
+        "duration_seconds": profile.get("duration_seconds"),
+    }
 
 
 @router.get("/api/recordings/{recording_id}/thumbnails")

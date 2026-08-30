@@ -1530,3 +1530,114 @@ async def test_terminate_all_kills_a_running_child(monkeypatch):
     finally:
         with stt_worker._children_lock:
             stt_worker._children.discard(child)
+
+
+# ---- 源の測定(1 segmentも書けずに終わった録画) -------------------------------------
+
+
+class _ProbeProc:
+    """測定用ffmpegの身代わり。stderrはfile handleへ直に書く(本物と同じ渡し方)。"""
+
+    returncode = 0
+
+    async def wait(self):
+        return 0
+
+
+def _probe_recorder(tmp_path, monkeypatch):
+    from tictok.record import recorder
+
+    monkeypatch.setattr(recorder, "_source_probe_at", {})
+    rec = recorder.Recorder("alice", str(tmp_path / "rec"), 1)
+    rec.hls_dir = tmp_path / "hls"
+    rec.hls_dir.mkdir()
+    return recorder, rec
+
+
+async def test_source_probe_records_what_the_source_returned(tmp_path, monkeypatch):
+    """1 segmentも書けずに終わったら、源が今何を返しているのかを測って失敗logへ残すこと。
+
+    捕捉は -loglevel warning で走るため、この型の失敗(接続は張れているのにpacketが来ない)
+    ではstderrが0 byteのまま終わる。実測 2026-08-25 08:08〜08:13 の5巡はすべてそうで、
+    源が止まっていたのかこちら側が取りこぼしたのかを後から絞れなかった。"""
+    recorder, rec = _probe_recorder(tmp_path, monkeypatch)
+    captured = []
+
+    async def fake_exec(*args, **kwargs):
+        captured.append(args)
+        kwargs["stderr"].write(
+            b"  Stream #0:0: Video: h264 (High), 432x864, 25 fps\n"
+            b"[out#0/null] video:0KiB audio:0KiB\n"
+            b"frame=    0 fps=0.0 q=-1.0 Lsize=N/A time=N/A\n")
+        return _ProbeProc()
+
+    monkeypatch.setattr(recorder.asyncio, "create_subprocess_exec", fake_exec)
+
+    ctx = await rec._probe_source("https://example.invalid/live.flv")
+
+    assert ctx["probe_exit_code"] == 0
+    assert ctx["probe_timed_out"] is False
+    # 「streamは名乗るのにframeが0」= 源が出していない、と読めることがこの測定の値打ち。
+    assert "Video: h264" in ctx["probe_stderr_tail"]
+    assert "frame=    0" in ctx["probe_stderr_tail"]
+    assert "-f" in captured[0] and "null" in captured[0]
+    # 測定は捕捉の邪魔をしない: segmentを数えるdirへ残り物を置かない。
+    assert list(rec.hls_dir.iterdir()) == []
+
+
+async def test_source_probe_is_throttled_per_streamer(tmp_path, monkeypatch):
+    """同じ配信者を続けて測らないこと。復旧loopは失敗を約1分ごとに繰り返すので、毎回測ると
+    測定のぶんだけ復帰が遅れ、同じ内容がlogへ積み上がる。"""
+    recorder, rec = _probe_recorder(tmp_path, monkeypatch)
+    runs = []
+
+    async def fake_exec(*args, **kwargs):
+        runs.append(args)
+        return _ProbeProc()
+
+    monkeypatch.setattr(recorder.asyncio, "create_subprocess_exec", fake_exec)
+
+    assert "probe_skipped" not in await rec._probe_source("https://example.invalid/live.flv")
+    again = await rec._probe_source("https://example.invalid/live.flv")
+
+    assert again["probe_skipped"] == "throttled"
+    assert len(runs) == 1
+
+
+async def test_launch_failure_carries_the_probe(tmp_path, monkeypatch, caplog):
+    """測定の結果が recording.launch_failed と同じ記録に載ること。別記録に分けると、
+    失敗の回数と源の状態を突き合わせるのに時刻で当てにいくことになる。"""
+    from tictok.record import recorder
+
+    rec = recorder.Recorder("alice", str(tmp_path / "rec"), 1)
+    rec.hls_dir = tmp_path / "hls"
+    rec.hls_dir.mkdir()
+    monkeypatch.setattr(recorder, "MAX_LAUNCH_ATTEMPTS", 1)
+
+    async def fake_launch(self, url, log_path):
+        self._capture_args = ["ffmpeg", "-i", url]
+        return _ProbeProc()
+
+    async def never_healthy(self, proc):
+        return False
+
+    async def noop(self, *a, **k):
+        return None
+
+    monkeypatch.setattr(recorder.Recorder, "_launch", fake_launch)
+    monkeypatch.setattr(recorder.Recorder, "_await_healthy", never_healthy)
+    monkeypatch.setattr(recorder.Recorder, "_terminate", noop)
+    monkeypatch.setattr(recorder.Recorder, "_finalize", noop)
+    async def fake_probe(self, url):
+        return {"probe_exit_code": 1, "probe_stderr_tail": "HTTP error 404 Not Found"}
+
+    monkeypatch.setattr(recorder.Recorder, "_probe_source", fake_probe)
+
+    with caplog.at_level("ERROR", logger="tictok.recorder"):
+        await rec._run("https://example.invalid/live.flv")
+
+    failed = [r.__dict__["ctx"] for r in caplog.records
+              if r.__dict__.get("event") == "recording.launch_failed"]
+    assert len(failed) == 1
+    assert failed[0]["probe_stderr_tail"] == "HTTP error 404 Not Found"
+    assert rec.state == recorder.STATE_FAILED
