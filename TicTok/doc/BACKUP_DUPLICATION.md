@@ -1,105 +1,152 @@
-# 保存先の二重化 — 対象の棚卸しと実装cost
+# DBの継続replicationと保存先の二重化
 
 「DBがmain SSDに集中していて、飛ぶと復旧できない」「録画の保存先も1か所」への回答です。
-結論から言うと、**最大の穴は設定1行で今日塞げます**。本格的な二重化はそのあとです。
 
-## 1. まず結論
+> **改訂 (2026-09-01)**: 初版はDBの対策を「定期snapshotの2か所化」としていましたが、
+> **snapshotの間隔がそのままRPO(失う時間)になる**ため、毎秒eventを取り込むこのsystemには
+> 不適切でした。DB側の方針を**継続replication(RPO≈1秒)**へ差し替えています。
 
-| | 内容 | 実装 | 効果 |
+## 1. 結論
+
+| | 内容 | 実装 | RPO |
 |---|---|---|---|
-| **今すぐ** | `TICTOK_DB_BACKUP_DIR` を別driveへ向ける | **0行** | DBの唯一の原本がSSDと道連れになるのを止める |
-| Phase 1 | DB backupの定期実行 | 小 (0.5人日) | 手動と migration 直前しか取られない状態を直す |
-| Phase 2 | DB backupを2か所へ | 小 (1〜2人日) | driveの故障に対してDBが生き残る |
-| Phase 3 | 録画の複製(mirror) | **大 (8〜15人日)** | 録画原本がdrive 1台の故障で消えなくなる |
-| Phase 4 | off-site(cloud等) | 中 (3〜5人日) | 火災・盗難・ransomware・誤操作 |
+| **今すぐ** | `TICTOK_DB_BACKUP_DIR` / `TICTOK_JOURNAL_DIR` を別driveへ | **0行** | — |
+| **Phase 1** | **Litestreamで2台目driveへ継続replication** | **0行** (設定のみ / 1〜2人日) | **≈1秒** |
+| Phase 2 | snapshotを「復旧手段」から「archiveの土台」へ役割変更 | 小 (0.5人日) | — |
+| Phase 3 | 録画の複製(mirror) | 大 (8〜15人日) | — |
+| Phase 4 | off-site | 中 (3〜5人日) | — |
 
-## 2. 何を守るのか — 棚卸し
+**Phase 1 はapp側の改修が1行も要りません。**理由は §5 にあります。
 
-**「DB / file / log」で数えると足りません。** 実際には次の13種類があります。
-再取得可否が実装の優先順位を決めます。
+## 2. RPOで考える — 軸は2つあり、混ぜてはいけません
+
+「replicaを作れば守れる」も「snapshotを取れば守れる」も、片方だけでは穴が残ります。
+守る故障が違うからです。
+
+| | 空間軸 (replica) | 時間軸 (履歴) |
+|---|---|---|
+| 守る故障 | drive死亡・機器故障・火災 | **誤DELETE**・壊れたmigration・論理破損・気づくのが遅れた事故 |
+| 手段 | RAID1 / 継続replication | snapshot / WAL archive |
+| RPO | 0〜1秒 | 遡れる範囲ぶん |
+| 弱点 | **間違いも忠実に複製する** | 最後の記録点までしか戻せない |
+
+### ご指摘の通り、replicaはDELETEに追従します
+
+**replicaはDELETEを「追従できない」のではなく、追従してしまうのが問題です。**
+
+| 手段 | 誤DELETEが複製されるまで |
+|---|---|
+| RAID1 | マイクロ秒 |
+| 継続replication | 約1秒 |
+| 同期dual-write | 同一transaction内(=即時) |
+
+忠実なreplicaほど速く間違いを写します。**空間軸をいくら厚くしても論理事故は1件も防げません。**
+
+### 「snapshotを取っておけばいい？」— 半分正解です
+
+snapshotなら誤DELETEから戻せます。ただし戻せるのは**最後のsnapshot時点**で、
+それ以降のeventは失われます。24時間間隔なら、誤DELETEに気づいた時に
+「消したsessionは戻るが、丸1日ぶんのeventが消える」という交換になります。
+
+**より良い手が1つあります。WAL archive(継続log shipping)です。**
+
+WAL archiveは「1秒ごとの変更履歴」を保持するので、
+
+* drive死亡 → 直前(≈1秒前)まで復旧できる ← **空間軸**
+* 誤DELETE → **そのDELETEの直前の瞬間へ戻せる** ← **時間軸**
+
+の両方を1つの仕組みで満たします。snapshotのように「最後の記録点まで巻き戻る」
+必要がありません。これが Phase 1 の中身です。
+
+### この projectでの誤DELETEは仮定ではありません
+
+`tictok/store/` には `DELETE FROM` が **30箇所**あり、20の表に及びます。
+特に危険なのは次の3つで、いずれも**人の操作かmigrationで一括して行が消えます**。
+
+| 経路 | 内容 |
+|---|---|
+| `delete_session` | session とその従属表(events / viewers / buckets / envelopes)を一括削除 |
+| retention | 保持policyによる一括削除。既定は0だが設定次第で走る |
+| intern migration | `doc/DB_INTERN.md` の**破壊的migration**。`events` 表の**列そのものを落とす** |
+
+さらに `glove_migration` / `battle_migration` は `battles.data_json` を**in-placeで書き換え、
+元の値はどこにも残りません**。これらに対して起動時に退避を取る仕組みが既にあるのは、
+**論理事故が既にこの project の設計上の前提になっている**ことの表れです。
+
+### journal は replica ではありません
+
+`journal/` は event 取り込み時にNDJSONへ追記される耐久記録ですが、
+**DBのreplicaの代わりにはなりません**。実装を読むと3点はっきりしています。
+
+| | 実測 |
+|---|---|
+| 対象 | `_journal_append` の呼び出しは **2箇所だけ** — `"e"`(event) と `"v"`(viewer sample) |
+| 耐久性 | `fh.flush()` のみで **fsyncしない**。「プロセスクラッシュは耐えるが電源断は非対象」(docstring) |
+| 削除の扱い | `recover_from_journal` は「**session行が無い(=削除済み)ならresurrectしない(削除の意思を尊重)**」 |
+
+つまり journal が守るのは**event列だけ**で、`recordings` / `transcripts` / `settings` /
+`media_job_queue` / `users` / `battles` は1行も守りません。そして**誤DELETEはそもそも
+巻き戻さない設計**です(それが正しい — journalの仕事ではありません)。
+
+`get_journal_dir()` の docstring も "Kept next to the DB so the backup lives on the same
+SSD as the data it protects" と、**同じSSDに置いてある**ことを明言しています。
+
+## 3. 何を守るのか — 棚卸し
+
+**「DB / file / log」で数えると足りません。**実際には13種類あります。
 
 | # | data | 既定の場所 | 再取得 | 失うと |
 |---|---|---|---|---|
-| 1 | `tictok.db` | DB path (main SSD) | **不可** | event・解析・設定・監視対象・文字起こし・fan台帳が全滅 |
+| 1 | `tictok.db` | DB path (main SSD) | **不可** | event・解析・設定・監視対象・文字起こし・fan台帳・**録画の身元**が全滅 |
 | 2 | 録画素材 `.ts` | `record_dir` / `record_dir_final` | **不可** | 録画そのもの |
-| 3 | `_backup/` 退避mp4 | 各rootの直下 | **条件付きで不可** | 下記(※1) |
-| 4 | `.sidecars/*.timing.json` | mp4と同じroot | **実質不可** | 下記(※2) |
-| 5 | pool `avatars/` `emotes/` `gift_icons/` | **work root固定** | **実質不可** | 下記(※3) |
-| 6 | `backups/` (DB退避3世代) | **DBの隣 = 同じSSD** | — | 下記(※4) |
-| 7 | `journal/` (耐久journal 14日) | project root | 不可 | DB commit前のeventが消える(※5) |
+| 3 | `_backup/` 退避mp4 | 各rootの直下 | **条件付きで不可** (※1) | 作り直しが壊れた録画の原本 |
+| 4 | `.sidecars/*.timing.json` | mp4と同じroot | **実質不可** (※2) | 文字起こしが動画とズレる |
+| 5 | pool `avatars/` `emotes/` `gift_icons/` | **work root固定** | **実質不可** (※3) | 焼き込みのavatar表示 |
+| 6 | `backups/` (DB退避3世代) | **DBの隣 = 同じSSD** (※4) | — | DBと同時に消える |
+| 7 | `journal/` (14日) | project root | 不可 | event列の最終防波堤 |
 | 8 | mp4(素材が残る録画) | mp4 root | 再mp4化で可 | GPU時間だけ |
-| 9 | 焼き込み `.overlay.mp4` / Up出力 `.up.mp4` | mp4 root | 再生成可 | GPU時間だけ(焼き込みは10.0秒/分) |
-| 10 | `_clips/` `_screenshots/` | work root固定 | 再生成可(人の選択は戻らない) | 切り出し位置の判断 |
+| 9 | 焼き込み `.overlay.mp4` / `.up.mp4` | mp4 root | 再生成可 | GPU時間だけ |
+| 10 | `_clips/` `_screenshots/` | work root固定 | 再生成可 | 切り出し位置の人の判断 |
 | 11 | `semantic_index.db` + `semantic_vectors.bin` | DBの隣 | 再構築可 | 埋め込みの再実行cost |
 | 12 | `logs/` (text + JSONL) | project root | 不可 | 事後調査の材料 |
 | 13 | `.env` / model weights | project root / 任意 | 書き直し・再DL可 | 手間だけ |
 
+**1 を失うと 2 が孤児になります。** `recordings` 表が無ければ、diskに残った数TBの
+`.ts` と mp4 は「誰の・いつの・何の録画か」を誰も知らないfileの山になります。
+**DBの優先度が録画より高いのはこのためです。**
+
 ### ※1 `_backup/` は「派生物」ではありません
 
-`doc/BACKUP_PRUNE.md` の実測(2026-07-25)では、2次rootの退避86件のうち **13件27.4GB が
-削除保留**でした。内訳は現行mp4が無い5件・**現行mp4にvideo streamが無い2件**・
-frame数が明らかに足りない5件・行が実fileを指していない1件です。
-
-**作り直しが壊れた録画がこれだけ実在し、その原本は `_backup/` にしかありません。**
-複製対象から一律に外すと、この13件を守れません。
+`doc/BACKUP_PRUNE.md` の実測(2026-07-25)では、2次rootの退避86件のうち
+**13件27.4GB が削除保留**でした。内訳は現行mp4が無い5件・**現行mp4にvideo streamが
+無い2件**・frame数が明らかに足りない5件・行が実fileを指していない1件です。
+作り直しが壊れた録画が実在し、その原本は `_backup/` にしかありません。
 
 ### ※2 `timing.json` は作り直せますが、作り直すと文字起こしがズレます
 
 `scripts/repair_timing_pts.py` で `.ts` から再生成はできます。しかし
 `doc/TIME_AXIS.md` が「**文字起こしは引き直せない** — 古い軸から今の軸へ戻すmapは、
-timing.jsonを作り直した時点で失われる」と記録しています。実測では331 groupのうち
+timing.jsonを作り直した時点で失われる」と記録しています。実測で331 groupのうち
 134 groupが取り残され、中央値167秒・最大1,194秒(約20分)ずれました。
 
 **`.sidecars/` を「派生物だから後回し」に分類すると、復元したDBの文字起こしが
-動画とズレます。**復元できたように見えて中身が合わない、という一番たちの悪い壊れ方です。
+動画とズレます。**復元できたように見えて中身が合わない、最もたちの悪い壊れ方です。
 
-### ※3 pool は work root にしか存在せず、CDN URLは期限切れします
+### ※3 pool は work root にしか無く、CDN URLは期限切れします
 
 `layout.py` の通り `avatars/` `emotes/` `gift_icons/` は **work root ただ1つ**に置かれ、
-書くのは収集時のcollectorだけです。TikTok CDNのURLは期限切れするため、
-後から取り直せません。焼き込み前の録画のavatar表示が失われます。
+書くのは収集時のcollectorだけです。TikTok CDNのURLは期限切れするため後から取り直せません。
 
-### ※4 backupがDBと同じdriveに在ります ← **最大の穴**
+### ※4 backupがDBと同じdriveに在ります
 
 `get_db_backup_dir()` の既定は `get_db_path()` の親、つまり **`tictok.db` の隣**です。
-
-```
-tictok.db          <- 原本
-tictok.db-wal
-backups/           <- 3世代の退避。同じdrive
-```
-
-**このSSDが飛ぶと、DBと3世代の退避が同時に消えます。**しかも退避が取られていたことは
-logに残るので、無いことに気づくのは戻したい時です。
+このSSDが飛ぶと、DBと3世代の退避が同時に消えます。
 
 同種の事故は既に起きています。`doc/DB_MAINTENANCE.md` の記録では、2026-08-23に
 intern migration直前の **1.85GBの退避が、test 1回の実行で消えました**(393KBのtest退避3つに
-押し出された)。これは別volume化とは別の話ですが、**「取れているつもり」が実際には
-取れていなかった**実例です。
-
-### ※5 journal は DB の backup ではありません
-
-`get_journal_dir()` の docstring は "Kept next to the DB so the backup lives on the same
-SSD as the data it protects" と明言しています。journal が守るのは
-**writer が止まったときの event 列**であって、**DB file 自体ではありません**。
-disk が飛べば journal も一緒に消えます。混同しないでください。
-
-## 3. 3-2-1 に当てはめる
-
-| 規則 | 現状 | Phase後 |
-|---|---|---|
-| コピーを**3**つ | 1つ(録画)〜2つ(DB本体+同じdriveのbackup) | 原本 + mirror + off-site |
-| **2**種類の媒体 | SSD / HDD には既に分かれている | 維持 |
-| **1**つを off-site | **無し** | Phase 4 |
-
-**RAID1 は backup ではありません。**誤削除・retention の暴走・ransomware・DBの論理破損は
-そのままmirrorされます。この project では「作り直しが壊れた録画が13件実在する」ことが
-実測で分かっている以上、**論理事故は仮定ではなく既往**です。RAID1は録画dataの
-drive故障対策としては有効ですが、DBには不十分です。
+押し出された)。**「取れているつもり」が実際には取れていなかった**実例です。
 
 ## 4. Phase 0 — 実装0でできること（今日）
-
-`.env` を3行足すだけです。
 
 ```
 TICTOK_DB_BACKUP_DIR=<別driveのpath>/tictok_backups
@@ -107,111 +154,137 @@ TICTOK_JOURNAL_DIR=<別driveのpath>/tictok_journal
 TICTOK_LOG_DIR=<別driveのpath>/tictok_logs
 ```
 
-* backup先の空き容量checkは既にあります(`TICTOK_DB_BACKUP_MIN_FREE_RATIO` 既定1.2)。
-* 起動時のmigration前退避は、退避に失敗すると **migrationを走らせず起動を中止**します。
-  別driveが外れている状態で起動すると止まります。これは仕様として正しい挙動です。
+* 起動時のmigration前退避は、**退避に失敗するとmigrationを走らせず起動を中止**します。
+  別driveが外れた状態で起動すると止まります。これは仕様として正しい挙動です。
 * **journal と log を遅いdriveへ移す場合は実測してください。** journal は event ごとの
-  追記で、log も同様に書き込み頻度が高い経路です。HDDへ向けて `http.loop_lag` や
-  `db.write_wait` が悪化しないかを `GET /api/perf` で確認してから確定させます。
-  悪化するなら journal と log は SSD のまま残し、**DB backup だけ**別driveへ向けます
-  (優先度は圧倒的に backup です)。
+  追記です。`GET /api/perf` の `http.loop_lag` と `db.write_wait` が悪化しないかを見て、
+  悪化するなら journal と log はSSDのまま残し、**DB backup だけ**別driveへ向けます。
 
-これだけで「SSDが飛ぶとDBが復旧不能」は解消します。残るのは
-「最後のbackup以降のeventが失われる」だけで、Phase 1 がその窓を縮めます。
+これは Phase 1 の前提ではなく、**Phase 1 までの繋ぎ**です。
 
-## 5. Phase 1 — DB backupの定期実行（小 / 0.5人日）
+## 5. Phase 1 — 継続replication（RPO≈1秒 / app改修0行）
 
-### 現状
+### 手段: Litestream
 
-backupが走るのは2経路だけです。
+SQLiteのWALを継続的に別の場所へ送り続けるtoolです。v0.5.x が現行で、
+**Windows Service としての稼働が公式にsupportされています**
+(`litestream.io/guides/windows/`)。CLAUDE.md の「Windows/Linuxで動作必須」を満たします。
 
-| 契機 | 実装 |
+複製先は **local file path** を選べます。**cloudは要りません。2台目のdriveで足ります。**
+
+### app側の改修が要らない理由
+
+Litestreamが要求するpragmaを、`tictok/storage.py` が**既に4つとも設定済み**でした。
+
+| Litestreamの要求 | `storage.py` の現状 |
 |---|---|
-| 人が押したとき | `POST /api/maintenance/backup` |
-| 破壊的migrationの直前 | `Storage.__init__` |
+| `PRAGMA journal_mode = WAL` | `PRAGMA journal_mode=WAL` ✅ |
+| `PRAGMA busy_timeout = 5000` (推奨値そのもの) | `PRAGMA busy_timeout=5000` ✅ |
+| `PRAGMA synchronous = NORMAL` | `PRAGMA synchronous=NORMAL` ✅ |
+| `PRAGMA foreign_keys = ON` | `PRAGMA foreign_keys=ON` ✅ |
 
-**定期実行はありません。**migrationが無い期間が続けば、最後の手動backupのまま何週間も
-経ちます。
+**偶然ではなく、どちらも同じ理由(WALでの並行読み書きと待ち)で同じ値に行き着いています。**
+`storage.py` に手を入れる必要はありません。
 
-### 実装
+### 何が得られるか
 
-`_capacity_sampler_bg()`(`api/startup.py`)と**同じ形**の background task を1本足します。
-capacity sampler が既に「起動時に前回時刻を見て、間隔を過ぎていれば1回実行」を
-やっているので、写す先がある状態です。
+| | |
+|---|---|
+| **RPO** | 既定で**1秒ごと**にreplicaへ送る。正常なshutdownでは未送信ぶんを送り切ってから終了する |
+| **live replica** | `litestream restore -f` は新しい変更を継続的に反映し続ける。**read-onlyで開く前提の warm standby** |
+| **誤DELETEからの復旧** | `-timestamp TIMESTAMP` で**任意の時点へ**、`-txid TXID` で**特定transaction直前へ**戻せる |
+| **複製先** | local path / SFTP / S3互換。まず local の2台目driveでよい |
+
+**`-txid` があるので、「誤DELETEの直前」に正確に戻せます。**
+snapshot方式のように「最後のsnapshotまで巻き戻る」必要がありません。
+§2 のご質問への直接の答えがこれです。
+
+### 設定の要点
+
+```yaml
+snapshot:
+  interval: 1h      # 既定24h。書き込みが多いとLTX fileが積み上がり復元が遅くなる
+  retention: 24h    # 遡れる幅。誤DELETEに気づくまでの時間で決める
+dbs:
+  - path: <TICTOK_DB_PATH>
+    replicas:
+      - path: <2台目driveのpath>
+```
+
+**`retention` が「誤DELETEに気づくまでに許される時間」そのものです。**
+24hだと翌日に気づいた事故はもう戻せません。この projectでは
+retentionの暴走やmigrationの破壊が数日後に露見し得るので、**7日以上を推奨します**
+(WAL archiveは変更ぶんだけなので、録画の8.69GB/日に比べれば容量は誤差です)。
+
+### この app 固有の注意
+
+| 事項 | 内容 |
+|---|---|
+| **手動checkpoint** | `/api/maintenance/checkpoint` が `PRAGMA wal_checkpoint(TRUNCATE)` を叩きます。Litestreamは自分でcheckpointを制御するため、この操作は `busy=1` を返しやすくなります。**app側は既に `busy` を成功へ丸めていない**ので誤解は生じませんが、buttonの意味が変わることを運用側へ伝える必要があります |
+| **VACUUM** | fileを作り直すので、直後にfull snapshotが要ります。手動・明示confirmのみなので頻度は問題になりません |
+| **DB差し替え後** | 復元でDB fileを置き換えたら `litestream reset` が要ります(Litestreamはlocal metadataを `.tictok.db-litestream` に持ち、削除・再作成を追跡しません)。**復元手順に必ず含めてください** |
+| **test隔離** | `tests/conftest.py` が `TICTOK_DB_BACKUP_DIR` をsandboxへ向けているのと同じ配慮が要ります。Litestreamの監視対象は**本番のDB pathだけ**にします |
+| **`-wal` / `-shm`** | 復元時にDB fileだけ置き換えて古い `-wal` を残すと、SQLiteが古いWAL pageを新しいDBへ適用します。3点セットで消します |
+
+### RAID1 との関係
+
+**どちらか一方ではなく、役割が違います。**
+
+| | RAID1 (Storage Spaces 双方向mirror / mdadm / ZFS) | Litestream |
+|---|---|---|
+| drive死亡時 | **止まらない**。RPO=0 | 止まる。復元してから再開(RPO≈1秒) |
+| 誤DELETE | **無力**(即座に複製される) | `-txid` で直前へ戻せる |
+| 実装 | 0行。ただしDBを mirror volume 上へ置く必要あり(`TICTOK_DB_PATH` は設定可) | 0行 |
+| 費用 | SSD 1台 | 0円(2台目driveの空き) |
+
+**復旧を求めるなら Litestream、無停止を求めるなら RAID1** です。
+ご相談の「吹き飛ぶと復旧もできません」に直接答えるのは Litestream です。
+両方入れれば「止まらず、かつ誤操作からも戻せる」になります。
+
+**工数: 設定fileとService登録で1〜2人日。**大半は §11 の復元testを通す時間です。
+
+## 6. Phase 2 — snapshotの役割を変える（小 / 0.5人日）
+
+Litestreamを入れると、**既存の `/api/maintenance/backup` は「復旧手段」ではなくなります**。
+役割は2つに絞られます。
+
+1. **Litestream自体が壊れていた場合の保険。** 設定ミス・Service停止・複製先の枯渇に
+   気づかないまま数週間、はあり得ます。app自身が取る自己完結したsnapshotは、
+   その系統から独立した唯一の像です。
+2. **WAL retentionより古い時点への復帰。** archiveが7日なら、8日前の状態はsnapshotにしか
+   ありません。
+
+したがって Phase 2 でやることは、初版で書いた「定期化」と「2か所化」のうち**定期化だけ**です。
 
 | 触る場所 | 内容 |
 |---|---|
-| `core/config.py` | `get_db_backup_interval_hours()` を追加(既定24) |
-| `core/dbmaint.py` | `REASON_SCHEDULED = "scheduled"` を追加 |
-| `api/startup.py` | `_db_backup_bg()` と `create_task` 1行 |
-| `core/settings.py` | `SETTING_DEFS` へ `db_backup_interval_hours` |
-| `tests/` | 間隔判定と ops_events の記録 |
+| `core/config.py` | `get_db_backup_interval_hours()` (既定 168 = 週1) |
+| `core/dbmaint.py` | `REASON_SCHEDULED = "scheduled"` |
+| `api/startup.py` | `_capacity_sampler_bg()` と同形の background task 1本 |
+| `core/settings.py` | `SETTING_DEFS` へ追加 |
+
+**新しい表は要りません。** capacity samplerは前回時刻をDBから引きますが、backupは
+`dbmaint.list_backups(reason="scheduled")` の最新世代のstampがそのまま「前回」です。
+退避file自体が履歴なので、経過時間の記録先を別に持つ必要がありません。
 
 世代は**種別ごと**に数える設計なので、`scheduled` を新しい reason にすれば
-`premigration` の唯一の像を押し出しません。ここは既存設計がそのまま効きます。
+`premigration` の唯一の像を押し出しません。既存設計がそのまま効きます。
 
-**新しい表は要りません。** capacity sampler は「前回sample」をDBの `capacity_samples` から
-引きますが、backup の場合は `dbmaint.list_backups(reason="scheduled")` の最新世代の
-stamp がそのまま「前回」です。退避file自体が履歴なので、経過時間の記録先を別に持つ
-必要がありません。
+**「2か所へcopy」は不要になりました。** Litestreamの複製先が既に2か所目です。
+snapshotは Phase 0 で別driveへ向けてあれば足ります。
 
-**規模: 約60〜100行 + test。**
-
-## 6. Phase 2 — DB backupを2か所へ（小 / 1〜2人日）
-
-### やってはいけない実装
-
-```python
-# 駄目 — 2つの異なる瞬間の像になり、しかもDBを2回読む
-src.backup(dest_primary)
-src.backup(dest_secondary)
-```
-
-`create_backup` は `PRAGMA integrity_check` を通してから最終名へ rename するため、
-**最終名で存在するfileは必ず「読めることを確認済み」**です。2か所目はその
-**検証済みfileの複製**にします。同一の像であることが保証され、DBへの負荷も1回分です。
-
-### 実装
-
-```python
-# create_backup の末尾、partial.replace(final) の後
-if secondary_dir:
-    _copy_durable(final, secondary_dir / final.name)   # fsyncまで待つ既存関数
-```
-
-`_copy_durable`(`record/recorder.py`)は **`shutil.copy` がOS cacheへ入った時点で返る**
-問題を既に解いてある関数です。外付けdriveがcopy途中でbusから外れた場合、
-失敗はcallが返ったずっと後に「遅延書き込みの失敗」として現れます。
-2か所目がまさに外付けdriveなので、この関数を通す必要があります。
-**新しくcopy処理を書かないでください。**
-
-| 触る場所 | 内容 |
-|---|---|
-| `core/config.py` | `get_db_backup_dir_secondary()` (既定 空 = 無効) |
-| `core/dbmaint.py` | 複製・`prune_backups` の2か所対応・`list_backups` の2か所表示 |
-| `record/recorder.py` | `_copy_durable` を共通の場所へ移す(現在は recorder 内) |
-| `api/routes/system.py` / `static/ops.js` | 画面に2か所目の状態と最終成功時刻 |
-| `tests/` | 複製失敗時に1か所目が残ること・prune が両方に効くこと |
-
-### 失敗の扱い
-
-**2か所目の失敗で起動を止めてはいけません。**1か所目が検証を通っていれば backup は
-成立しています。`storage.record_ops_event(kind="maintenance.mirror_failed",
-severity=warning)` を書けば、既存の通知rule(`notify_rule_ops`)がそのまま拾います
-(`doc/CAPACITY_FORECAST.md` が同じ経路を使っています)。**新しい通知経路は要りません。**
-
-ただし**「2か所目が何日も失敗し続けている」は検知が要ります。**warning 1本は流れます。
-capacity と同じく、最終成功からの経過時間で閾値を持たせてください。
-
-**規模: 約150〜250行 + test。**
+> 初版では `src.backup(dest)` を2回叩かず検証済みfileを `_copy_durable` で複製せよ、と
+> 書きました。この注意自体は正しいままですが、**その実装はもう要りません**。
 
 ## 7. Phase 3 — 録画の複製（大 / 8〜15人日）
 
-ここが本体です。**設計上の地雷が2つあります。**
+DBと違い、録画は「継続replication」の対象になりません。1本が数百MB〜数GBの
+不変fileで、書かれるのは録画中の追記と完了時の1回だけだからです。**完了した録画を
+複製するjob**が正しい形です。
 
 ### 地雷1: mirror root を `record_roots()` に足してはいけません
 
-`api/runtime.py` に既に root list の抽象があります。
+`api/runtime.py` に既にroot listの抽象があります。
 
 ```python
 _RECORD_ROOTS = [RECORD_DIR] if FINAL_DIR == RECORD_DIR else [RECORD_DIR, FINAL_DIR]
@@ -225,12 +298,12 @@ ROOT_KEYS = ("work", "final")
 return {key: Path(root) for key, root in zip(ROOT_KEYS, layout.record_roots())}
 ```
 
-3本目を足すと `zip` が黙って切り捨てます。それ以前に、
-**`record_roots()` は「録画の実体を探す root」**なので、mirror を足すと:
+3本目は `zip` が黙って切り捨てます。それ以前に `record_roots()` は
+「録画の実体を探すroot」なので、mirrorを足すと:
 
 * retention が mirror の bytes を解放見込みに数える
 * 「最終保存先へ移動」が「退避先に同名が既にある」と判定して対象から外す
-* `_has_usable_media` が mirror 側の素材を見て、原本を派生物として消しにいく
+* `_has_usable_media` が mirror 側の素材を見て、**原本を派生物として消しにいく**
 * 再生・再mp4化が mirror 側を掴む
 
 **mirror は `record_roots()` とは別の概念として持つ必要があります。**
@@ -239,17 +312,15 @@ return {key: Path(root) for key, root in zip(ROOT_KEYS, layout.record_roots())}
 ### 地雷2: mover を二重に持たない
 
 `Recorder._move_recording_files` の docstring は
-「the ops-screen "relocate to the final dir" action has to move the same set ... Making it
-static lets that path reuse this verbatim **instead of growing a second mover that could
-drift from this one**」と、二重化を明示的に避けた経緯を残しています。
+「a second mover that could drift from this one」を避けた経緯を明示しています。
+複製も同じ集合(mp4・session dir・派生file・`.sidecars`)を扱うので、
+**「消すか消さないか」をparameterにして1つの関数に畳む**のが既存設計と整合します。
 
-複製も**同じ集合**(mp4・session dir・派生file・`.sidecars`)を扱うので、
-copierを別に生やすと同じ drift を招きます。**「消すか消さないか」をparameterにして
-1つの関数に畳む**のが既存設計と整合します。
+`_move_session_dir` は既に copy → 全fileのsize検証 → **その後で**元を削除、という順序で
+`fsync` 込みで書かれています。**削除の一歩手前まで、複製に必要な処理は既にあります。**
 
-`_move_session_dir` は既に copy → 全fileのsize検証 → **その後で**元を削除、という
-順序で書かれています。`fsync` も入っています。**削除の一歩手前まで、複製に必要な
-処理は既にあります。**
+`_copy_durable` は「`shutil.copy` はOS cacheへ入った時点で返る」問題を解いた関数です。
+複製先が外付けdriveである以上、**新しくcopy処理を書かず必ずこれを通してください。**
 
 ### 実装の内訳
 
@@ -262,13 +333,10 @@ copierを別に生やすと同じ drift を招きます。**「消すか消さ�
 | `core/ops_labels.py` | 訳語(1箇所に持つ約束) | 小 |
 | `api/routes/bulk.py` | 一括複製の投入 | 中 |
 | `api/disk.py` / `static/capacity.*` | 「複製済 N本/X GB / 未複製 M本/Y GB」の常時表示 | 中 |
-| `core/capacity.py` 周辺 | mirror先の空き容量の予測と閾値割れ通知 | 小 |
 | retention | mirror先を削除対象から確実に外す | 小 |
 | `tests/` | 既存の mover test に倣う | 大 |
 
-**job queue に乗せれば進捗・取り消し・再実行・GPU枠との共存が全部ただで付きます。**
-`MEDIA_JOB_KINDS` に1つ足すだけで Job 画面に出ます(「別台帳だった頃はJob一覧に出ず、
-GPUを同じ枠で取り合っているのに『動いているのにjobが無い』と読める状態だった」)。
+job queueに乗せれば**進捗・取り消し・再実行・GPU枠との共存が全部ただで付きます**。
 
 ### 複製する範囲の既定
 
@@ -282,105 +350,96 @@ GPUを同じ枠で取り合っているのに『動いているのにjobが無�
 | pool `avatars/` 他 | **複製する** | 小さく、CDN URLが期限切れする(※3) |
 | 焼き込み・Up出力・`_clips/` | 複製しない | 再生成可。GPU時間だけ |
 
-この既定は `doc/RETENTION.md` の資産序列(transient → derived → source)の**裏返し**です。
-retention が最後に消すものを、mirror は最初に複製します。同じ序列を2箇所に別の形で
-書かないよう、判定は `_has_usable_media` / `has_media` を通してください。
+これは `doc/RETENTION.md` の資産序列(transient → derived → source)の**裏返し**です。
+retentionが最後に消すものを、mirrorは最初に複製します。判定は
+`_has_usable_media` / `has_media` を通し、序列を2箇所に別の形で書かないでください。
 
-### 検証
-
-`_copy_durable` の size 一致 + fsync が最低線です。**sha256 は option** にします
-(8.69GB/日なら1〜2分ですが、既存に録画の content hash は1つも無く、
-指紋を持ち始めると持ち主と更新契機の設計が要ります)。
-
-**規模: 約600〜1,000行 + test。8〜15人日。**
+**規模: 約600〜1,000行 + test。**
 
 ## 8. Phase 4 — off-site（中 / 3〜5人日）
 
-火災・盗難・ransomware・誤操作に効くのはこの層だけです。2つの道があります。
+火災・盗難・ransomwareに効くのはこの層だけです。
 
-| 方式 | 実装 | 引き換え |
-|---|---|---|
-| **app外**: 定時task + `rclone sync` | **0行**(script と手順のみ) | appのDBが把握しないので画面に出ない。失敗が通知経路に乗らない |
-| **app内**: Phase 3 の mirror 先をcloudにする | Phase 3 + 3〜5人日 | 画面・通知・job台帳に全部乗る |
-
-**Phase 3 を作るなら app 外の rclone で十分**です。mirror が local に在れば、
-そこから rclone で cloud へ流すのが一番単純で、`_copy_durable` の fsync 前提とも
-衝突しません。Phase 3 を作らないなら、app内でやる意味も薄くなります。
+* **DB**: Litestreamの複製先をもう1つ増やすだけです(S3互換を追加)。**実装0行**。
+  WAL archiveは変更ぶんだけなので転送量も費用も僅少です。
+* **録画**: Phase 3 の mirror が local に在れば、そこから `rclone sync` で流すのが
+  一番単純です。app内に取り込む必要はありません(`_copy_durable` の fsync 前提とも
+  衝突しません)。
 
 ## 9. 費用
 
-### local HDD 1台
+### DB (Phase 1)
 
-原本相当(素材 + 唯一原本のmp4 + `_backup` + DB + sidecars + pool)は概ね **2TB級**です
-(2026-07-20実測で K: 使用2,085GB)。8.69GB/日で増えるので、
+| | |
+|---|---|
+| Litestream | 無料(Apache-2.0) |
+| 複製先 | **2台目driveの空き**。DB 506MB + WAL archive で数GB規模 |
+| off-site を足す場合 | S3 Standard $0.023/GB-月。数GBなら **月$0.1未満** |
 
-* 8TB HDD 1台: **¥15,000〜20,000**(1回)
-* 満杯まで: (8,000 - 2,000) ÷ 8.69 ≒ **690日(約1.9年)**
+**DBの継続replicationは実質タダです。**守る価値との差が最も大きい投資です。
 
-### cloud (ap-northeast-1 実価格)
+### 録画 (Phase 3 / 4)
 
-2TBを置く場合の月額です。単価は前回のAWS調査で取得した実値です。
+原本相当は概ね **2TB級**(2026-07-20実測で K: 使用2,085GB)、8.69GB/日で増えます。
 
-| tier | 単価 | 2TB/月 |
+| | 初期 | 月額 |
 |---|---:|---:|
-| S3 Standard | $0.023/GB | $47.1 |
-| S3 Standard-IA | $0.0138/GB | $28.3 |
-| **S3 Glacier IR** | $0.005/GB | **$10.2** (¥1,530) |
-| S3 Deep Archive | $0.002/GB | $4.1 |
+| 8TB HDD 1台 | ¥15,000〜20,000 | ¥0(電気代) |
+| S3 Glacier IR 2TB | ¥0 | **$10.2 (¥1,530)** |
 
-**復元は無料ではありません。**Glacier IR から 2TB を手元へ戻すと、
-取り出し $0.03/GB = $61 + 転送 $0.114/GB = $228 で、**合計約$290(¥44,000)** です。
-災害時に1回払う額としては妥当ですが、「気軽に戻せる」ものではないことは
-把握しておいてください。
-
-**Deep Archive は原本には使えません**(取り出しに最大12時間)。
-
-### まとめ
-
-| 構成 | 初期 | 月額 |
-|---|---:|---:|
-| Phase 0 のみ(既存の空きdriveへ向ける) | ¥0 | ¥0 |
-| + local HDD 1台 (Phase 3) | ¥20,000 | ¥0(電気代) |
-| + cloud off-site 2TB (Phase 4) | ¥0 | ¥1,530 |
-
-**local HDD 1台は約1年でcloudのcostを下回ります**が、off-site の代わりにはなりません
+8TB HDD は満杯まで (8,000−2,000) ÷ 8.69 ≒ **690日(約1.9年)**。
+local HDD は約1年でcloudのcostを下回りますが、**off-siteの代わりにはなりません**
 (同じ部屋にある2台は、火災と盗難に対しては1台です)。
+
+復元も無料ではありません。Glacier IR から2TBを戻すと取り出し $0.03/GB = $61 +
+転送 $0.114/GB = $228 で **合計約$290 (¥44,000)** です。
+**Deep Archive は原本に使えません**(取り出しに最大12時間)。
 
 ## 10. 採らない案
 
 | 案 | 理由 |
 |---|---|
-| DBを RDS / PostgreSQL へ | `doc/STORAGE_SPLIT.md` の lock 契約(`_lock -> _buf_lock` 一方向)がSQLite前提。改修が大きく、backup問題は別volume化で解ける |
-| RAID1 だけで済ませる | 論理破損・誤削除がmirrorされる。この project では「壊れた作り直し」が実測13件実在する |
-| `src.backup()` を2回叩く | 2つの異なる瞬間の像になり、DBを2回読む |
+| **定期snapshotだけでDBを守る** | 間隔がそのままRPO。毎秒eventを取り込むsystemで数時間ぶんを捨てる交換になる |
+| **replicaだけでDBを守る** | 誤DELETEを1秒で複製する。時間軸が無い |
+| RAID1 だけで済ませる | 同上。論理事故に無力。ただし無停止のためには有効で、Litestreamと併用する価値はある |
+| journal をDBのbackup代わりにする | 対象は event と viewer の2種のみ。`recordings` も `settings` も守らない。fsyncもせず、削除も巻き戻さない |
+| app内に同期dual-writeを実装 | RPO=0だが、書き込みlatencyが倍になり、複製先の失敗時のpolicyが要る。Litestreamで1秒まで詰められる以上、割に合わない |
+| DBを RDS / PostgreSQL へ | `doc/STORAGE_SPLIT.md` の lock 契約(`_lock -> _buf_lock` 一方向)がSQLite前提。改修が大きい |
 | mirror root を `record_roots()` へ追加 | retention・relocate・再生・`_has_usable_media` が mirror を原本と取り違える。`ROOT_KEYS` の zip が3本目を黙って捨てる |
-| 録画の複製に `shutil.copy` を使う | OS cache へ入った時点で返る。外付けdriveの遅延書き込み失敗を検出できない。`_copy_durable` を使う |
+| 録画の複製に `shutil.copy` を使う | OS cacheへ入った時点で返る。外付けdriveの遅延書き込み失敗を検出できない |
 | 複製の判定に尺(duration)を使う | `doc/BACKUP_PRUNE.md` の実測で18件中13件を誤判定。frame数で見る |
 
-## 11. 検証 — backupは「戻せた」ことでしか確認できない
+## 11. 検証 — 「戻せた」ことでしか確認できません
 
-`doc/DB_MAINTENANCE.md` に復元手順(4段)があります。**この手順を1度も通していない
-backupは、backupではありません。**
+**通したことのない復元手順は、復元手順ではありません。**
 
-Phase 1 を入れたら、そのタイミングで1度やってください。
+### Phase 1 を入れたら（必須）
 
 1. serverを停止する(単一instance lockがあるため起動したままの差し替えはできない)
 2. `tictok.db` / `-wal` / `-shm` を別名で残す
-3. 退避fileを `tictok.db` としてcopyする(**`-wal` / `-shm` はcopyしない**)
-4. 起動して、画面が読めることと件数が合うことを確かめる
+3. `litestream restore -timestamp <10分前> -o tictok.db <replica>` を実行する
+4. `litestream reset` を実行する(**忘れるとreplicationが以後おかしくなります**)
+5. 起動して、画面が読めることと件数が合うことを確かめる
 
-Phase 3 を入れたら、**mirror 側から1本の録画を戻して再生できるか**を同じように
-1度通してください。素材だけでなく `.sidecars` が揃っていないと、
-戻した録画の文字起こしがズレます(※2)。
+**3で「10分前」を指定するのが要点です。**最新へ戻すだけでは、
+誤DELETEからの復旧が本当にできるかを確かめたことになりません。
+
+### Phase 3 を入れたら
+
+mirror側から1本の録画を戻して**再生できるか**を確かめてください。
+素材だけでなく `.sidecars` が揃っていないと、戻した録画の文字起こしがズレます(※2)。
 
 ## 12. 順序
 
 ```
-Phase 0 (今日・0行)  ->  Phase 1 (0.5人日)  ->  復元testを1度通す
-   -> Phase 2 (1〜2人日)  -> [ここまでで DB は守れている]
-   -> Phase 3 (8〜15人日) -> [録画原本が drive 故障で消えなくなる]
-   -> Phase 4 (3〜5人日)  -> [火災・盗難・ransomware]
+Phase 0 (今日・0行)
+   -> Phase 1 (1〜2人日) Litestream + 復元testを1度通す
+        [ここでDBは RPO≈1秒 + 誤DELETEから復旧可能 になる]
+   -> Phase 2 (0.5人日) snapshotを週1で定期化
+   -> Phase 3 (8〜15人日) 録画の複製
+   -> Phase 4 (3〜5人日) off-site
 ```
 
-**Phase 0 と Phase 1 で、被害の大きい方(DB)の穴はほぼ塞がります。**
+**Phase 1 までで、被害が最も大きい対象(DB)の穴は実質塞がります。**
+app改修0行・費用ほぼ0円に対して、得られるものが一番大きい段です。
 Phase 3 は工数が一桁大きいので、そこまで一気にやる必要はありません。
