@@ -66,7 +66,7 @@ Glacier IR の単価はPrice List APIで確認済みの実値です。他の2列
 |---|---|---|---:|---:|---|
 | **X** | Oracle Always Free 単体 | 同じ無料block volume | **約17日** | **¥0** | ✗ |
 | **Y** ★ | Oracle Always Free | 外部の格安object storage | **約6ヶ月** | **約¥1,000** | ✗ |
-| Z | 格安VPS(大容量disk) 1台 | 同じdisk | 約45日 | ¥750〜1,300 | ✗ |
+| Z | x86 VPS + object storage | object storage | 約38日 | 約¥1,000 | ✗ |
 | D | AWS Plan C | S3 Glacier IR | 永久 | ¥4,900 | ✗ |
 | D+ | AWS + Spot GPU | S3 Glacier IR | 永久 | ¥9,300 | ✅ |
 
@@ -103,15 +103,52 @@ Oracleの外向き転送が10TB/月無料なので、**録画を外部storageへ
 
 **予算のほぼ全額をstorageに使えるので、保持期間が最大化されます。**
 
-### 案Z — 格安VPS 1台で完結（¥750〜1,300）
+### 案Z — x86 VPS + object storage（約¥1,000 / 保持約38日）
 
-object storageを使わず、大きめのdiskを持つVPS 1台に収めます。
+**arm64とcapacity確保の両方を避けたい場合の選択肢**です。
 
-* 構成が1つで済む。取り出し料(Glacier IRは$0.03/GB)も転送料もかからない
-* 保持は disk 容量で決まる。400GB disk なら約45日
-* Oracleのcapacity確保やarm64の心配が無い(x86 VPSを選べる)
+> **訂正**: 初版でこの案を「大容量diskのVPS 1台で保持45日 / ¥750〜1,300」と
+> 書きましたが**誤りです**。その価格帯のVPSのdiskは20〜50GBで、
+> **録画2.3〜5.8日ぶんにしかなりません**(下表)。1台完結では保持45日は買えません。
 
-**arm64を避けたい場合の本命**です。VPSの価格は公表値の確認が要ります。
+Lightsailの実価格(Price List API取得)で価格とdiskの関係を確かめました。
+
+| 月額 | RAM | disk | 録画の日数 | このappが動くか |
+|---:|---:|---:|---:|---|
+| ¥525 | 0.5GB | 20GB | 2.3日 | ✗ RAM不足 |
+| ¥750 | 1GB | 40GB | 4.6日 | ✗ **Chromiumだけで約1GB** |
+| ¥1,500 | 2GB | 60GB | 6.9日 | △ 厳しい |
+| **¥3,600** | **4GB** | **80GB** | 9.2日 | ✅ |
+| ¥6,600 | 8GB | 160GB | 18.4日 | ✅ |
+
+**diskは価格に対して線形にしか増えません。**録画8.69GB/日に対して、
+月額を10倍にしても保持は2倍にしかならない — だから**録画をobject storageへ
+逃がす構成が必要**になります。
+
+そして重要な点として、**AWS/Lightsailでは¥1,000は不可能です**。
+このappが動く最小構成(4GB RAM)が**¥3,600**だからです。
+¥750で4GB級を出せるのはAWS以外のprovider(Hetzner / Contabo / 国内VPS等)で、
+**これらの価格は私の側で未検証です。契約前に必ずご確認ください。**
+
+構成:
+
+```
+[x86 VPS 4GB / 40〜80GB disk]  ¥750前後(要確認)
+   live検出 + collector + recorder + FastAPI + SQLite
+   disk は 5〜9日ぶんの hot buffer のみ
+        |  完了した録画を継続的に送出
+        v
+[object storage 約330GB]  ¥250   -> 合計 保持 約38日
+```
+
+#### hot bufferが薄いことへの注意
+
+40GBのdiskは録画**4.6日ぶん**しかありません。**送出が数日止まればdiskが埋まり、
+録画が落ちます。**
+
+`doc/CAPACITY_FORECAST.md` の容量予測と `capacity.forecast_low` 通知が
+そのまま監視に使えますが、**既定の `capacity_alert_days`(14日)では一度も鳴りません** —
+diskの全容量が4.6日ぶんしか無いためです。**2日程度へ下げてください。**
 
 ## 4. GPU機能は¥1,000には入りません
 
@@ -180,11 +217,34 @@ Oracle Always Free で Chromium を動かせるのは **Ampere A1 = arm64** だ�
 arm64 wheelです。**GPU系機能はどのみちOFFなので、実害の範囲は限定的**ですが、
 避けたいなら案Z(x86 VPS)にします。
 
-### (3) Ampere A1 の capacity
+### (3) Ampere A1 の capacity — Oracle自身が明記しています
 
-A1は人気regionで確保が難しいことが知られています。**「取れるまで試す」性質**の
-ものなので、本番の常時収集を全面的に預ける前に、実際に確保できるかを見てください。
-規約上の回収条件も併せてご確認ください。
+これは伝聞ではなく、**Oracleの公式docに書かれています**
+(`docs.oracle.com` / Always Free Resources)。
+
+> If you receive an "out of host capacity" error when trying to create a Compute
+> instance, this indicates a **temporary lack of Always Free shapes in your home
+> region**. Try creating the instance in a different availability domain, or wait a
+> while, then try to create the instance again. You can also choose to **upgrade your
+> account to Pay as You Go** ...
+
+つまり **Always Free の shape が不足する事象は仕様として想定されており**、
+Oracleが案内する回避策は「別のADで試す」「時間を置いて再試行」「有料account へ上げる」
+です。**「取れるまで試す」性質**である点が公式に裏付けられています。
+
+### (5) 確保の容易さの比較
+
+| | 確保 | 根拠 |
+|---|---|---|
+| **有料VPS(案Z)** | **容易**。購入すれば数分で用意される | 商用製品。在庫切れは例外的 |
+| Oracle Always Free(案X・Y) | **不確実**。再試行が要る場合がある | 上記の公式doc |
+| AWS(案D) | 容易 | 商用製品 |
+
+**有料VPSは「抽選」ではなく「購入」です。**Oracleの困難は無料枠に特有のもので、
+有料accountでは優先度が上がるとOracle自身が案内しています。
+
+ただし**「容易に確保できること」と「¥750で4GB級が買えること」は別の話**です。
+後者はprovider次第で、上表のとおりAWSでは¥3,600かかります。
 
 ### (4) DBの保護
 
