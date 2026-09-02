@@ -2,24 +2,99 @@
 
 「WAFは他のSaaSだとどうやっているのか」への回答です。
 
-**結論: 誰も回避していません。買っています。**
-そして**この projectが今Chromiumで自前でやっている処理は、既にこの appが契約している
-vendorが商品として売っています。**
+> **訂正 (2026-09-01)**: 初版でこれを「誰も回避していません。買っています」と
+> 書きましたが、**整理が綺麗すぎました。**vendor自身の公開docを読むと、
+> 実態は**「分散したagent fleet」+「署名生成のreverse engineering」**であり、
+> ByteDanceのanti-crawler措置を迂回する行為そのものは含まれています。
+> 「回避していない」のではなく、**回避の実装と運用リスクをvendorが引き受けている**、
+> が正確です。下の §1 に一次情報を置きます。
 
-## 1. 商用の3つの層
+**この projectが今Chromiumで自前でやっている処理は、既にこの appが契約している
+vendorが商品として売っています。**ただし買う前に、その中身を知っておく必要があります。
 
-| 層 | 中身 | WAFとの関係 |
+## 1. EulerStreamは実際に何をしているのか（vendorの公開docより）
+
+### (a) 分散agent fleet — 「複数IPで見に行っている」は概ね当たり
+
+`docs/sign-server/preferred-agents` に明記があります。
+
+> Our API uses **cloud microservices called "agents"** to generate WebSocket URLs &
+> return the responses to you. ... we have **tons of agents running in different
+> regions around the world**. ... the sign API will first try your chosen agent
+> before picking a **random public agent**
+
+agent IDは `rn-dal-1-a` / `rn-nyc-1-a` / `rn-chi-1-a` のような**地域code付き**で、
+既定は**公開agentへのround-robin**です。有料planでは `preferred_agent_ids` で
+指定できますが、**最低3つ以上を並べることが必須**とされています
+(「requestsをランダムに分散させられるように」)。
+
+**つまりご指摘のとおり、地理的に分散した多数のnodeへ振り分けています。**
+「1 requestで複数人ぶん」のbulkも、内部では複数のagentへ散っていると考えるのが自然です。
+
+### (b) しかし本体は署名生成の方です
+
+`docs/sign-server/custom-sign-servers` が、より重要なことを書いています。
+
+> you need to provide a valid **`X-Bogus`, `X-Gnarly`, and `msToken`** signature.
+> These are ... created with **complicated obfuscated JavaScript**, based on your
+> browser information. This is part of something called the **"ByteDance
+> Anti-Crawler"**, which is ... to prevent crawlers from harvesting data en masse
+> from TikTok.
+>
+> ... **What we can't do is tell you how to generate signatures.**
+
+さらに、
+
+> the signature parameters **encode your browser details**, which must match the
+> `browser_version` and `browser_name` query parameters. These must also match your
+> `User-Agent` header.
+
+**IPを分散させるだけでは通りません。**署名は browser の素性を符号化しており、
+それが User-Agent と整合していなければ拒否されます。
+`doc/LIVE_DETECTION.md` が実測した
+「`_waftokenid` をHTTP clientへ移植しても403」と同じ構造です。
+
+**vendorの中核資産はIP fleetではなく、この署名生成です。**
+「教えられない」と明言しているのがそこだけであることが、その証拠になっています。
+
+### (c) 「resource-heavy」の意味
+
+rate limitsのpageにこうあります。
+
+> We've opted for a sort of **"heavy-handed"** way of generating this URLs that ...
+> is robust and **automatically handles updates to TikTok's API**. On the other hand,
+> **it's resource-heavy**, and so we've got rate limits in place for fair use.
+
+署名algorithmを静的に再実装するのではなく、**実browserを走らせて生成している**と
+読むのが自然です。無料枠が2,500 requests/日と控えめなのも、
+CAPTCHA solvingを別商品として売っているのも、この読みと整合します。
+
+## 1b. だから、これは「合法な調達」ではなく「リスクの移転」です
+
+**正直に言うと、買っても行為の性質は変わりません。**変わるのは次の点です。
+
+| | 自前でやる | vendorから買う |
 |---|---|---|
-| **A. 公式のauthorized path** | creator/agencyからOAuthを受け、**本人のdata**を読む | scrapingではないのでWAFの外側 |
-| **B. 専門vendorから買う** | 検出・signing・room解決を、それを本業とする事業者に委ねる | vendorが負う |
-| C. 自前で回避し続ける | proxy・CAPTCHA・fingerprint | **これが「他社もやっている」の実態ではない** |
+| 署名生成の追随 | TikTokが変えるたび自分で直す | vendorが直す |
+| IPの分散 | 自分で用意する(=本文書が扱わない領域) | vendorのfleet |
+| 自宅/自社IPの露出 | **する** | しない |
+| ToS上の位置づけ | **変わらない** | **変わらない** |
+| 止まったとき | 自分で直せる | **待つしかない** |
 
-Cを商品化している事業者は実在します(EulerStreamの製品ラインにも
-"Captcha API — High fidelity CAPTCHA solving service" があります)。
-ただし**それは選択肢の1つであって、標準的なやり方ではありません。**
-本文書ではAとBだけを扱います。
+**TikTokの利用規約は、誰が取得したかに関わらずdataの利用側にも及びます。**
+「vendor経由だから問題ない」とは言えません。判断する材料としてここに書いておきます。
 
-## 2. この appは既にBの入口に立っています
+### 唯一、性質が違う道
+
+**公式のauthorized path**(creator本人からOAuthを受けて、その人のdataを読む)だけは
+anti-crawlerの外側にあります。EulerStreamも `OAuth Tokens` 系のendpoint
+(Exchange / Refresh / Revoke / Introspect / Get user info)を持っています。
+
+ただし**この用途には使えません。**監視対象は自分が権限を持たない他人の配信であり、
+本人の認可を取れないためです。**「他人の公開配信を継続的に監視する」という
+要求そのものが、公式APIの想定外**である、というのが実際のところです。
+
+## 2. この appは既に半分だけ委託しています
 
 `tictok/core/config.py` に `TICTOK_EULER_API_KEY` があり、
 WebSocket接続の**signingは既にEulerStreamへ委託済み**です。
@@ -109,6 +184,10 @@ headless Chromiumが不要になると、これまでの検討の前提が変わ
 
 **`doc/COST_ALTERNATIVES.md` の最大のriskだった「TikTok WAFのgo/no-go」が
 消えます。**これが実務上いちばん効きます。
+
+ただし **§1b のとおり、riskは消えるのではなくvendorへ移ります。**
+vendorがTikTok側の変更に追随できなくなれば、検出は止まります。
+**「自分では直せない停止」を受け入れられるかが判断の分かれ目**です。
 
 `doc/LIVE_DETECTION.md` に記録された障害
 (browserが死なずに固まり、**229回連続失敗・5時間**検出が止まった)も、
