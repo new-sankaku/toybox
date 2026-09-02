@@ -208,6 +208,11 @@ provider側のlifecycleの方が確実です。
 **instance 1台を数日立てて `live_resolver` だけ動かし、`SIGI_STATE` が取れるかを
 最初に確かめてください。**取れなければ他の全ての見積りが無意味になります。
 
+> **(2026-09-01追記) このriskは回避できます。**検出をvendor API へ移すと
+> 公開pageを叩かなくなるため、**このgo/no-go自体が不要**になります。
+> あわせてheadless Chromiumが要らなくなり、**4GB → 2GB級のVPSで足りる**可能性があります。
+> [LIVE_DETECTION_VENDOR.md](LIVE_DETECTION_VENDOR.md) を参照してください。
+
 安いproviderほどIP帯のevaluationは厳しい傾向があります。塞がれた場合、
 国内VPS(さくら/ConoHa/Xserver等)は日本のIP帯でCDNへの経路も短いため、
 次に試す価値があります。

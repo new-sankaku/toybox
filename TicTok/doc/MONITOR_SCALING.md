@@ -2,6 +2,12 @@
 
 「監視数を増やしたらVPS 4GBで足りるか」への回答です。
 
+> **前提の注意 (2026-09-01追記)**: 本文書の制約はすべて
+> **「LIVE検出を自前のheadless Chromiumで公開pageに当てる」現在の実装**を前提にしています。
+> 検出をvendor API(bulk live check / LIVE Alerts)へ移すと、
+> **制約1(検出遅延)は丸ごと消え、監視数の上限もほぼ無くなります。**
+> 先に [LIVE_DETECTION_VENDOR.md](LIVE_DETECTION_VENDOR.md) を読んでください。
+
 **結論: RAMは足ります。先に詰まるのは(1)LIVE検出の遅れ、(2)diskです。**
 どちらもRAMを増やしても解決しません。
 
