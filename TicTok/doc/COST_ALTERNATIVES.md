@@ -150,6 +150,10 @@ Lightsailの実価格(Price List API取得)で価格とdiskの関係を確かめ
 そのまま監視に使えますが、**既定の `capacity_alert_days`(14日)では一度も鳴りません** —
 diskの全容量が4.6日ぶんしか無いためです。**2日程度へ下げてください。**
 
+**同時監視数を増やすとここが最初に壊れます。**監視2倍で17.4GB/日となり、
+40GB diskのbufferは2.3日になります。監視数を増やす場合の詳細は
+[MONITOR_SCALING.md](MONITOR_SCALING.md) にあります。
+
 ## 4. GPU機能は¥1,000には入りません
 
 焼き込み・超解像・文字起こし・BGM除去はGPUが要り、Spot g6.xlarge を月65時間で
