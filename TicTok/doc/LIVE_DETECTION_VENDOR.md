@@ -94,6 +94,68 @@ anti-crawlerの外側にあります。EulerStreamも `OAuth Tokens` 系のendpo
 本人の認可を取れないためです。**「他人の公開配信を継続的に監視する」という
 要求そのものが、公式APIの想定外**である、というのが実際のところです。
 
+## 1c. WAFはpipelineのどこに掛かっているのか（実装で確認）
+
+**結論: WAFを踏むのは「unique_id → roomId」の1段だけです。**
+署名とWAFは別の仕組みで、**署名さえ手に入れば、接続も録画も自分のIPから普通に通ります。**
+実際この appはそうやって動いています。
+
+| # | 段階 | host | 防御 | どのIPから | 署名 |
+|---:|---|---|---|---|---|
+| ① | **unique_id → roomId** | `www.tiktok.com/@user/live` (HTML) | **SlardarWAF**(JS challenge) | ローカル(Chromium) | — |
+| ② | room_info → 配信URL | `webcast.tiktok.com/webcast/room/info/` | **WAF対象外** | **ローカル(素のhttpx)** | **不要** |
+| ③ | event WebSocket | `webcast.tiktok.com/webcast/im/fetch` → wss | ByteDance Anti-Crawler | **ローカル** | **必要**(vendorから) |
+| ④ | 映像segment | `pull-hls-*.tiktokcdn.com` | **WAF対象外**。URLに時限token | **ローカル(ffmpeg)** | 不要 |
+
+### 根拠
+
+**②が署名も browser も要らないこと** — `_fetch_room_payload` のdocstringが
+「署名を消費せず room_info の生payloadを1度だけ引く(**web.getは既定 `sign_url=False`**)」
+と明言しており、`webcast.tiktok.com/room/info/` を素の httpx で叩いています。
+
+**③④が自分のIPから出ていること** — `client.connect()` に proxy 設定は一切ありません。
+vendorから受け取るのは**署名済みURLだけ**で、**WebSocketを張るのはこのprocessです**。
+
+**④に認証material が1つも無いこと** — ffmpegの起動引数は実質 `-i <url>` だけです。
+
+```python
+args = ["ffmpeg", "-nostdin", "-y", "-loglevel", "warning", ...,
+        "-i", url,                      # header も UA も cookie も渡していない
+        "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", ...]
+```
+
+**header も User-Agent も cookie も付けていません。**それで通るということは、
+CDN側の入場券は**URLに埋め込まれた時限token**だけで、
+**IPにもfingerprintにも縛られていない**ことになります。
+`get_log_stream_url_expiry_warn_seconds()` の説明にある
+「TikTok issues these URLs with lifetimes measured in **hours**」がその寿命です。
+
+`doc/LIVE_DETECTION.md` も同じことを別の角度から書いています。
+
+> `room_info` は `webcast.tiktok.com`、websocket署名は sign server で、**いずれもSlardarWAF対象外**。
+> → **検出も再接続もwww.tiktok.comのWAFを踏まない。**
+>
+> 録画（ffmpeg）はCDN（`pull-hls-*.tiktokcdn.com`）からsegmentを取得し、**WAF対象外なので影響なし**。
+
+### だから何が言えるか
+
+1. **`ProbeGate` の 2回/分 は①にしか掛かっていません。**
+   ②③④は監視数を増やしても、WAF的には何の制約も受けません。
+   `doc/MONITOR_SCALING.md` で「制約は検出遅延とdiskだけ」と結論したのは、
+   この構造の裏返しです。**録画そのものは帯域とdiskの許す限り増やせます。**
+
+2. **vendorから買うのは実質①(と③の署名)だけです。**
+   ②④は今までどおり自分のIPのままで、そこは何も変わりません。
+   §1b で「riskの移転」と書いた範囲は、**pipelineの1/4**です。
+
+3. **「IPを分散させないと配信が取れない」ということはありません。**
+   1台のIPで、監視数ぶんのWebSocketとffmpegを普通に張れます。
+   分散が要るとしたら①だけで、それはvendorのfleetが担っている部分です。
+
+> 補足(未検証): EulerStreamのplanにある "Cloud WebSockets"(無料25 / Business 100)は、
+> **③をvendor側で張る別mode**と読めます。TikTokLiveの既定は自前接続なので、
+> 現状この枠は消費していないはずですが、確認していません。
+
 ## 2. この appは既に半分だけ委託しています
 
 `tictok/core/config.py` に `TICTOK_EULER_API_KEY` があり、
