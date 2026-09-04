@@ -135,6 +135,18 @@ function installBrowserStubs(win, calls) {
     disconnect() {}
   };
 
+  // jsdom は layout を持たないので ResizeObserver も未実装。動画の枠の実寸を測る側が
+  // 読み込み時に呼ぶので、無いと script の評価そのものが落ちる。
+  win.ResizeObserver = class ResizeObserverStub {
+    constructor(cb) {
+      this.cb = cb;
+      calls.observers.push(this);
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+
   // <canvas> の 2D context。jsdom は canvas package 無しだと getContext が null を返し、
   // 描画 code が TypeError で落ちる。呼ばれた命令を記録するだけの context を返す。
   const ctxMethods = [

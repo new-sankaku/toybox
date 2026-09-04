@@ -213,6 +213,31 @@ _STILL_NAME_RE = re.compile(
     r"(?:_(?P<label>.+))?$"
 )
 
+# highlightをgifterごとに繋いだ1本の名前。組み立て側は
+# :func:`tictok.media.highlight_export.export_filename` で、**対で守る**。
+#
+#     01_260829-260905_coin5906_セクハラ珍たん_story.mp4
+#
+# 先頭の2桁は**その週の中の順位**(01がその週で一番コインの多い人)。file名の並び順そのものを
+# コインの高い順にするために付いている —— coinは桁区切りを持たないので、これが無いと
+# ``coin14611`` が ``coin3092`` より前に来る文字列順になる(額の順にならない)。
+# **prefixの無い名前も読む。** 既に書き出した分の名前は変えないので、両方が同じfolderに並ぶ。
+#
+# 置き場は ``<配信者>/LiveHightlite_マージ済み`` で、``_clips`` の切り出しと同じく
+# ``ARTIFACT_DIRNAMES`` に入る(一覧・移動・容量が必ず見る)。読み手をここに置かないと、
+# 容量を食っているfileが素性なしの行として並ぶ。
+#
+# **表示名で分割しない。** gifterの表示名には ``_`` も ``_story`` も入り得る(利用者が自由に
+# 付ける)。前は ``coin<数字>_``、後ろは ``_story`` を手掛かりにして、間を丸ごと名前として
+# 採る。``.+`` を貪欲にしてあるので、名前が ``_story`` で終わる人でも末尾の1つだけが印として
+# 剥がれる。
+#
+# **録画のstemを持たない。** 複数のhighlightのgift演出を跨いで束ねた物で、録画1本に属さない。
+_MERGED_HIGHLIGHT_NAME_RE = re.compile(
+    r"^(?:(?P<position>\d{2,})_)?"
+    r"(?P<start>\d{6})-(?P<end>\d{6})_coin(?P<coin>\d+)_(?P<name>.+)_story$"
+)
+
 # file名末尾の版の印 -> 種別。``clip_path(suffix=...)`` が付けるものと同じ語彙。
 # ``.work`` は名前の途中にも ``_work<件数>`` を持つ(種別はそちらから決まる)が、ここに
 # 載せておかないと末尾の印が剥がれず、名前そのものが規約外として読めなくなる。
@@ -258,6 +283,37 @@ def _parse_still_name(base: str) -> Optional[dict]:
     }
 
 
+def _parse_merged_highlight_name(base: str) -> Optional[dict]:
+    """highlightをgifterごとに繋いだ1本のfile名を読み戻す。規約外なら None。
+
+    ``stem`` は空にする。録画1本に属さないので、一覧が録画へ紐付けようとしても当たっては
+    いけない —— 空にしておけば ``by_stem`` は必ず外れ、``recording_id`` が付かない
+    (``tictok.api.routes.clips``)。存在しない録画のidを名乗るより、持たない方が正しい。
+
+    ``start``/``end`` も **None** にする。あの2つは「録画のどこからどこまで」で、この成果物は
+    録画上の範囲を持たない(週のgiftを繋いだ物である)。0秒などを入れると、一覧の範囲の欄が
+    実在しない位置を名乗る。代わりに ``week``(``yymmdd-yymmdd``)と ``coin``(その週の合計)を
+    返し、一覧はそちらで素性を名乗る。
+
+    ``label`` はgifterの表示名。一覧のラベル欄がそのまま「誰のfileか」になる。"""
+    m = _MERGED_HIGHLIGHT_NAME_RE.match(base)
+    if m is None:
+        return None
+    return {
+        "stem": "",
+        "streamer": "",
+        "start": None,
+        "end": None,
+        "label": m.group("name"),
+        "kind": "highlight",
+        "parts": None,
+        "week": f'{m.group("start")}-{m.group("end")}',
+        "coin": int(m.group("coin")),
+        # その週の中の順位(file名の先頭)。prefixを持たない古いfileでは None。
+        "position": int(m.group("position")) if m.group("position") else None,
+    }
+
+
 def parse_clip_name(name: str) -> Optional[dict]:
     """成果物のfile名から中身の素性を読み取る。規約外なら None。
 
@@ -281,6 +337,12 @@ def parse_clip_name(name: str) -> Optional[dict]:
         if base.endswith(suffix):
             base, kind = base[: -len(suffix)], variant
             break
+    # highlightをgifterごとに繋いだ1本を先に見る。録画のstemを持たない別の作りなので
+    # ``_CLIP_NAME_RE`` では読めない。字幕fileは中身が動画ではないので種別を譲る。
+    merged = _parse_merged_highlight_name(base)
+    if merged is not None:
+        return {**merged, "kind": "subtitle" if ext else merged["kind"],
+                "subtitle_format": ext.lstrip(".") if ext else ""}
     m = _CLIP_NAME_RE.match(base)
     if m is None:
         return None

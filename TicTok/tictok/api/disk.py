@@ -7,6 +7,7 @@ routeから切り離して置く。route側(``tictok.api.routes.storage``)は lo
 依存は runtime / files / fsfacts。
 """
 
+import json
 import shutil
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from tictok.paths import PROJECT_ROOT
 from tictok.core.config import get_db_path, get_log_dir
 from tictok.core import layout
 from tictok.record.recorder import disk_free_by_volume, is_finalizing, Recorder
+from tictok.record import mirror
 from tictok.record import retention
 from tictok.record.upscale import cleanup_upscale_files
 from tictok.core import cancel, capacity
@@ -28,10 +30,14 @@ from tictok.api import runtime
 
 def _disk_volume_paths() -> list:
     """Every volume the running install writes to: the working dir (HLS + capture),
-    the final dir (relocation target and where outputs are generated), the DB and the
+    the final dirs (relocation targets and where outputs are generated), the DB and the
     logs. These routinely sit on different drives, so only a per-volume reading says
-    which one is about to fill up."""
-    return [runtime.RECORD_DIR, runtime.FINAL_DIR, get_db_path(), get_log_dir()]
+    which one is about to fill up.
+
+    最終保存先は全系統を並べる。2系統は相互mirrorで**両方へ同じ量を書く**ので、片方だけを
+    測っていると、もう一方が満杯に近づいていても誰も気付かない(移送はその時点で両系統とも
+    行われなくなる)。"""
+    return [runtime.RECORD_DIR, *_final_dirs(), get_db_path(), get_log_dir()]
 
 
 def _disk_min_free_bytes() -> int:
@@ -221,10 +227,83 @@ def _capacity_alert_check(report: dict) -> None:
 # いつ最終保存先へ移すかはこの画面から人が決める。移送の実体は recorder の
 # _move_recording_files を使う(moverを二重に持たない)。自動で動く経路が無い以上、
 # 一時保存先は放っておけば増え続けるので、本数と容量を容量画面に常時出して気付けるようにする。
+#
+# 最終保存先が2つ設定されているとき、それらは**振り分け先ではなく相互mirror**である。1台の
+# diskが壊れても退避済みのdataが残るようにするためのもので、両系統は常に同じ内容でなければ
+# ならない。したがって移送は「どちらかへ移す」ではなく「全系統へ複製してから元を消す」で、
+# 片系統にでも書けないなら移送そのものを行わない(``tictok.record.mirror``)。
+
+def _final_dirs() -> list:
+    """移送で**書き込む**最終保存先の全系統。1つも無ければ空list。
+
+    代表値 ``runtime.FINAL_DIR`` を先頭に置き、``runtime.FINAL_DIRS`` の残りを続ける。
+    代表値も必ず書き込み対象に含めるのは、「読み出し・表示が指すroot」と「書き込むroot」が
+    別々の名前で別々の集合を指すと、読む側は在ると言い書く側は書かない、という食い違いが
+    起きるためである(``runtime`` の定義では FINAL_DIR は FINAL_DIRS[0] なので、実運用では
+    両者は完全に一致する)。
+
+    一時保存先そのものは外す —— 同じrootへ2度書くのはmirrorではなく同じfileへの二重書き込み
+    であり、そもそも移す先が無い状態である。
+    """
+    dirs: list = []
+    for root in (runtime.FINAL_DIR, *runtime.FINAL_DIRS):
+        if root != runtime.RECORD_DIR and root not in dirs:
+            dirs.append(root)
+    return dirs
+
 
 def _relocation_enabled() -> bool:
     """退避先が別に設定されているときだけ機能を出す。同一なら移す先が無い。"""
-    return runtime.FINAL_DIR != runtime.RECORD_DIR
+    return bool(_final_dirs())
+
+
+def _mirror_enabled() -> bool:
+    """再同期(2系統の突き合わせ)を出すか。相手が居るのは2系統以上のときだけ。"""
+    return len(_final_dirs()) >= 2
+
+
+def _unavailable_final_dirs() -> list:
+    """今この瞬間に見えていない最終保存先。外付けHDDがbusから落ちれば丸ごと消える。
+
+    見えないrootを「空」と読むと、そこに在るはずのdataが全部欠けていることになり、再同期は
+    最終保存先の中身を丸ごと(実測2026-09-02で ``K:\\80_Tiktok`` の 12,340 file / 0.59TB)複製し
+    始め、移送は「退避先に同名は無い」と判断して片系統だけへ書く。どちらも、
+    diskが戻ってきた瞬間に食い違いとして現れる。だからrootが1つでも見えないなら、突き合わせも
+    移送も行わない。
+    """
+    return [root for root in _final_dirs() if not root.is_dir()]
+
+
+def _relocation_ready() -> bool:
+    """移送・随伴・突き合わせを行ってよい状態か(退避先が在り、全系統が見えている)。"""
+    return _relocation_enabled() and not _unavailable_final_dirs()
+
+
+def _require_mirrors_available(stage: str) -> None:
+    """最終保存先が1つでも見えないなら、その操作を始めさせない。
+
+    ``_require_disk_space`` と同じ位置付けで、始めてから壊すのではなく始める前に断る。
+    見えないrootが在る状態で移送すれば片系統だけが最新になり、それは次の障害で気付かずに
+    dataを失う唯一の経路である。運用logに残すのは、diskが外れていた事実そのものが、後から
+    「なぜあの日から片方が古いのか」を答える唯一の手掛かりになるためである。
+    """
+    missing = _unavailable_final_dirs()
+    if not missing:
+        return
+    runtime.storage.record_ops_event(
+        runtime.logger, "storage.mirror_unavailable",
+        "{stage}を中止しました: 最終保存先 {dirs} が見つかりません".format(
+            stage=stage, dirs="、".join(str(root) for root in missing)),
+        severity=OPS_WARNING,
+        detail={"stage": stage, "missing": [str(root) for root in missing],
+                "final_dirs": [str(root) for root in _final_dirs()]},
+    )
+    raise HTTPException(
+        status_code=409,
+        detail=("最終保存先 {dirs} が見つかりません（driveが外れている可能性があります）。"
+                "両系統が揃うまで移送・再同期は行いません。".format(
+                    dirs="、".join(str(root) for root in missing))),
+    )
 
 
 def _is_under(path: Path, root: Path) -> bool:
@@ -248,12 +327,23 @@ def _relocation_plan() -> dict:
     「まだ移していない」にも現れなかった)。mp4も素材も無い行だけを除く。実測では working dir
     を指す完了録画132本のうち82本がこれ(retention削除済み)で、件数に混ぜると「82本移せる」
     という嘘になる。
+
+    最終保存先が2系統あるときの ``dst`` は代表(``final_dir``)のもので、実際に書く先は
+    ``dsts`` の全部である。退避先の同名判定も**全系統**で行う: 片方にだけ在る録画を「まだ
+    移していない」として数えると、移送は片方へ書けず失敗し続ける(埋めるのは再同期の役目)。
+
+    最終保存先が1つでも見えないときは対象を1本も出さない(``unavailable_dirs``)。見えない
+    rootは空に見えるので、そのまま計画を組めば「向こうには何も無い」と読んで全部を移送対象に
+    してしまう。
     """
     plan: list = []
     total_bytes = 0
     skipped_missing = 0
     skipped_bytes_unknown = 0
     enabled = _relocation_enabled()
+    final_dirs = _final_dirs()
+    unavailable = _unavailable_final_dirs()
+    ready = enabled and not unavailable
     # 所在の内訳(どちらの保存先に何本あるか)はDBのbytesで出し、fileのstatは取らない。
     # 完了録画は数千本あり、画面を開くたび全件statすると容量画面が数秒待たされる。実測が
     # 要るのは移動対象(作業先の取り残し)だけで、そちらは下で実sizeを測る。
@@ -265,7 +355,9 @@ def _relocation_plan() -> dict:
         under_work = _is_under(src, runtime.RECORD_DIR)
         if under_work:
             where = "work"
-        elif enabled and _is_under(src, runtime.FINAL_DIR):
+        elif any(_is_under(src, root) for root in final_dirs):
+            # どの系統に在っても「最終保存先に在る」で1件。2系統は同じ内容なので、系統ごとに
+            # 数え上げると完了録画の総本数が実体の2倍を名乗ることになる。
             where = "final"
         else:
             # record root の外を指す行。移動もretentionも触らないので、内訳では別に数える。
@@ -277,7 +369,7 @@ def _relocation_plan() -> dict:
         else:
             # bytes未記録の行。0として足すと内訳が実態より小さく見えるので件数で断る。
             bucket["unknown_bytes"] += 1
-        if not enabled or not under_work:
+        if not ready or not under_work:
             continue
         stem = Path(row["filename"]).stem
         try:
@@ -301,8 +393,9 @@ def _relocation_plan() -> dict:
                 # bytes未記録の5本に2.7〜4.4時間の録画が混じっていた)。走査するのはこの
                 # 数本だけなので、候補ぶん走査するのとは費用が違う。
                 size = api_files._dir_usage(media_dir)[0]
-        dst = layout.mp4_path(runtime.FINAL_DIR, stem)
-        if dst.exists() or layout.has_media(layout.session_dir(runtime.FINAL_DIR, stem)):
+        dsts = [layout.mp4_path(root, stem) for root in final_dirs]
+        if any(dst.exists() or layout.has_media(layout.session_dir(root, stem))
+               for root, dst in zip(final_dirs, dsts)):
             # 退避先に同名が既に居る。上書きすると既に退避済みの実体を壊すので触らない
             # (素材だけの録画では衝突するのはmp4ではなくsession dirの方である)。
             skipped_bytes_unknown += 1
@@ -312,7 +405,9 @@ def _relocation_plan() -> dict:
             "unique_id": row["unique_id"],
             "filename": row["filename"],
             "src": str(src),
-            "dst": str(dst),
+            # dst は代表1つ(画面と既存の呼び出し互換)。実際に書くのは dsts の全部である。
+            "dst": str(dsts[0]),
+            "dsts": [str(dst) for dst in dsts],
             "bytes": size,
             "started_at": row["started_at"],
         })
@@ -341,7 +436,10 @@ def _relocation_plan() -> dict:
         "by_streamer": sorted(by_streamer.values(), key=lambda e: -e["bytes"]),
         "locations": locations,
         "record_dir": str(runtime.RECORD_DIR),
+        # final_dir は代表1つ(既存の画面が読んでいるkey)。書き込む先の全部は final_dirs。
         "final_dir": str(runtime.FINAL_DIR),
+        "final_dirs": [str(root) for root in final_dirs],
+        "unavailable_dirs": [str(root) for root in unavailable],
     }
 
 
@@ -376,8 +474,9 @@ def _clip_relocation_items(pending_final_stems=()) -> tuple:
     持ち主が分からないfileは動かさずに数だけ返す。録画の行が消えても成果物は実在するので
     (切り出しはretentionにも録画削除にも載らない)、当てずっぽうで最終保存先へ送らない。
     """
-    if not _relocation_enabled():
+    if not _relocation_ready():
         return [], 0
+    final_dirs = _final_dirs()
     owners: dict = {}
     for row in runtime.storage.completed_recordings_with_paths():
         stem = Path(row["filename"] or "").stem
@@ -388,7 +487,7 @@ def _clip_relocation_items(pending_final_stems=()) -> tuple:
         owners.setdefault(row["unique_id"] or "", {})[stem] = {
             "recording_id": row["id"],
             "unique_id": row["unique_id"],
-            "to_final": (_is_under(Path(row["path"]), runtime.FINAL_DIR)
+            "to_final": (any(_is_under(Path(row["path"]), root) for root in final_dirs)
                          or stem in pending_final_stems),
         }
     flat = {stem: info for bucket in owners.values() for stem, info in bucket.items()}
@@ -432,31 +531,48 @@ def _relocate_clip_group(item: dict) -> tuple:
 
     戻り値は ``(移せた本数, 移したbytes, 失敗の理由list)``。1本の失敗で残りを諦めない
     (録画本体と違い、成果物どうしは互いに依存しない)。
+
+    最終保存先が2系統あるときは、1本ごとに**全系統へ複製してから元を消す**。録画本体と同じ
+    順序で、理由も同じである(途中で失敗しても元が残っている)。全系統へ書けなかった1本は、
+    書けた側を消して元を残す —— 成果物はDBに行を持たず台帳がfile systemだけなので、片系統
+    だけに在る1本は誰も居場所を辿れない。
     """
     src_base = Path(runtime.RECORD_DIR)
-    dst_base = Path(runtime.FINAL_DIR)
+    dst_bases = _final_dirs()
     moved = 0
     moved_bytes = 0
     errors: list = []
     for rel in item["files"]:
         src = src_base / rel
-        dst = dst_base / rel
+        dsts = [base / rel for base in dst_bases]
         if not src.is_file():
             # 走査から実行までの間に消えた(利用者が一覧から削除した)。失敗ではない。
             continue
-        if dst.exists():
+        if any(dst.exists() for dst in dsts):
             errors.append(f"{Path(rel).name}: 移動先に同名のfileがあります")
             continue
         try:
             size = src.stat().st_size
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dst))
+            if len(dsts) == 1:
+                # 1系統だけの構成は今までどおりのmove。同一volume内なら実体を書き直さない。
+                dsts[0].parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dsts[0]))
+            else:
+                written: list = []
+                try:
+                    for dst in dsts:
+                        written.append(dst)
+                        mirror.copy_file(src, dst)
+                except OSError:
+                    mirror.undo(written)
+                    raise
+                src.unlink()
         except OSError as exc:
             runtime.logger.warning(
                 "切り出し %s を最終保存先へ移せませんでした", rel,
                 extra={"event": "clip.relocation_failed",
                        "ctx": {"recording_id": item["recording_id"], "src": str(src),
-                               "dst": str(dst)}},
+                               "dsts": [str(dst) for dst in dsts]}},
                 exc_info=True,
             )
             errors.append(f"{Path(rel).name}: {exc}")
@@ -466,35 +582,81 @@ def _relocate_clip_group(item: dict) -> tuple:
     return moved, moved_bytes, errors
 
 
+def _mirror_recording(src: Path, dsts: list) -> None:
+    """1本を全系統へ複製し、全部が揃ってから元を消す。失敗はOSErrorで送出する。
+
+    途中で失敗したら、それまでに書けた系統も消す。片系統だけに実体が在る状態を作らないという
+    一点のためだけの処理で、元はまだ消していないので消して失う物は無い。巻き戻しにも失敗した
+    ときは、残ったpathを添えて例外にする —— 自動で片付けられない食い違いは、人が知らなければ
+    次の障害まで残る。
+    """
+    done: list = []
+    for dst in dsts:
+        try:
+            mirror.copy_recording_files(src, dst)
+        except OSError as exc:
+            stuck: list = []
+            for written in done:
+                _removed, remains = mirror.remove_recording_files(written)
+                stuck.extend(remains)
+            if stuck:
+                raise OSError(
+                    "{error}（巻き戻せなかったfileが残っています: {paths}）".format(
+                        error=exc, paths="、".join(str(path) for path in stuck[:3]))
+                ) from exc
+            raise
+        done.append(dst)
+    mirror.remove_recording_files(src)
+
+
 def _relocate_one(item: dict) -> Optional[str]:
     """1本を退避する。成功でNone、失敗で理由の文字列。
 
     status='recording' への再確認はここでは行わない(呼び出し側が実行直前に見る)。
     移送に成功したときだけDBのpathを書き換える。順序が逆だと、移送に失敗した録画のpathが
     存在しないfileを指す。
+
+    最終保存先が**1系統**のときは今までどおり ``Recorder._move_recording_files`` のmoveで、
+    挙動は1bitも変えない(同一volumeならrenameで済む経路をcopyへ置き換える理由が無い)。
+
+    **2系統**のときは「全系統へ複製 → 検証 → 元を消す」の順で行う(``tictok.record.mirror``)。
+    1系統目へmoveしてから2系統目へcopyする形にしないのは、2系統目で失敗した時点で元がもう
+    無く、片系統だけが実体を持つ状態が確定してしまうためである。
+
+    **片方にでも書けなければ、既に書けた側を消して移送そのものを無かったことにする。** 元は
+    まだ手元に在るので、消して失うdataは無い —— 消さずに残す方が危険で、その1本だけが片系統に
+    在る状態は、次にそのdiskが壊れたときまで誰も気付かない。巻き戻しにも失敗した場合だけ、
+    残ったpathを理由の文字列に載せて人へ渡す(自動で片付けられない以上、黙って成功を名乗る
+    わけにはいかない)。
     """
     src = Path(item["src"])
-    dst = Path(item["dst"])
+    dsts = [Path(path) for path in item["dsts"]]
     # mp4は録画の身元で、実在するとは限らない(finalizeはもう作らない)。移す実体は素材の
     # session dirなので、在るかどうかは両方で見る。
     if not src.is_file() and not layout.has_media(
             layout.session_dir(layout.record_root_of(src), src.stem)):
         return "移送元が見つかりません"
-    if dst.exists() or layout.has_media(
-            layout.session_dir(layout.record_root_of(dst), dst.stem)):
-        return "退避先に同名のfileが既にあります"
+    for dst in dsts:
+        if dst.exists() or layout.has_media(
+                layout.session_dir(layout.record_root_of(dst), dst.stem)):
+            return "退避先に同名のfileが既にあります"
     try:
-        Recorder._move_recording_files(src, dst)
+        if len(dsts) == 1:
+            Recorder._move_recording_files(src, dsts[0])
+        else:
+            _mirror_recording(src, dsts)
     except OSError as exc:
         # working dirに残す。working dirも許可されたrecord rootなので再生も出力も続く。
         runtime.logger.warning(
             "%s の移送に失敗したため %s に残しました", item["filename"], src,
             extra={"event": "recording.manual_relocation_failed",
                    "ctx": {"recording_id": item["recording_id"], "path": str(src),
-                           "dst": str(dst), "size_bytes": item["bytes"]}},
+                           "dsts": [str(dst) for dst in dsts],
+                           "size_bytes": item["bytes"]}},
             exc_info=True,
         )
         return str(exc)
+    dst = dsts[0]
     if not runtime.storage.update_recording_path(item["recording_id"], str(dst)):
         # 行が消えている(session削除と競合)。fileは既に移動済みなので位置だけ記録に残す。
         runtime.logger.warning(
@@ -587,7 +749,206 @@ def _relocation_summary() -> dict:
         "skipped_existing_at_destination": plan["skipped_existing_at_destination"],
         "record_dir": plan["record_dir"],
         "final_dir": plan["final_dir"],
+        "final_dirs": plan["final_dirs"],
+        # 見えていない系統は容量画面へ常時出す。「移していない録画は0本」と「移せる状態に
+        # ない」は同じ表示になってはならない(前者は片付いている、後者は止まっている)。
+        "unavailable_dirs": plan["unavailable_dirs"],
     }
+
+
+# ---- 最終保存先の再同期 ------------------------------------------------------------
+# 2系統は相互mirrorなので、片方にしか無いfileは「まだ揃っていない」状態である。移送は必ず
+# 全系統へ書くので新しく増えることはないが、2系統目を後から設定したとき・片系統が外れている
+# 間に何かが書かれたときは揃っていない。それを埋めるのがここである。
+#
+# 行うのはcopyだけで、元は消さない。移送(relocate)は一時保存先を空けるための片道の操作だが、
+# 再同期は両系統を同じにするための操作で、消してよいfileは1つも無い。
+#
+# 同名でsizeが違うfileは**触らない**。どちらが正しいかはここでは決められず(新しい方が正しい
+# とは限らない —— 途中で切れた書き込みの方が新しいこともある)、上書きは取り返しがつかない。
+
+# 応答へ載せる明細の上限。初回の再同期では片系統が丸ごと欠けており、明細は実測(2026-09-02)の
+# 12,340 file をdir単位に束ねた件数になる。件数(total_items)は常に実数を返し、明細だけを畳む。
+_MIRROR_REPORT_LIMIT = 200
+
+# 突き合わせた結果を**確かめた時刻とともに**残すkey。走査は両rootの全dirを辿るので画面を
+# 開くたびには回せず、残さなければ「最後に揃っていると確かめたのはいつか」に誰も答えられない
+# —— 二重化が効いているかは、空き容量ではなくその1点でしか読めない。
+#
+# 置き場が ``db_maintenance`` なのは、失っても困らない記録だからである(失えば次に突き合わせる
+# までの間「未確認」に戻るだけで、実体は1byteも変わらない)。
+_MIRROR_CHECK_KEY = "mirror_compare_result"
+
+
+def _store_mirror_check(report: dict) -> None:
+    """実際に走査した回の要約を残す。明細は残さない —— 後から効くのは件数と時刻だけで、
+    file名の一覧は次の走査で作り直せる。
+
+    欠けている件数は**系統ごと**に分けて残す。合計だけでは「どちらのdriveに無いのか」が
+    読めず、片方だけが古い状態(二重化が実際に破れている唯一の形)を人が名指しできない。"""
+    by_dst: dict = {}
+    for group in report["items"]:
+        entry = by_dst.setdefault(group["dst"], {"count": 0, "bytes": 0})
+        entry["count"] += group["count"]
+        entry["bytes"] += group["bytes"]
+    runtime.storage.set_maintenance_value(_MIRROR_CHECK_KEY, json.dumps({
+        "at": time.time(),
+        "final_dirs": list(report["final_dirs"]),
+        "missing_items": report["total_items"],
+        "missing_bytes": report["total_bytes"],
+        "missing_by_dst": by_dst,
+        "diverged": report["diverged_count"],
+        "errors": len(report["errors"]),
+        "stale": False,
+    }, ensure_ascii=False))
+
+
+def invalidate_mirror_check() -> None:
+    """再同期でfileを書いた後、残っている要約は**実行前の姿**になる。
+
+    0件へ書き換えない —— 複製に失敗した分まで「揃った」と読ませることになる。取り直すには
+    全走査をもう一度回すしかないので、消さずに古いと名乗らせる(``_mirror_report`` の
+    ``current`` と同じ考え方)。"""
+    raw = runtime.storage.get_maintenance_value(_MIRROR_CHECK_KEY)
+    if not raw:
+        return
+    try:
+        saved = json.loads(raw)
+    except ValueError:
+        return
+    saved["stale"] = True
+    runtime.storage.set_maintenance_value(_MIRROR_CHECK_KEY, json.dumps(saved, ensure_ascii=False))
+
+
+def mirror_check_status() -> dict:
+    """最後に突き合わせた結果。一度も走っていなければ ``at`` は None。
+
+    今の系統と違う組み合わせで採った結果は捨てる。別の2 driveについての答えを「最後に
+    確かめた日」として出すと、設定を変えた日から誰も確かめていないことが隠れる。"""
+    dirs = [str(root) for root in _final_dirs()]
+    blank = {"at": None, "final_dirs": dirs, "missing_items": 0, "missing_bytes": 0,
+             "missing_by_dst": {}, "diverged": 0, "errors": 0, "stale": False,
+             "enabled": _mirror_enabled()}
+    raw = runtime.storage.get_maintenance_value(_MIRROR_CHECK_KEY)
+    if not raw:
+        return blank
+    try:
+        saved = json.loads(raw)
+    except ValueError:
+        return blank
+    if not isinstance(saved, dict) or list(saved.get("final_dirs") or []) != dirs:
+        return blank
+    return {**blank, **saved, "enabled": _mirror_enabled()}
+
+
+def _mirror_plan() -> dict:
+    """2系統の最終保存先を突き合わせた結果(dry-run)。実行は ``_run_mirror_resync``。
+
+    突き合わせは両rootの全dirを辿る走査である(``/api/storage/scan`` と同じ性質のblocking
+    I/O)。DBには二次保存先に何が在るかの台帳が無いので、実体を見る以外に答えを出す方法は無い。
+    読むのはmetadataだけ(比べるのはsizeである)なので費用はfile数に比例し、実測(2026-09-02)で
+    ``K:\\80_Tiktok`` は 12,340 file —— 複製そのもの(同じ実測で0.59TB)とは桁が違う。
+
+    最終保存先が1つでも見えないときは走査そのものを行わない。見えないrootは空に見えるため、
+    そのまま突き合わせれば「向こうには何も無い」と読んで、最終保存先の中身を丸ごと
+    (12,340 file / 0.59TB)複製する計画を出すことになる。
+    """
+    dirs = _final_dirs()
+    unavailable = _unavailable_final_dirs()
+    base = {
+        "enabled": _mirror_enabled(),
+        "final_dirs": [str(root) for root in dirs],
+        "unavailable_dirs": [str(root) for root in unavailable],
+        "items": [], "total_items": 0, "total_bytes": 0,
+        "diverged": [], "diverged_count": 0, "errors": [],
+    }
+    if not base["enabled"] or unavailable:
+        return base
+    diff = mirror.compare_roots(dirs)
+    report = {
+        **base,
+        "items": diff["groups"],
+        "total_items": sum(group["count"] for group in diff["groups"]),
+        "total_bytes": sum(group["bytes"] for group in diff["groups"]),
+        "diverged": diff["diverged"],
+        "diverged_count": len(diff["diverged"]),
+        "errors": diff["errors"],
+    }
+    # 走査を回した回だけ残す。系統が見えない・2系統でないときの ``base`` を残すと、
+    # 突き合わせていないことが「揃っている」として記録に残る。
+    _store_mirror_check(report)
+    return report
+
+
+def _mirror_report(plan: dict, current: bool) -> dict:
+    """planをAPI応答の形へ畳む。実行に使うfile名の一覧は落とし、件数と先頭だけを返す。
+
+    file名の一覧をそのまま返すと、初回の再同期(片方が空)の応答には最終保存先のfileがそのまま
+    並ぶ(実測2026-09-02で12,340 file)。畳むのは明細だけで、件数・容量は実数のままにする
+    (そこを丸めると、操作の規模を人が見誤る)。
+
+    ``current`` は「この突き合わせが今の状態か」である。**再同期の実行後に返すplanは実行前に
+    採ったもの**で(取り直すには全走査をもう一度回すことになる)、そのまま「残り」として描くと、
+    複製し終えた直後の画面が実行前の件数を「まだ残っている」と名乗る。逆に0件を「揃った」と
+    読むのも同じ誤りなので、現在の状態かどうかは応答自身が名乗る。
+    """
+    return {
+        **plan,
+        "items": [{key: value for key, value in group.items() if key != "files"}
+                  for group in plan["items"][:_MIRROR_REPORT_LIMIT]],
+        "listed_items": min(len(plan["items"]), _MIRROR_REPORT_LIMIT),
+        "group_count": len(plan["items"]),
+        "diverged": plan["diverged"][:_MIRROR_REPORT_LIMIT],
+        "current": current,
+    }
+
+
+def _run_mirror_resync(plan: dict, on_item=None) -> dict:
+    """planに沿って、欠けている側へfileを複製する。1件の失敗で全体を止めない。
+
+    1 fileがlockされているだけで残りを諦めるのは、この機能の目的(2系統を揃える)に反する。
+    失敗は数えて報告し、次へ進む。
+
+    走査から実行までの間に埋まったfile(別経路の移送など)は飛ばす。**既に在るfileは決して
+    上書きしない** —— 同名でsizeが違うなら、それは人の判断を待つべき食い違いである。
+    """
+    copied = 0
+    copied_bytes = 0
+    failures: list = []
+    total = len(plan["items"])
+    for index, group in enumerate(plan["items"]):
+        cancel.check_cancelled()
+        if on_item is not None:
+            on_item(index, total, group)
+        rel = group["rel"]
+        src_dir = Path(group["src"]) / rel if rel else Path(group["src"])
+        dst_dir = Path(group["dst"]) / rel if rel else Path(group["dst"])
+        for name in group["files"]:
+            cancel.check_cancelled()
+            src = src_dir / name
+            dst = dst_dir / name
+            if not src.is_file():
+                # 走査から実行までの間に消えた。失敗ではない。
+                continue
+            if dst.exists():
+                continue
+            try:
+                copied_bytes += mirror.copy_file(src, dst)
+            except OSError as exc:
+                runtime.logger.warning(
+                    "再同期で %s を %s へ複製できませんでした", name, dst_dir,
+                    extra={"event": "storage.mirror_copy_failed",
+                           "ctx": {"src": str(src), "dst": str(dst)}},
+                    exc_info=True,
+                )
+                failures.append({"filename": f"{rel}/{name}" if rel else name,
+                                 "reason": str(exc)})
+                continue
+            copied += 1
+    if on_item is not None:
+        on_item(total, total, None)
+    return {"copied": copied, "copied_bytes": copied_bytes, "failures": failures,
+            "diverged_count": plan["diverged_count"]}
 
 
 def _retention_rules() -> dict:

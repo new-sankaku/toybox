@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok LIVE Monitor — ストーリー</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="app-dashboard">
+  <div class="app-shell">
+    <h1 class="visually-hidden">ストーリー</h1>
+    <div class="a-topbar">
+      <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+      <nav class="a-nav"></nav>
+      <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status" aria-live="polite">Server接続中…</span></div>
+    </div>
+
+    <!-- TikTok本体が出すハイライト(LIVE replayの切り抜き)を、こちらの録画へ音声指紋で
+         突き合わせて「何のギフトか」「誰が投げたか」を割り出す画面。
+         ハイライト 1本はmontageで、平均6秒のgift演出が10個ほど、複数の録画から繋がれている。
+
+         tabは3つだけにしてある。以前は「照合結果」という**1本の中だけを読む面**が別に在ったが、
+         あれは選ぶ物(ハイライト 1本)も主語(gift演出)も検証の面と違うのに、検証の行をclickすると
+         毎回そちらへ飛ばされていた ―― 1件確かめるたびに面が入れ替わるので、大量の行を
+         続けて見ることができなかった。**確かめる場所と一覧を同じ面に置く**のが要件なので、
+         検証の面の左へ動画を入れて畳んである。 -->
+    <div class="vd-tabs">
+      <button id="tab-list" class="vd-tab active" type="button">ハイライト一覧</button>
+      <button id="tab-cover" class="vd-tab" type="button">検証</button>
+      <button id="tab-export" class="vd-tab" type="button">出力</button>
+    </div>
+
+    <!-- ===== ハイライト一覧 ===== -->
+    <!-- 置き場を走査して手元のハイライトを台帳へ載せ、そこから照合を起動する場所。
+         配信者の絞り込みは左の縦paneへ置く(帯を積み増さない)。操作は表の見出し行と
+         その上の1本の帯に収める。 -->
+    <div id="view-list" class="vd-view">
+      <!-- dropの受け皿。**受けるのはこの面だけ**である(検証tab・出力tabへ落ちた物を黙って
+           投入しない)。dragの間だけ出して、**どこへ入るのか**を落とす前に名乗る ――
+           置き場は配信者folderの下なので、投入先を知らないまま落とさせると、別人の置き場に
+           入ったハイライトが「当たらないだけ」の形で静かに増える。
+           投入先のpathはServerが名乗った値をそのまま出す(画面ではpathを組み立てない)。 -->
+      <div id="hl-drop" class="st-drop hidden" aria-hidden="true">
+        <div class="st-drop-body">
+          <div class="st-drop-title">ここへdrop</div>
+          <div id="hl-drop-where" class="st-drop-where"></div>
+        </div>
+      </div>
+      <div class="vd-gwrap st-listwrap">
+        <!-- 一番左=観る場所。**行をclickしてもこの面は動かない。** 以前は検証tabへ飛ばして
+             いたので、1本確かめるたびに面が入れ替わり、一覧の位置も選択も失われた ――
+             「これは要らないfileだ」と決めて選び直して消す、という一続きの操作が
+             そこで切れていた。確かめる場所を一覧と同じ面に置くのは検証・出力と同じ約束。
+             実体の無い行(状態=fileが無い)はServerが url を返さないので、押しても404に
+             なる再生は起こさず、ここで理由を名乗る。
+             **この列には動画しか置かない。** 以前は同じ列の動画の下に配信者の棚が
+             ぶら下がっていて、絞り込む物(棚)と観る物(動画)が縦に積まれていたため、
+             どちらも列幅28%の中で痩せていた(利用者の指定)。
+             **動画の上には何も置かない。** 見出しも、配信者名もfile名も尺も置かない ――
+             どれも右の表の行に出ている物で、同じことを2箇所へ書いたぶんだけ動画が低く
+             なっていた(利用者の指定)。3つのtabで動画の箱を1pxも動かさないため、
+             player の上に段を作るのはここでも検証・出力の面でも止めてある。
+             出せない理由(実体の無い行・URLを返さない行)だけは player の上へ重ねて出す。 -->
+        <div class="st-stage st-liststage">
+          <video id="hl-video" class="vd-mvideo" controls playsinline preload="metadata"></video>
+          <!-- 出せない理由。空の間は何も出さない(:empty で消える)ので、ここに字が出て
+               いるのは「出せない理由が在るとき」だけである。 -->
+          <div id="hl-play-status" class="st-stage-note" aria-live="polite"></div>
+        </div>
+
+        <!-- 絞り込みの棚は**表のすぐ左**の縦列に置く(利用者の指定)。絞る物と絞られる物が
+             隣り合っていないと、棚を押した結果がどこに出るのかを目で追えない ――
+             動画の下に居た頃は、棚と表の間に動画1本ぶんの幅が挟まっていた。 -->
+        <div class="vd-gside st-listshelf">
+          <div class="vd-gside-head">
+            <span class="vd-gbar-label">配信者</span>
+          </div>
+          <!-- 棚は走査で判った配信者から組む。選択肢を画面が持つと、置き場に居るのに
+               選べない配信者ができる。 -->
+          <div id="hl-streamers" class="vd-gside-list" role="toolbar" aria-orientation="vertical"
+               aria-label="配信者で絞り込む"></div>
+          <div class="vd-gbar-ops">
+            <span class="vd-gbar-label">状態</span>
+            <!-- 状態の選択肢もserverが返した値から組む。画面側で状態名を先に決めると、
+                 server側が状態を足したときに、その行だけどの絞り込みでも出なくなる。 -->
+            <select id="hl-status" aria-label="状態で絞り込む"><option value="">全て</option></select>
+          </div>
+        </div>
+
+        <div class="vd-gmain">
+          <div class="x-toolbar">
+            <!-- 投入。**dropだけにしない** ―― dropはtouchやキー操作の利用者には使えない。
+                 accept は file選択の絞り込みに過ぎず、受けるかどうかを決めるのはServerで
+                 ある(拡張子の判定は store.highlights.HIGHLIGHT_EXTENSIONS の1箇所だけ)。
+                 受けるのはこの箱ではなく画面全体なので、枠は細い破線に留める。 -->
+            <span id="hl-dropzone" class="st-dropzone">
+              <button id="hl-add" class="btn btn-primary btn-small" type="button">動画を追加</button>
+            </span>
+            <input id="hl-file" class="visually-hidden" type="file" multiple
+                   accept="video/mp4,.mp4" aria-label="投入するハイライトの動画" />
+            <!-- 投入先の下に週のfolderを作る。素材は週ごとに仕分けられているので、
+                 folderを作る手段が画面に無いと、投入のたびにfile管理画面へ出て手で作る
+                 ことになる。**名前もその選択肢もServerが決める** ―― 週の境目は
+                 「土曜の朝7時〜次の土曜の朝7時」で、画面側で日付を組み立てると、
+                 対象の週(検証・出力tab)と1日ずれた名前のfolderが静かに増える。 -->
+            <span class="st-opt"><span class="st-opt-l">週のfolder</span>
+              <select id="hl-folder-week" aria-label="作る週のfolder"></select>
+              <button id="hl-folder-add" class="btn btn-small" type="button" disabled>folderを作る</button>
+            </span>
+            <!-- **走査は台帳の引き直しも含む。** かつて隣に「再読み込み」を置いていたが、
+                 あちらは置き場を見ずに台帳を引き直すだけで、走査を押せば必ずそれも起きる
+                 ―― 押し分ける理由が画面から読めない2つのbuttonが並んでいた。 -->
+            <button id="hl-scan" class="btn btn-small" type="button">置き場を走査</button>
+            <span class="vd-row-sep" aria-hidden="true"></span>
+            <button id="hl-match" class="btn btn-small" type="button" disabled>照合</button>
+            <button id="hl-delete" class="btn btn-danger btn-small" type="button" disabled>削除</button>
+            <!-- 実体の無い行の片付け。走査は消えたfileの行を消さずに「fileが無い」へ倒す
+                 ―― 置き場が一時的に外れているだけのことがあり、照合結果と人の手直しを
+                 道連れにできないためである。だが**戻ってこないfileの行は誰も片付けない**
+                 ので、そのまま溜まり続ける。1行ずつ選んで消す道はあるが、そこへ辿り着く
+                 前に行のclickで別のtabへ飛ばされていた(それは直した)。
+                 0件のときは出さない ―― 常設にすると、出ているのが普通の帯になる。 -->
+            <button id="hl-purge" class="btn btn-danger btn-small hidden" type="button"
+                    aria-label="実体の無い行を台帳から片付ける"></button>
+            <!-- 照合の設定は毎回触る物ではないので常設の帯にはしない。開け閉めはbuttonで、
+                 開いている間だけ下へ広がる。 -->
+            <button id="hl-opts-toggle" class="btn btn-small" type="button" aria-expanded="false"
+                    aria-controls="hl-opts-body">照合の設定</button>
+            <span class="sp"></span>
+            <span id="hl-job" class="vd-summary" aria-live="polite"></span>
+            <span id="hl-summary" class="vd-summary"></span>
+          </div>
+
+          <!-- 照合の設定。**空欄はServerの既定値をそのまま使う。** 画面側が既定の数値を持つと、
+               Server側の設定を変えても画面から投げた分だけ古い値で走る。 -->
+          <div id="hl-opts-body" class="st-optspanel hidden">
+            <span class="st-opt"><span class="st-opt-l">遡る日数</span>
+              <input id="opt-days" class="st-num" type="number" min="1" step="1" placeholder="既定"
+                     aria-label="候補にする録画を何日ぶん遡るか" />
+            </span>
+            <span class="x-field seg-field"><span class="seg-label">候補</span>
+              <span id="opt-scope" class="seg" role="radiogroup" aria-label="録画のどこを候補にするか" data-value="">
+                <button class="seg-item" type="button" data-value="">既定</button>
+                <button class="seg-item" type="button" data-value="gift">gift地点</button>
+                <button class="seg-item" type="button" data-value="all">録画全体</button>
+              </span>
+            </span>
+            <span class="st-opt"><span class="st-opt-l">gift前 秒</span>
+              <input id="opt-gift-lead" class="st-num" type="number" min="0" step="0.5" placeholder="既定"
+                     aria-label="gift地点の何秒前から候補の窓を開くか" />
+            </span>
+            <span class="st-opt"><span class="st-opt-l">gift後 秒</span>
+              <input id="opt-gift-tail" class="st-num" type="number" min="0" step="0.5" placeholder="既定"
+                     aria-label="gift地点の何秒後まで候補の窓を開くか" />
+            </span>
+            <!-- 照合の下限。**出力の下限とは別の設定**で、こちらは「探す範囲」を決める。
+                 値は画面に書き写さない ―― 既定はServerのconfigが持っており、写すと設定を
+                 変えても画面から起動した分だけ古い値で走る。空欄のとき実際に効く値は
+                 GET /api/highlights の defaults から薄字(placeholder)で名乗る。
+                 空欄と0は別の意味で、0は「下限なし」の明示指定である。
+                 既定が98なのは、99🪙の階層(LIVE On Air / Singing Mushroom など)にも
+                 画面上の演出が出るためで、199以上へ上げるとその階層が窓を失う
+                 (実測の真値10件のgift演出のうち3件が消えた)。 -->
+            <span class="st-opt"><span class="st-opt-l">gift窓の下限🪙</span>
+              <input id="opt-min-diamonds" class="st-num" type="number" min="0" step="1" placeholder="既定"
+                     aria-label="gift窓を張るgiftのコインの下限" />
+            </span>
+            <span class="st-opt"><span class="st-opt-l">窓 秒</span>
+              <input id="opt-window" class="st-num" type="number" min="0" step="0.1" placeholder="既定"
+                     aria-label="指紋を取る窓の長さ(秒)" />
+            </span>
+            <span class="st-opt"><span class="st-opt-l">hop 秒</span>
+              <input id="opt-hop" class="st-num" type="number" min="0" step="0.001" placeholder="既定"
+                     aria-label="指紋の窓をずらす刻み(秒)" />
+            </span>
+          </div>
+
+          <div class="result-block st-fill">
+            <div class="vd-listhead vd-listhead-tools">
+              <h3 class="result-subtitle">■ ハイライト</h3>
+              <span id="hl-selected" class="vd-summary"></span>
+              <span class="sp"></span>
+              <span id="hl-status-note" class="vd-summary" aria-live="polite"></span>
+            </div>
+            <div class="table-wrap">
+              <table class="result-table" id="hl-table">
+                <thead>
+                  <tr>
+                    <th class="vd-th-pick"><input id="hl-select-all" type="checkbox" aria-label="表示中を全選択" /></th>
+                    <th>配信者</th>
+                    <th>file</th>
+                    <th class="num">尺</th>
+                    <th>状態</th>
+                    <th class="num">gift演出</th>
+                    <!-- 2つの数は別物である。gift演出1つが複数のgiftを持つので、
+                         「giftを持つgift演出の数」と「giftの件数」は一致しない。 -->
+                    <th class="num">gift付き</th>
+                    <th class="num">gift件数</th>
+                    <th class="num">最高🪙</th>
+                    <th class="num">合計🪙</th>
+                    <th>照合</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="hl-rows"></tbody>
+              </table>
+              <div id="hl-empty" class="feed-empty" data-label="ハイライト"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 検証: 週のgift × ハイライト ===== -->
+    <!-- **表の主語はgiftである**(ハイライトではない)。その週にこの配信者へ投げられたgiftを
+         並べ、各行に「ハイライトのどこに出ているか」を付ける。読めるべきことは4つ:
+           1. どのgiftが採られたか        … TikTokが何を選んでいるかが見える
+           2. **どのgiftが採られていないか** … 高額なのに1本も無いgiftが並べば、
+              「TikTokが選ばなかった」のか「こちらの照合が取りこぼした」のかを
+              人が確かめる起点になる。この面の一番の用途。
+           3. 同じgiftが複数のハイライトに出ているか … 重複排除が効いているかの確認
+           4. 確からしさの低い当たり … NGを付けて出力から外す起点
+
+         **行をclickしても面は動かない。** 左の動画エリアがその場でその位置を映す ――
+         以前は照合結果tabへ飛ばしていたが、1件見るたびに面が入れ替わるので、
+         数百件を続けて確かめることができなかった。↑↓キーで次の行へ送れる。 -->
+    <div id="view-cover" class="vd-view hidden">
+      <!-- **帯も動画の右へ入れる。** 面の頭に横いっぱいの帯を敷いていた頃は、
+           動画がその厚みぶん下から始まり、帯を持たない一覧tabと縦位置が揃わなかった
+           ―― tabを移るたびに動画が上下に跳ねる(利用者の指摘)。帯は表と同じ列の
+           1段目に置き、動画は面の上端から下端までを1つの領域として立てる。 -->
+      <div class="st-cover">
+        <div class="st-tools">
+          <div class="x-toolbar">
+            <label class="x-field"><span>配信者</span>
+              <select id="cv-streamer" aria-label="検証する配信者"></select>
+            </label>
+            <!-- 週の選択肢も境界も**この面の応答が持っている**(weeks / prev_week / next_week /
+                 start_label / end_label)。別の口から週を引いて重ねると、選んでいる週と表の
+                 中身が別々に動く余地ができる。 -->
+            <label class="x-field"><span>対象の週</span>
+              <span class="st-weekbar">
+                <button id="cv-week-prev" class="btn btn-small" type="button" aria-label="前の週">‹</button>
+                <select id="cv-week" aria-label="対象の週"></select>
+                <button id="cv-week-next" class="btn btn-small" type="button" aria-label="次の週">›</button>
+              </span>
+            </label>
+            <span id="cv-week-range" class="vd-summary"></span>
+            <span class="vd-row-sep" aria-hidden="true"></span>
+            <span class="x-field seg-field"><span class="seg-label">絞り込み</span>
+              <span id="cv-filter" class="seg" role="radiogroup" aria-label="表に出すgift" data-value="all">
+                <button class="seg-item" type="button" data-value="all">全て</button>
+                <!-- **上から順に潰していく面なので、次に見る行を出す指定を一番手前に置く。**
+                     印はgift 1件ごとで、当たりの無い行にも付く(そこがこの面の一番の用途)。 -->
+                <button class="seg-item" type="button" data-value="unchecked">未確認</button>
+                <button class="seg-item" type="button" data-value="missing">未出現</button>
+                <button class="seg-item" type="button" data-value="multi">複数に出現</button>
+                <button class="seg-item" type="button" data-value="risk">要確認</button>
+                <button class="seg-item" type="button" data-value="ng">NG済</button>
+              </span>
+            </span>
+            <span class="x-field seg-field"><span class="seg-label">並び</span>
+              <span id="cv-order" class="seg" role="radiogroup" aria-label="並び順" data-value="diamonds">
+                <button class="seg-item" type="button" data-value="diamonds">高額順</button>
+                <button class="seg-item" type="button" data-value="time">配信時刻順</button>
+                <button class="seg-item" type="button" data-value="gifter">Gifterごと</button>
+              </span>
+            </span>
+            <span class="st-opt"><span class="st-opt-l">🪙の下限</span>
+              <input id="cv-min" class="st-num" type="number" min="0" step="1" placeholder="既定"
+                     aria-label="表に出すgiftのコインの下限" />
+            </span>
+            <label class="vd-chk"><input id="cv-autoplay" type="checkbox" checked /> 自動再生</label>
+            <button id="cv-stats-toggle" class="btn btn-small" type="button" aria-expanded="false"
+                    aria-controls="cv-stats">この週の集計</button>
+            <button id="cv-reload" class="btn btn-small" type="button">再読み込み</button>
+            <!-- **件数の名乗りも要注意の帯もここには置かない。** 表を見れば読める ――
+                 「出ていない」は区間の列に、確からしさは確からしさの列に出ており、
+                 何件あるかは絞り込みを押したときの表の長さそのものである(利用者の指定)。 -->
+          </div>
+
+          <!-- この週の俯瞰。既定では畳んである ―― 13行の数字を常時左へ置いていたために、
+               肝心の表と動画から幅を奪ったうえ、何を読む面なのかが分からなくなっていた。
+               割合はServerが返した合計から出す(行を数え直さない)。 -->
+          <div id="cv-stats" class="st-stats hidden"></div>
+        </div>
+
+        <div class="vd-mlist">
+          <div class="result-block">
+            <div class="vd-listhead vd-listhead-tools">
+              <h3 class="result-subtitle">■ 週のgift</h3>
+              <span id="cv-note" class="vd-summary"></span>
+              <span class="sp"></span>
+              <span class="vd-summary st-keys-note">↑↓ 送る / Enter 確認して次へ / H L 候補 / Space / ←→ 縮める・Ctrl+←→ 伸ばす / [ ] 開始 / , . 終了 / Z 戻す / A 確認 / N NG</span>
+            </div>
+            <div class="table-wrap">
+              <table class="result-table" id="cv-table">
+                <thead>
+                  <tr>
+                    <!-- 「時刻」では何の時刻か読めなかった。**配信の時刻**である
+                         (ハイライトの中の秒は「区間」の列)。 -->
+                    <th>配信時刻</th>
+                    <th class="num">🪙</th>
+                    <th>gift</th>
+                    <th>gifter</th>
+                    <!-- **「位置」の列は畳んだ。** 位置(giftが映っている秒)と区間(切り出す
+                         範囲)はどちらもハイライトの中の秒で、数字の形まで同じ ―― 隣り合う
+                         2列にすると、どちらがfileに入る方なのかが読めなかった。fileに入る
+                         のは区間の方なので、列はそちらだけにして、giftの映っている秒は
+                         この列のtooltipで名乗る。「出ていない」もここに出る。 -->
+                    <th class="num">区間</th>
+                    <!-- **語ではなく数を出す**(利用者の指定)。「高 / 低」の2択では、
+                         低い行が10件並んだときにどれから観ればよいのかを語が答えられ
+                         なかった。0〜100で、線ちょうどが50。目盛りはServerが持つ
+                         (highlight_match.score_of)。 -->
+                    <th class="num">スコア</th>
+                    <!-- **照合そのものが壊れている疑い**だけを出す列。印(次の列)は
+                         「知っておくこと」なので、混ぜると普通に付く印に紛れて
+                         見落とす。線(秒)はServerが名乗る(long_segment_seconds)。 -->
+                    <th>警告</th>
+                    <th>印</th>
+                    <!-- **「この行は見た」の印。** gift 1件ごとで、gift演出の approved には
+                         相乗りさせない —— どのハイライトにも出ていない行(gift演出もgift行も
+                         持たない)にこそ印が要る。数百件を上から潰す面なので、どこまで見たかが
+                         残らないと開き直すたびに最初から確かめ直すことになる。 -->
+                    <th>確認</th>
+                    <th>NG</th>
+                  </tr>
+                </thead>
+                <tbody id="cv-rows"></tbody>
+              </table>
+              <div id="cv-empty" class="feed-empty" data-label="週のgift"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 左=確かめる場所。**行を選んでもここが変わるだけで、面は動かない。**
+             HTMLの並びは 表→動画→軸 のままで、左右の入れ替えはCSSの区画割り
+             (grid-template-areas)で行う ―― ここに載る物(時間軸)は「表で行を選んだあと」に
+             触る物なので、読み上げとtabの順は表が先でなければ意味が通らない。 -->
+        <!-- **動画の上には何も置かない**(一覧tab・出力tabと同じ)。見出しも素材の名前も
+             尺も置かない ―― どれも右の表の行に出ている物で、同じことを2箇所へ書いた
+             ぶんだけ動画が低くなり、tabごとに縦位置がずれていた(利用者の指定)。 -->
+        <div class="st-stage">
+          <!-- **既定で消音。** 行を送るたびに自動再生が走る面なので、音が出る作りだと
+                 一覧を眺めるだけで鳴り続ける。必要な人はplayerのbuttonで戻せる。 -->
+          <video id="cv-video" class="vd-mvideo" controls playsinline preload="metadata" muted></video>
+          <!-- 出せない理由だけを player の上へ重ねる(空の間は出ない)。 -->
+          <div id="cv-play-status" class="st-stage-note" aria-live="polite"></div>
+        </div>
+
+        <!-- ===== 時間の帯。**動画の右、表の下に敷く。** =====
+             軸に要るのは高さではなく幅である ―― 動画の列(28%)の中へ積んでいた頃は、60秒の
+             ハイライトが表の左端で終わる幅しか無く、gift iconは段を作る前に重なり、0.25秒を
+             詰めるのに数pxをdragすることになっていた(利用者の指摘)。
+             **ただし動画の下は通さない。** 動画は面の上端から下端までを1つの領域として
+             立てるので、軸はその**右側の残り**、つまり表の下だけに敷く(利用者の指定)。
+             横いっぱいの1段として動画の下まで通していた頃は、その帯の厚みぶん動画が
+             低くなっていた。
+             置き場は表の枠(.st-cover)の中の1区画である ―― 枠は段を2つ持ち、動画がその2段を
+             跨ぐので、表が何行になっても軸は面の下端から動かない。
+             読み上げとtabの順は 表→動画→軸で、「行を選んだあとに触る物」という並びのまま。 -->
+        <div class="st-axis">
+          <!-- 時間軸。**配信者動画の seek bar と同じ作りである**(lane構成・handleの掴み方・
+               再生位置・目盛り・gift iconは static/timeline.js が持つ共通の物)。上端が区間の
+               handle lane、下端が時刻ruler、その間が本体で、本体の下端に演出区間のlaneが載る。
+               コマ(filmstrip)はrulerの直上の帯へ敷く ―― 本体の地へ敷いていた頃は、同じ場所に
+               載るgiftのiconと名前が絵に紛れて読めなかった(利用者の指摘)。
+               地に敷くのは波形ではなくgift演出(montageの継ぎ目)で、🪙の量は柱の高さで出す。 -->
+          <div class="vd-heat-head vd-timebar">
+            <span id="cv-time" class="vd-time">--:--:-- / --:--:--</span>
+            <!-- **同じgiftは複数のハイライトに入る。** どれを観るかを人が選べないと、機械が
+                 代表に決めた1本にそのgiftのアニメが1frameも無いとき、その行からは確かめる
+                 手が無い(実測: Whale diving 2,150🪙 は3本に当たり、代表の5.9秒の1本には
+                 映っておらず、11.1秒ある別の1本の11.8〜15.8秒にだけ映っていた)。
+                 **選ぶことは「このgiftはこの1本を使う」という指定でもある** —— 書き出しの
+                 重複排除もこの選択を最優先に読む。当たりが1本しか無い行では触れない。
+                 帯は増やさず、時刻と速度と同じこの行へ置く。 -->
+            <span class="vd-chk seg-field"><span class="seg-label">候補</span>
+              <select id="cv-hit" class="st-hitpick"
+                      aria-label="このgiftが当たっているハイライト"></select>
+            </span>
+            <!-- 数百件を続けて確かめる面なので、速さは常設の操作である。段が9つあるものを
+                 pillで並べると行を占領するため、録画画面と同じくbarで出す(選んだ速さは
+                 出力tabと共通で、次に開いた時も同じ速さで始まる)。 -->
+            <span class="vd-chk seg-field"><span class="seg-label">速度</span>
+              <span id="cv-rate" class="segbar"
+                    data-stops="0.25,0.5,0.75,1,1.25,1.5,2,3,4"
+                    data-value="1" data-revert="1" data-wheel="1"
+                    data-label="再生速度" data-unit="x"></span>
+            </span>
+            <span class="sp"></span>
+            <label class="vd-chk"><input id="cv-show-strip" type="checkbox" checked /> コマ</label>
+            <span id="cv-tl-note" class="vd-summary"></span>
+          </div>
+          <div class="vd-heat-wrap">
+            <canvas id="cv-timeline" class="vd-heat st-timeline" aria-label="時間軸"></canvas>
+            <!-- hoverしている秒の絵。配信者動画は録画1本ぶんのspriteを持つが、ハイライトに
+                 その口は無いので、1枚ずつ切ってcacheへ残す口を秒を丸めて叩く。 -->
+            <div id="cv-thumb" class="vd-thumb hidden">
+              <!-- 絵はServerが頼まれた幅で切って返すので、縦は実比率のまま出す(縦横を
+                   画面が決めると、縦動画が横長に潰れる)。取れなかった秒は差し替えない。 -->
+              <img id="cv-thumb-img" class="st-thumb-img" alt="" />
+              <div id="cv-thumb-time" class="vd-thumb-time"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 出力 ===== -->
+    <!-- **出力の単位はgifter 1人につき1本**である。1本へ全部を繋ぐのではない ――
+         切り抜きは「この人が投げた分」として本人へ届く物なので、他人のgift演出が混ざった
+         1本は誰のものでもなくなる。
+         束ねる鍵はidentity_keyで、表示名では束ねない ―― 同じ人が名前を変えると1人が
+         2束に割れ、別人が同じ名前を名乗ると別人が1束に混ざる。表示名はfile名と画面表示
+         にだけ使う。
+         書き出す前に「誰の束が何本できるか」を確かめられることが要件で、束を開くと
+         その人のgift演出が並ぶ2段の見え方にしてある。**書き出した後は左で観られる。** -->
+    <div id="view-export" class="vd-view hidden">
+      <!-- **素材を選ぶ棚は置かない。** 素材は対象の週で決まる —— その週のgiftに当たった
+           ハイライトが素材そのものであって、file名から中身を当てられない一覧を人へ選ばせる
+           理由が無い(利用者の指定)。配信者と週は検証tabと同じく帯へ置く。 -->
+      <div class="vd-gwrap">
+        <div class="vd-gmain">
+          <!-- **帯は動画の右へ入れる。** 面の頭に横いっぱいの帯を敷いていた頃は、
+               動画がその厚みぶん下から始まり、一覧tabと縦位置が揃わなかった
+               ―― tabを移るたびに動画が上下に跳ねる(利用者の指摘)。 -->
+          <div class="st-exsplit">
+            <div class="st-tools">
+              <div class="x-toolbar">
+                <!-- 出力は配信者folderの下へ置かれるので、Serverは配信者を跨いだ選択を400で
+                     弾く。跨げる選択UIを出して押してから断られるより、1人ぶんしか並ばない
+                     作りにして跨ぎようが無くする。 -->
+                <label class="x-field"><span>配信者</span>
+                  <select id="ex-streamer" aria-label="出力する配信者"></select>
+                </label>
+                <!-- 誰のfileを作るかを決める週。境目は土曜の朝7時で、ランキングの「週」
+                     (月曜0時始まり)とは**別物**である。判定は配信者画面の「週のGifter」と
+                     同じ口(/api/streamers/{id}/mentions)から引く ―― 画面と出力で「誰が対象か」
+                     が食い違うのが最悪の結末なので、週の境界も閾値も画面側では組み立てない。
+                     **週を選ぶことが素材を選ぶことである。** -->
+                <label class="x-field"><span>対象の週</span>
+                  <span class="st-weekbar">
+                    <button id="ex-week-prev" class="btn btn-small" type="button" aria-label="前の週">‹</button>
+                    <select id="ex-week" aria-label="対象の週"></select>
+                    <button id="ex-week-next" class="btn btn-small" type="button" aria-label="次の週">›</button>
+                  </span>
+                </label>
+                <span id="ex-week-range" class="vd-summary"></span>
+                <span class="vd-row-sep" aria-hidden="true"></span>
+                <!-- 並びは**1本の中のgift演出の順**を決めるだけ。fileを分ける軸はgifterで固定
+                     なので、以前あった「gifter順」「gifterでまとめる」はここから外した
+                     (同じ意味の指定が2つ残ると、どちらがfileを分けるのか読めなくなる)。 -->
+                <span class="x-field seg-field"><span class="seg-label">並び</span>
+                  <span id="ex-order" class="seg" role="radiogroup" aria-label="1本の中のgift演出の順" data-value="diamonds">
+                    <button class="seg-item" type="button" data-value="diamonds">高額順</button>
+                    <button class="seg-item" type="button" data-value="time">時刻順</button>
+                  </span>
+                </span>
+                <!-- 出力の下限。照合の「gift窓の下限」と同じ数字だが**別の設定**である ――
+                     あちらは探す範囲、こちらは出来上がりの中身を決める。 -->
+                <span class="st-opt"><span class="st-opt-l">下限🪙</span>
+                  <input id="ex-min" class="st-num" type="number" min="0" step="1" placeholder="既定"
+                         aria-label="1本へ載せるgift 1件あたりのコインの下限" />
+                </span>
+                <button id="ex-opts-toggle" class="btn btn-small" type="button" aria-expanded="false"
+                        aria-controls="ex-opts-body">出力の設定</button>
+                <button id="ex-plan" class="btn btn-small" type="button">出来上がりを確認</button>
+                <button id="ex-run" class="btn btn-primary btn-small" type="button" disabled>書き出す</button>
+                <span class="sp"></span>
+                <span id="ex-job" class="vd-summary" aria-live="polite"></span>
+                <span id="ex-summary" class="vd-summary"></span>
+              </div>
+
+              <div id="ex-opts-body" class="st-optspanel hidden">
+                <!-- gift演出は演出の立ち上がりで切られているので端が詰まっている。前後へ少し
+                     広げられるようにする(広げてもハイライトの端は越えません)。 -->
+                <span class="st-opt"><span class="st-opt-l">前の余白 秒</span>
+                  <input id="ex-pad-lead" class="st-num" type="number" min="0" step="0.1" placeholder="既定"
+                         aria-label="gift演出の頭を何秒前へ広げるか" />
+                </span>
+                <span class="st-opt"><span class="st-opt-l">後の余白 秒</span>
+                  <input id="ex-pad-tail" class="st-num" type="number" min="0" step="0.1" placeholder="既定"
+                         aria-label="gift演出の尻を何秒後ろへ広げるか" />
+                </span>
+              </div>
+            </div>
+
+            <div class="vd-mlist">
+              <div class="result-block">
+                <!-- **表の見出しは置かない。** 「■ 出来上がるfile」も件数の内訳も
+                     読み方の畳みも外した ―― 列の見出しと行そのものが同じことを
+                     名乗っており、その帯のぶんだけ表が短くなっていた(利用者の指定)。 -->
+                <!-- ===== 観る操作。**表の上へ置く。** =====
+                     以前は左の動画の下に積んでいたが、押した結果(どの1本を通して観るか・
+                     どれが書き出し済みか)が出るのは右の表の側で、操作と結末が面の左右に
+                     割れていた(利用者の指摘)。表の見出し行の直上へ移せば、押す場所と
+                     読む場所が同じ列に並ぶ。
+                     **2つ在った帯は1つに畳む。** どちらも「出来上がった1本を観る」ための
+                     操作で、段を積み増す理由が無い(この面は縦が最も足りない)。 -->
+                <div class="vd-listhead vd-listhead-tools">
+                  <span class="vd-gbar-label">通し再生</span>
+                  <button id="ex-play-all" class="btn btn-small" type="button" disabled>頭から通して</button>
+                  <!-- 不具合は必ず繋ぎ目に出る。全体を通して観るより、繋ぎ目だけを拾って
+                       流す方が速く確かめられる。 -->
+                  <button id="ex-play-joins" class="btn btn-small" type="button" disabled>繋ぎ目だけ</button>
+                  <button id="ex-play-stop" class="btn btn-small" type="button" disabled
+                          aria-label="通し再生を止める">■</button>
+                  <!-- 速さは検証tabと同じ設定を使う。同じ画面の同じ「観る」操作なので、
+                       tabを移るたびに選び直させない。 -->
+                  <span class="vd-chk seg-field"><span class="seg-label">速度</span>
+                    <span id="ex-rate" class="segbar"
+                          data-stops="0.25,0.5,0.75,1,1.25,1.5,2,3,4"
+                          data-value="1" data-revert="1" data-wheel="1"
+                          data-label="再生速度" data-unit="x"></span>
+                  </span>
+                  <span id="ex-run-note" class="vd-summary" aria-live="polite"></span>
+                  <span class="sp"></span>
+                  <span class="vd-gbar-label">書き出し済み</span>
+                  <span id="ex-files-note" class="vd-summary"></span>
+                  <button id="ex-files-reload" class="btn btn-small" type="button">再読み込み</button>
+                </div>
+                <!-- 置き場に在るfile。下見を通さなくても観られる ―― 先週書き出した物を
+                     確かめたいだけの時に、計画を組み直させる理由が無い。表の上の帯なので
+                     縦には積まず、横へ流して折り返す(下のCSS)。 -->
+                <div id="ex-files" class="vd-gside-list st-files" aria-label="書き出し済みのfile"></div>
+                <div id="ex-files-empty" class="feed-empty" data-label="書き出し済みのfile"></div>
+                <div class="table-wrap">
+                  <table class="result-table" id="ex-table">
+                    <thead>
+                      <!-- 🪙の列が2つ在り、**別の数**である。週合計はその人がこの週に投げた
+                           総額(誰のfileを作るかの根拠)、この1本はそのfileに実際に入るgiftの
+                           合計。名前で書き分けないと、同じ列に見えて読み違える。 -->
+                      <tr>
+                        <th class="num">#</th>
+                        <th>gifter</th>
+                        <th class="num">gift</th>
+                        <th class="num">週合計🪙</th>
+                        <th class="num">この1本🪙</th>
+                        <th class="num">尺</th>
+                        <!-- **file名の列は置かない。** 中身は順位・週・週合計🪙・gifterを
+                             並べ直した文字列で、どれも隣の列に出ている ―― それが表の幅の
+                             46%(実測466px)を1列で使い、そのぶんgifterの列が139pxまで痩せて、
+                             名前の方が切れていた(file名の中には同じ名前が全部出ているのに)。
+                             実際に付く名前は行を開いた中で全文を出す。 -->
+                        <th>観る</th>
+                      </tr>
+                    </thead>
+                    <tbody id="ex-rows"></tbody>
+                  </table>
+                  <div id="ex-empty" class="feed-empty" data-label="出来上がるfile"></div>
+                </div>
+                <!-- fileにならなかった人・ハイライトに1件も出ていない人は、**表の外の
+                     文章では出さない**。以前はここに段を作って「下限を越えたgiftが5件
+                     ありますが、どれもハイライトに出ていません」と1人ずつ書いていたが、
+                     読む物は行であって説明ではない(利用者の指定) ―― gifterの表へ
+                     そのまま行として並べ、fileが出来ないことは行の警告色で名乗る。 -->
+              </div>
+            </div>
+
+            <!-- 面は**動画・ギフト・表の3つの領域**へ縦に割る(利用者の指定)。以前は
+                 「観る場所」と「表」の2つで、ギフト(繋いだ窓の並び)は動画の枠の中に
+                 同居していた ―― 帯の幅が動画の列から取られるので、片方を広げると
+                 もう片方が痩せ、どちらも独立して決められなかった。3つを同じ高さの
+                 領域にすれば、割り方は2本の棒でそれぞれ決まる。
+                 左=観る場所。**書き出した後に観る手段が無かった**ので、別人のgiftが
+                 混ざったfileは配ってから気付くしかなかった。 -->
+            <div class="split-bar" id="ex-split-a" role="separator" aria-orientation="vertical" tabindex="0" aria-label="動画とギフトの割り方"></div>
+            <div class="split-bar" id="ex-split-b" role="separator" aria-orientation="vertical" tabindex="0" aria-label="ギフトと表の割り方"></div>
+            <!-- **動画の上には何も置かない**(一覧tab・検証tabと同じ)。見出しもfile名も
+                 置かない ―― どれも右の表の行に出ている物で、その段のぶんだけ動画が
+                 低くなり、tabごとに縦位置がずれていた(利用者の指定)。 -->
+            <div class="st-stage">
+              <div class="st-exwatch">
+                <video id="ex-video" class="vd-mvideo" controls playsinline preload="metadata" muted></video>
+                <!-- 出せない理由だけを player の上へ重ねる(空の間は出ない)。 -->
+                <div id="ex-play-status" class="st-stage-note" aria-live="polite"></div>
+              </div>
+            </div>
+
+            <!-- 中=ギフト。1本のmp4は3〜8個の窓を繋いだ物で、繋ぎ目はmp4の中に印が無い
+                 （containerのchapterは書いていない）。ここに出さないと「いま何本目の
+                 何のgiftを観ているか」が判らないまま流れていく。
+                 空でも領域は畳まない ―― 3つの割り方を覚えている面で、選ぶたびに列が
+                 消えたり生えたりすると、動画と表の幅が勝手に動く。 -->
+            <!-- 見出しも本数も置かない。並んだ札そのものが「繋ぐ順の窓」で、何本かは
+                 数えれば判る(利用者の指定)。 -->
+            <div class="st-expane">
+              <div id="ex-chapters" class="st-chapters hidden" aria-label="繋いだ窓"></div>
+              <div id="ex-chapters-empty" class="feed-empty" data-label="繋いだ窓"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <div class="a-footer">
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
+      <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
+    </div>
+  </div>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/timeline.js"></script>
+  <script src="/static/story.js"></script>
+</body>
+</html>

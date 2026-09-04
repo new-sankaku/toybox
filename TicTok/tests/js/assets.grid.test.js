@@ -52,7 +52,7 @@ const AVATAR_URL = "GET /api/assets?kind=avatar&q=taro&sort=last_seen&order=desc
 // 並び順をserverが出していない種別へは、sort/orderを渡さない。
 const RAW_URL = "GET /api/assets?kind=raw&limit=100&offset=0";
 const EMOTE_URL = "GET /api/assets?kind=emote&sort=name&order=desc&limit=100&offset=0";
-// 語が無いavatar。requestは出し、応答のtotalで「絞り込んでください」を出す。
+// 語が無いavatar。requestは出し、応答のtotalで「N件中 先頭M件」と名乗る。
 const AVATAR_BROWSE_URL = "GET /api/assets?kind=avatar&sort=last_seen&order=desc&limit=100&offset=0";
 const STICKER_URL = "GET /api/assets?kind=sticker&sort=name&order=desc&limit=100&offset=0";
 // 配信者で絞った一覧。絞込はkindの次(検索語と同じ場所)に載る。
@@ -272,7 +272,6 @@ describe("素材画面", () => {
       // 案内は一覧の上。先頭ぶんの下だと、scrollし切った人にしか届かない。
       expect(noteEl().textContent).toContain("193,359件");
       expect(noteEl().textContent).toContain("先頭 2件");
-      expect(noteEl().textContent).toContain("絞り込んでください");
       expect(noteEl().compareDocumentPosition(doc.getElementById("as-grid")))
         .toBe(doc.DOCUMENT_POSITION_FOLLOWING);
       // 続きは読ませない(無限scrollにしない)。
@@ -292,7 +291,7 @@ describe("素材画面", () => {
       await switchKind("sticker");
       expect(assetKindInfoOf("sticker").count).toBeNull();
       expect(noteEl().textContent).toContain("90,000件");
-      expect(noteEl().textContent).toContain("絞り込んでください");
+      expect(noteEl().textContent).toContain("先頭 1件");
     });
 
     it("小さい種別は語が無くてもそのまま並べ、案内も出さない", () => {
@@ -364,7 +363,7 @@ describe("素材画面", () => {
     it("集計済みで0件の種別は「未集計」と言わない", async () => {
       expect(kindButton("raw").querySelector(".as-kind-meta").textContent).toContain("0件");
       await switchKind("raw");
-      expect(emptyEl().textContent).toBe("素材はありません。");
+      expect(emptyEl().textContent).toBe("素材なし");
     });
 
     it("再集計するとその種別だけを数え直し、結末を名乗る", async () => {
@@ -591,8 +590,10 @@ describe("素材画面", () => {
       await pick("as-sort", "sends");
       expect([...tileOf("10065").querySelectorAll(".as-stat.is-sorted")]
         .map((el) => el.querySelector(".k").textContent)).toEqual(["送られた個数"]);
+      // 「今この数字で並んでいる」ことは is-sorted の見た目が名乗る。hoverには書かない
+      // (見れば分かる物をtooltipへ二重に置かない)。
       expect(tileOf("10065").querySelector(".as-stat.is-sorted").title)
-        .toContain("この数字で並んでいます");
+        .toBe("送られた個数: 1,234個");
     });
   });
 
@@ -791,20 +792,20 @@ describe("素材画面", () => {
       // 一覧だけstub不在 = 404。
       await reopen({ "GET /api/assets/summary": SUMMARY });
       expect(emptyEl().className).toContain("list-failed");
-      expect(emptyEl().textContent).toContain("0件という意味ではありません");
+      expect(emptyEl().textContent).toContain("取得できませんでした");
       expect(tiles()).toHaveLength(0);
     });
   });
   describe("集計していない種別で絞り込んだとき", () => {
-    // 集計(rescan)が無いと配信者の絞込も集計順も必ず0件になる。それを「素材はありません」
+    // 集計(rescan)が無いと配信者の絞込も集計順も必ず0件になる。それを「素材なし」
     // と出すと、集計すれば出てくる物を無いことにする。
     it("配信者で絞ると0件ではなく未集計として名乗る", async () => {
       await switchKind("emote");
       await pick("as-streamer", "alice");
       expect(emptyEl().textContent).toContain("まだ集計していません");
-      expect(emptyEl().textContent).toContain("0件という意味ではありません");
+      expect(emptyEl().textContent).toContain("0件ではありません");
       expect(emptyEl().textContent).toContain("再集計");
-      expect(emptyEl().textContent).not.toContain("素材はありません");
+      expect(emptyEl().textContent).not.toContain("素材なし");
     });
 
     it("集計順に切り替えたときも未集計として名乗る", async () => {
@@ -818,13 +819,13 @@ describe("素材画面", () => {
       await switchKind("emote");
       await pick("as-streamer", "");
       await pick("as-sort", "name");
-      expect(emptyEl().textContent).toContain("素材はありません");
+      expect(emptyEl().textContent).toContain("素材なし");
     });
 
     it("集計済みの種別では0件を素材が無いと名乗る", async () => {
       await pick("as-streamer", "bob");
       expect(tiles()).toHaveLength(0);
-      expect(emptyEl().textContent).toContain("素材はありません");
+      expect(emptyEl().textContent).toContain("素材なし");
       expect(emptyEl().textContent).not.toContain("まだ集計していません");
     });
 

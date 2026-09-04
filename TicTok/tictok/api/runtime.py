@@ -70,9 +70,14 @@ mimetypes.add_type("text/javascript", ".mjs")
 # Resolved at startup from settings (see init below). A UI change to either dir
 # therefore takes effect on the next server start, not mid-run.
 # RECORD_DIR = working dir (SSD): live recording, HLS, avatar/gift caches.
-# FINAL_DIR  = final dir (HDD): completed mp4s relocate here (== RECORD_DIR when unset).
+# FINAL_DIRS = final dirs (HDD): completed mp4s relocate here. 0, 1 or 2 entries.
+#   2つ設定されているとき、それらは**振り分け先ではなく相互mirror**である(1台壊れても
+#   退避済みの録画が残るようにするためのもの)。書く側は全部へ書き、読む側は全部を探す。
+# FINAL_DIR  = FINAL_DIRS[0](未設定なら RECORD_DIR)。読み出し・表示の代表1つで、
+#   「どちらか片方へ書けばよい」という意味では**ない**。書く経路は FINAL_DIRS を使うこと。
 RECORD_DIR: Path
 FINAL_DIR: Path
+FINAL_DIRS: list = []
 # Roots a stored recording path is allowed to resolve under (both dirs, deduped).
 _RECORD_ROOTS: list[Path] = []
 UNIQUE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.]{1,64}$")
@@ -339,6 +344,11 @@ class JobRegistry:
 
 hub = EventHub()
 jobs = JobRegistry(hub.broadcast)
+# DB保守(退避・VACUUM・checkpoint・健全性check)の排他。画面のbutton(routes.system)と
+# 配信終了後の自動退避(startup._backup_db_snapshot)が同じlockを取る ―― 別々に持つと、
+# 1.6GBのsnapshotが読み transaction を握っている最中にVACUUMが走り出し、書き込みを全部
+# 止めた上でreaderに阻まれて失敗する。
+maintenance_lock = asyncio.Lock()
 # 走っている意味検索buildのtask。asyncioはrunning taskを強参照しないため、ここで
 # 持っていないとGCがbuildを黙って回収し得る。
 _semantic_build_tasks: set = set()
@@ -450,7 +460,8 @@ storage.record_ops_event(
     logger,
     "process.startup_recovery_completed",
     "起動時の復旧: journalから {sessions}件のsessionを復元（event +{events}件、"
-    "viewer +{viewers}件）、残っていた {stale_sessions}件のsessionを確定、"
+    "viewer +{viewers}件、行ごと作り直したsession {resurrected}件）、"
+    "残っていた {stale_sessions}件のsessionを確定、"
     "{stale_recordings}件の録画を中断扱いにしました"
     "（bucketを補完したsession {backfilled}件 / 内訳 journal {t_journal:.1f}s・"
     "session確定 {t_stale:.1f}s・bucket補完 {t_backfill:.1f}s・録画 {t_rec:.1f}s）".format(
@@ -467,6 +478,7 @@ storage.record_ops_event(
         "journal_sessions": _journal_summary["sessions"],
         "journal_events": _journal_summary["events"],
         "journal_viewers": _journal_summary["viewers"],
+        "journal_resurrected": _journal_summary["resurrected"],
         "stale_sessions": _stale_sessions,
         "stale_recordings": _stale_recordings,
         "backfilled_bucket_sessions": _backfilled_buckets,
@@ -481,9 +493,19 @@ settings = Settings(storage)
 # DB value if set, else the env var, else the default. FINAL_DIR falls back to the
 # working dir when unset (no split; completed recordings are not relocated).
 RECORD_DIR = Path(settings.get("record_dir")).resolve()
-_final_setting = settings.get("record_dir_final")
-FINAL_DIR = Path(_final_setting).resolve() if _final_setting else RECORD_DIR
-_RECORD_ROOTS = [RECORD_DIR] if FINAL_DIR == RECORD_DIR else [RECORD_DIR, FINAL_DIR]
+# 2系統は同順で解決し、重複と一時保存先そのものを外す(同じrootを2度書けば、mirrorでは
+# なく同じfileへの二重書き込みになる)。dictで畳むのは順序を保つため。
+FINAL_DIRS = list({
+    _resolved: None
+    for _resolved in (
+        Path(_value).resolve()
+        for _value in (settings.get("record_dir_final"), settings.get("record_dir_final2"))
+        if _value
+    )
+    if _resolved != RECORD_DIR
+})
+FINAL_DIR = FINAL_DIRS[0] if FINAL_DIRS else RECORD_DIR
+_RECORD_ROOTS = [RECORD_DIR, *FINAL_DIRS]
 # 録画横断のpool(avatars/emotes/gift_icons)はwork rootにしか存在しない。書く側(下のcache)と
 # 読む側(焼き込み)が同じ値を使うよう、serverが解決した実物をlayoutへ渡す。
 layout.set_pool_root(RECORD_DIR)
@@ -495,10 +517,12 @@ layout.set_record_roots(_RECORD_ROOTS)
 _migrated_sidecars = sum(migrate_sidecars(_root) for _root in _RECORD_ROOTS)
 logger.info(
     "録画directoryを解決しました（work=%s final=%s, sidecar %d件を移行）",
-    RECORD_DIR, FINAL_DIR, _migrated_sidecars,
+    RECORD_DIR, " / ".join(str(_d) for _d in FINAL_DIRS) or "(未設定)", _migrated_sidecars,
     extra={"event": "process.record_dirs_resolved",
            "ctx": {"path": str(RECORD_DIR), "final_path": str(FINAL_DIR),
-                   "split": FINAL_DIR != RECORD_DIR,
+                   "final_paths": [str(_d) for _d in FINAL_DIRS],
+                   "final_mirrors": len(FINAL_DIRS),
+                   "split": bool(FINAL_DIRS),
                    "sidecars_migrated": _migrated_sidecars}},
 )
 avatar_pool = AvatarPool(

@@ -24,7 +24,10 @@ from tictok.core.config import (
     get_db_analyze_enabled,
     get_db_analyze_growth_ratio,
     get_db_backup_before_migration,
+    get_row_trash_keep_days,
 )
+
+from tictok.store import row_trash
 
 from tictok.store._common import (
     _ANALYZE_STATE_KEY,
@@ -76,6 +79,26 @@ class MaintenanceMixin:
             " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
+
+    def get_maintenance_value(self, key: str):
+        """``db_maintenance`` の値を1つ読む。無ければ None。
+
+        ``_get_maintenance_locked`` と分けてあるのは、あちらが既にlockを取っている
+        migration経路の中から呼ばれる前提だからである。こちらはlockを取る ―― 起動後の
+        background taskが「どこまで退避したか」の印を読むための口で、他のkeyとは呼ばれる
+        文脈が違う。
+
+        ここに置いてよいのは**失っても困らない予定の記録**だけである。行数の見張りの台帳を
+        DBの外(退避先)へ置いているのと対になる判断で、あちらはDBが壊れた瞬間に一緒に失われ
+        ては困る。こちらは失っても、次の周期が同じ録画をもう一度退避するだけで済む。"""
+        with self._lock:
+            return self._get_maintenance_locked(key)
+
+    def set_maintenance_value(self, key: str, value: str) -> None:
+        """``db_maintenance`` の値を1つ書く。用途の制限は :meth:`get_maintenance_value`。"""
+        with self._lock:
+            self._set_maintenance_locked(key, value)
+            self._conn.commit()
 
     def _backup_before_migrations(self) -> dict:
         """破壊的migrationの直前の自動退避。__init__からのみ呼ぶ。
@@ -596,6 +619,19 @@ class MaintenanceMixin:
             "CREATE INDEX IF NOT EXISTS idx_events_kind_identity"
             " ON events(kind, identity_key, diamonds, session_id, time)"
         )
+        # 全体dashboardの「gift名ごと」「贈り主ごと」の集計用。gift行だけの部分indexなので
+        # 全eventの2.4%(38,301行)しか持たず、covering なので行本体を読まない。実測(本番の
+        # 複製): gift名の上位50が 112ms -> 3ms、贈り主の上位50が 118ms -> 数ms。
+        # kind全体へ張る案は+70MBで見送った経緯がある(perf audit round3)ため gift 限定。
+        # 列は集計が読むものを全て含めること(gift_count が抜けると表本体へ戻って効かない)。
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_gift_name"
+            " ON events(gift_name, diamonds, gift_count) WHERE kind = 'gift'"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_gift_identity"
+            " ON events(identity_key, diamonds, gift_count, session_id) WHERE kind = 'gift'"
+        )
         # 接続時の遡りの二重記録を止める一意制約(_events_insert_sql の ON CONFLICT が
         # ここを指す)。部分indexにしてあるので、message_idを持たない行 — collector自身が
         # 書くsystem eventと、計装前の既存120万行 — は1件もindexへ載らない。
@@ -896,9 +932,320 @@ class MaintenanceMixin:
                 extra={"event": "storage.schema_migrated",
                        "ctx": {"table": "media_job_queue", "column": "sweep"}},
             )
+        self._migrate_media_job_recording_optional()
+        self._migrate_highlight_segment_gifts()
+        # giftごとの切り出し範囲。既存行はNULLのまま残す —— NULLが「gift演出の窓をそのまま
+        # 使う」という意味そのものなので、gift演出の値で埋めると人が一度も触っていないgiftの
+        # 窓が固定され、次の再照合でgift演出が動いても付いていかなくなる。
+        if self._has_table("highlight_segment_gifts"):
+            gift_columns = [
+                row["name"]
+                for row in self._conn.execute("PRAGMA table_info(highlight_segment_gifts)")
+            ]
+            # 見せ場(show_start/show_end)は**機械が測った値**で、cut_* とは持ち主が違う。
+            # 1つのgift演出に順番待ちで並んだ演出のうち、そのgiftのものが映っている区間で
+            # ある。既存行はNULLのまま残す —— NULLは「まだ割っていない」で、gift演出の窓と
+            # 同じという意味ではない。次の照合で測り直される。
+            for name in ("cut_start", "cut_end", "show_start", "show_end"):
+                if gift_columns and name not in gift_columns:
+                    self._conn.execute(
+                        f"ALTER TABLE highlight_segment_gifts ADD COLUMN {name} REAL")
+                    logger.info(
+                        "highlight_segment_gifts表に %s columnを追加しました", name,
+                        extra={"event": "storage.schema_migrated",
+                               "ctx": {"table": "highlight_segment_gifts",
+                                       "column": name}},
+                    )
+            # 人がこのgiftの当たりとして選んだ1本の印。既存行は0(誰も選んでいない)で入り、
+            # そのgiftの代表は今までどおり機械の順位が決める。**0が「機械に任せる」の意味
+            # そのもの**なので、機械の代表を書き写して埋めてはいけない —— 埋めると、次の
+            # 再照合でよりよい当たりが出ても人が選んだ扱いで固定される。
+            if gift_columns and "chosen" not in gift_columns:
+                self._conn.execute(
+                    "ALTER TABLE highlight_segment_gifts"
+                    " ADD COLUMN chosen INTEGER NOT NULL DEFAULT 0")
+                logger.info(
+                    "highlight_segment_gifts表にchosen columnを追加しました",
+                    extra={"event": "storage.schema_migrated",
+                           "ctx": {"table": "highlight_segment_gifts",
+                                   "column": "chosen"}},
+                )
+            # まとめ投げの個数。**既存行はeventから埋め直す** —— NULLのままだと1個扱いに
+            # なり、「30💎を9個(270💎)」が単価270💎のgiftとして下限を通ってしまう。eventは
+            # 消えていないので推測は要らず、gift_event_id で引き直せる。
+            if gift_columns and "gift_count" not in gift_columns:
+                self._conn.execute(
+                    "ALTER TABLE highlight_segment_gifts ADD COLUMN gift_count INTEGER")
+                filled = self._conn.execute(
+                    "UPDATE highlight_segment_gifts SET gift_count ="
+                    " (SELECT e.gift_count FROM events e"
+                    "   WHERE e.id = highlight_segment_gifts.gift_event_id)"
+                ).rowcount
+                logger.info(
+                    "highlight_segment_gifts表にgift_count columnを追加し、%d行をeventから"
+                    "埋めました", filled,
+                    extra={"event": "storage.schema_migrated",
+                           "ctx": {"table": "highlight_segment_gifts",
+                                   "column": "gift_count", "backfilled": filled}},
+                )
+        # 映像の切り替わり終わる点。既存行はNULL+未測定のまま残す —— gift演出の頭で埋めると
+        # 「測った結果ずれが無かった」と区別が付かず、画面が「まだ測っていません」を
+        # 言えなくなる。
+        if self._has_table("highlight_segments"):
+            segment_columns = [
+                row["name"]
+                for row in self._conn.execute("PRAGMA table_info(highlight_segments)")
+            ]
+            for name, ddl in (("video_start", "REAL"), ("video_end", "REAL"),
+                              ("video_probed", "INTEGER NOT NULL DEFAULT 0")):
+                if segment_columns and name not in segment_columns:
+                    self._conn.execute(
+                        f"ALTER TABLE highlight_segments ADD COLUMN {name} {ddl}")
+                    logger.info(
+                        "highlight_segments表に %s columnを追加しました", name,
+                        extra={"event": "storage.schema_migrated",
+                               "ctx": {"table": "highlight_segments", "column": name}},
+                    )
+                    if name == "video_end":
+                        # 両端は1つの印(video_probed)で名乗る。頭だけを測っていた行は、
+                        # **尻を測っていない**ので印を落とす —— 落とさないと画面が
+                        # 「測ったが決まらなかった」と言い、押しても変わらない操作を
+                        # 人に探させる。頭の値そのものは残す(測ったのは事実である)。
+                        back = self._conn.execute(
+                            "UPDATE highlight_segments SET video_probed = 0"
+                            " WHERE video_probed <> 0").rowcount
+                        logger.info(
+                            "映像の尻が未測定のため、%d行の測定済み印を落としました", back,
+                            extra={"event": "storage.schema_migrated",
+                                   "ctx": {"table": "highlight_segments",
+                                           "column": name, "unprobed": back}},
+                        )
         # cut_listの統合はここでは行わない。表を1つ落とす破壊的な操作なので、退避
         # (_backup_before_migrations)を越えた後の区間から呼ぶ(__init__を参照)。
         self._migrate_search_index()
+        self._migrate_row_trash()
+
+    def _migrate_row_trash(self) -> None:
+        """消えた行の退避(row単位のundo)triggerを揃え、保持日数を過ぎた退避を刈る。lock保持前提。
+
+        triggerの作り直しは ``DROP TRIGGER`` を含むが、落ちるのはtrigger自身だけで行は1つも
+        消えない。よって退避(_backup_before_migrations)の前のこの区間で構わない ——
+        cut_listの統合(表そのものを落とす)とはそこが違う。
+
+        刈り取りを起動時に置くのは ``_prune_ops_events_locked`` と同じ流儀である。定期の退避
+        (``api/startup.py`` の scheduled backup)へぶら下げる形にもできるが、この表は実測でも
+        数千行にしかならないので、周期を持たせる理由が無い。
+
+        仕組みと対象表の線引き、費用の実測は :mod:`tictok.store.row_trash` を参照。"""
+        row_trash.ensure_triggers(self._conn)
+        row_trash.prune(self._conn, get_row_trash_keep_days())
+
+    def prune_row_trash(self) -> int:
+        """消えた行の退避を保持日数で刈る。起動後に呼べる口(lockは自分で取る)。
+
+        起動時の刈り取り(:meth:`_migrate_row_trash`)と同じ処理で、こちらは長く動き続ける
+        serverから明示的に呼ぶためにある。"""
+        with self._lock:
+            removed = row_trash.prune(self._conn, get_row_trash_keep_days())
+            self._conn.commit()
+        return removed
+
+    def row_trash_summary(self) -> dict:
+        """消えた行の退避(``row_trash``)の要約。表ごとの件数と最古・最新の時刻だけを返す。
+
+        行の中身は載せない。退避に入るのは設定値・見どころのmemo・字幕の直しで、それを
+        状況画面へ素で流す理由が無い —— 中身を見て戻す作業は
+        ``scripts/restore_deleted_rows.py`` の担当である。ここが答えるのは
+        「いま何行を抱えているか」「一番古いのはいつか」だけ。"""
+        conn = self._read_connection()
+        counts = [dict(row) for row in row_trash.counts_by_table(conn)]
+        stamps = [row for row in counts if row.get("oldest") and row.get("newest")]
+        return {
+            "keep_days": get_row_trash_keep_days(),
+            "tables": list(row_trash.ROW_TRASH_TABLES),
+            "counts": counts,
+            "rows": sum(int(row.get("rows") or 0) for row in counts),
+            "oldest": min((float(row["oldest"]) for row in stamps), default=None),
+            "newest": max((float(row["newest"]) for row in stamps), default=None),
+        }
+
+    def _migrate_media_job_recording_optional(self) -> None:
+        """media_job_queue.recording_id の NOT NULL を外す。lock保持前提。冪等。
+
+        台帳に載るjobは「録画1本に対する処理」ばかりだったので、この列はNOT NULLだった。
+        highlightの突き合わせはその前提を満たさない —— **どの録画のどこから来たのかを
+        求めるのがjob本体**なので、投入時点で書ける録画idが原理的に存在しない。
+
+        埋め合わせにどれか1本の録画idを入れてはいけない。台帳は「この録画で何が走ったか」
+        の記録でもあり(busy判定・削除の抑止・sweepの済み判定がこの列を読む)、無関係な録画を
+        名乗らせるとその録画のmp4が削除から守られ、別のjobがその録画で走れなくなる。
+
+        SQLiteは列の制約を後から緩められないので、表を作り直す(公式の12-step)。行はすべて
+        写し、indexは張り直す。``PRAGMA foreign_keys`` は書き換えの間だけ落とす —— 付けたまま
+        DROPすると、写し終える前に参照が切れたと見なされる。
+        """
+        info = list(self._conn.execute("PRAGMA table_info(media_job_queue)"))
+        if not info:
+            return
+        recording = next((row for row in info if row["name"] == "recording_id"), None)
+        if recording is None or not recording["notnull"]:
+            return
+        columns = ", ".join(row["name"] for row in info)
+        # PRAGMAは transaction の中では効かない。ここまでの ALTER を確定させてから落とす。
+        self._conn.commit()
+        self._conn.execute("PRAGMA foreign_keys=OFF")
+        try:
+            self._conn.execute("""
+                CREATE TABLE media_job_queue_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL UNIQUE,
+                    kind TEXT NOT NULL,
+                    recording_id INTEGER REFERENCES recordings(id) ON DELETE CASCADE,
+                    session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+                    group_id TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
+                    state TEXT NOT NULL,
+                    priority INTEGER NOT NULL DEFAULT 0,
+                    queued_at REAL NOT NULL,
+                    started_at REAL,
+                    finished_at REAL,
+                    pct INTEGER NOT NULL DEFAULT 0,
+                    stage TEXT NOT NULL DEFAULT '',
+                    error TEXT,
+                    result_json TEXT NOT NULL DEFAULT '{}',
+                    params_json TEXT NOT NULL DEFAULT '{}',
+                    stages_json TEXT NOT NULL DEFAULT '[]',
+                    not_before REAL,
+                    deferred_since REAL,
+                    sweep INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            moved = self._conn.execute(
+                f"INSERT INTO media_job_queue_new ({columns})"
+                f" SELECT {columns} FROM media_job_queue").rowcount
+            with dbmaint.allow_schema_drops():
+                self._conn.execute("DROP TABLE media_job_queue")
+            self._conn.execute(
+                "ALTER TABLE media_job_queue_new RENAME TO media_job_queue")
+            # indexはDROPで一緒に消える。SCHEMAのCREATE INDEX IF NOT EXISTSは既に走った
+            # 後なので、ここで張り直さないと次の起動まで1本も無い状態が続く。
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_media_job_queue_state"
+                " ON media_job_queue(state, priority, queued_at)")
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_media_job_queue_rec"
+                " ON media_job_queue(recording_id, state)")
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_media_job_queue_group"
+                " ON media_job_queue(group_id, queued_at)")
+            self._conn.commit()
+        finally:
+            self._conn.execute("PRAGMA foreign_keys=ON")
+        logger.info(
+            "media_job_queue表のrecording_idを任意にしました（%d 行を移しました）", moved,
+            extra={"event": "storage.schema_migrated",
+                   "ctx": {"table": "media_job_queue", "column": "recording_id",
+                           "rows": moved}},
+        )
+
+    # gift演出からgiftの表へ写す列。旧 highlight_segments の列名と新 highlight_segment_gifts の
+    # 列名が同じものだけを並べる(意味の変わる列は写さない —— 下のdocstringを参照)。
+    _HIGHLIGHT_GIFT_MOVED_COLUMNS = (
+        "gift_event_id", "gift_id", "gift_name", "diamonds", "gift_image",
+        "user_unique_id", "user_nickname", "user_id", "identity_key", "gift_media_time",
+    )
+    # 旧 highlight_segments からgiftの表へ移す列。移した後のgift演出の表には残さない。
+    _HIGHLIGHT_SEGMENT_DROPPED_COLUMNS = frozenset(_HIGHLIGHT_GIFT_MOVED_COLUMNS)
+
+    def _migrate_highlight_segment_gifts(self) -> None:
+        """gift演出1行が持っていたgift列を ``highlight_segment_gifts`` へ移す。lock保持前提。冪等。
+
+        **1 segment 1 gift では持てないことが実測で判った。** segmentは最長8.3秒あり、その中に
+        演出を持つgiftが複数入る —— 最後のgift演出(t=54–60)の Galaxy 1000💎 と Spartan Helmet
+        399💎 がそれで、画面に映っていたのは後者なのに高額な前者が採られた。出力がgifterごと
+        1本である以上、これは**別人の名前が付く**誤りになる。
+
+        写すのは「同じ意味のまま置き場が変わる列」だけである。gift演出の属性(idx / votes / ratio /
+        corr / confidence / media_start / effect_json / approved)はgift演出の表に残す ——
+        gift行へ降ろすと意味が変わる(``approved`` は「このgift演出を確認した」であって
+        「このgifterを確認した」ではない)。
+
+        ``edited`` の扱いだけが判断を要する。旧 ``edited`` は「端を動かした」と「giftを
+        差し替えた」の**両方**で立っていたので、どちらだったかは行からは戻せない。ここでは
+        **giftの側を守る方(manual=1)** へ倒す —— 端だけを動かした行のgiftが1回ぶん機械の
+        更新を免れるのは取り返せるが、人が差し替えたgifterが黙って上書きされるのは
+        取り返せない。以後は ``edited``(gift演出の端)と ``manual``(giftの差し替え)に分かれるので、
+        この曖昧さは1回きりである。
+
+        SQLiteは列を後から落とせないので、gift演出の表は作り直す(公式の12-step)。
+        """
+        info = list(self._conn.execute("PRAGMA table_info(highlight_segments)"))
+        if not info:
+            return
+        names = [row["name"] for row in info]
+        if "gift_event_id" not in names:
+            return                                    # 既に移し終えている
+        moved = self._conn.execute(
+            "INSERT OR IGNORE INTO highlight_segment_gifts"
+            " (segment_id, highlight_id, idx, "
+            + ", ".join(self._HIGHLIGHT_GIFT_MOVED_COLUMNS) +
+            ", inside, is_primary, manual, excluded, dropped)"
+            " SELECT s.id, s.highlight_id, 0, s."
+            + ", s.".join(self._HIGHLIGHT_GIFT_MOVED_COLUMNS) +
+            # 旧い行のgiftはgift演出の主(1件しか持てなかった)。inside はgift演出の範囲内として
+            # 扱う —— 旧い形は範囲外のgiftも同じ列へ入れていたが、区別が行に残っていない。
+            ", 1, 1, s.edited, s.excluded, s.dropped"
+            " FROM highlight_segments s WHERE s.gift_event_id IS NOT NULL").rowcount
+        keep = [name for name in names
+                if name not in self._HIGHLIGHT_SEGMENT_DROPPED_COLUMNS]
+        columns = ", ".join(keep)
+        # PRAGMAは transaction の中では効かない。ここまでを確定させてから落とす。
+        self._conn.commit()
+        self._conn.execute("PRAGMA foreign_keys=OFF")
+        try:
+            self._conn.execute("""
+                CREATE TABLE highlight_segments_new (
+                    id INTEGER PRIMARY KEY,
+                    highlight_id INTEGER NOT NULL
+                        REFERENCES highlight_videos(id) ON DELETE CASCADE,
+                    idx INTEGER NOT NULL,
+                    start REAL NOT NULL,
+                    end REAL NOT NULL,
+                    recording_id INTEGER,
+                    media_start REAL,
+                    votes INTEGER,
+                    ratio REAL,
+                    corr REAL,
+                    confidence TEXT,
+                    effect_json TEXT,
+                    approved INTEGER NOT NULL DEFAULT 0,
+                    edited INTEGER NOT NULL DEFAULT 0,
+                    excluded INTEGER NOT NULL DEFAULT 0,
+                    dropped INTEGER NOT NULL DEFAULT 0,
+                    memo TEXT
+                )
+            """)
+            self._conn.execute(
+                f"INSERT INTO highlight_segments_new ({columns})"
+                f" SELECT {columns} FROM highlight_segments")
+            with dbmaint.allow_schema_drops():
+                self._conn.execute("DROP TABLE highlight_segments")
+            self._conn.execute(
+                "ALTER TABLE highlight_segments_new RENAME TO highlight_segments")
+            # indexはDROPで一緒に消える。SCHEMAのCREATE INDEX IF NOT EXISTSは既に走った
+            # 後なので、ここで張り直さないと次の起動まで1本も無い状態が続く。
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_highlight_segments_hl"
+                " ON highlight_segments(highlight_id, idx)")
+            self._conn.commit()
+        finally:
+            self._conn.execute("PRAGMA foreign_keys=ON")
+        logger.info(
+            "highlightのgift演出からgiftを別表へ移しました（%d 件）", moved,
+            extra={"event": "storage.schema_migrated",
+                   "ctx": {"table": "highlight_segments",
+                           "moved_to": "highlight_segment_gifts", "rows": moved}},
+        )
 
     def _has_table(self, name: str) -> bool:
         """その名前の表が在るか。lock保持前提。廃止した表に触るmigrationを、既に畳んだDBで
@@ -974,7 +1321,8 @@ class MaintenanceMixin:
                  cut["label"] or "", cut["group_id"], cut["position"],
                  cut["exported_at"], cut["exported_path"], cut["created_at"]))
             created += 1
-        self._conn.execute("DROP TABLE cut_list")
+        with dbmaint.allow_schema_drops():
+            self._conn.execute("DROP TABLE cut_list")
         logger.info(
             "切り出し %d 件を見どころへ統合しました（既存へ畳んだ %d 件・新しい行 %d 件）",
             len(cuts), folded, created,
@@ -1068,7 +1416,8 @@ class MaintenanceMixin:
         self._conn.execute("UPDATE search_hits SET body_norm = tictok_index_fold(body)")
         rows = self._conn.execute("SELECT COUNT(*) AS n FROM search_hits").fetchone()["n"]
         # 旧FTSはbody列を索引している。索引する列の入れ替えはALTERできないので作り直す。
-        self._conn.execute("DROP TABLE IF EXISTS search_fts")
+        with dbmaint.allow_schema_drops():
+            self._conn.execute("DROP TABLE IF EXISTS search_fts")
         self._conn.executescript(SEARCH_FTS_DDL)
         self._conn.execute("INSERT INTO search_fts(search_fts) VALUES('rebuild')")
         self._set_maintenance_locked(_SEARCH_FOLD_KEY, version)
@@ -1185,7 +1534,8 @@ class MaintenanceMixin:
                 )
         self._conn.commit()
         # 前回が一時indexを張ったまま落ちていることがある。常設にしない約束なので必ず消す。
-        self._conn.execute(f"DROP INDEX IF EXISTS {self._INTERN_TEMP_INDEX}")
+        with dbmaint.allow_schema_drops():
+            self._conn.execute(f"DROP INDEX IF EXISTS {self._INTERN_TEMP_INDEX}")
         self._conn.execute(
             f"CREATE UNIQUE INDEX {self._INTERN_TEMP_INDEX} ON event_strings(value)")
         try:
@@ -1193,7 +1543,8 @@ class MaintenanceMixin:
             filled = self._intern_fill_ids_locked()
         finally:
             # 一時indexは必ず落とす。例外で抜けても常設化させない。
-            self._conn.execute(f"DROP INDEX IF EXISTS {self._INTERN_TEMP_INDEX}")
+            with dbmaint.allow_schema_drops():
+                self._conn.execute(f"DROP INDEX IF EXISTS {self._INTERN_TEMP_INDEX}")
             self._conn.commit()
         return {"interned_rows": added, "filled": filled}
 

@@ -357,12 +357,26 @@ async def retry_job(job_id: str) -> dict:
         raise HTTPException(status_code=404, detail="jobが見つかりません。")
     if job["state"] in ("pending", "running"):
         raise HTTPException(status_code=409, detail="このjobはまだ実行中です。")
+    # **録画1本に属さないjobが在る**(highlightの突き合わせ・書き出し)。そこへ
+    # ``get_recording(None)`` を引くと必ずNoneが返り、「録画が見つかりません（削除済み）」
+    # という**嘘の理由**で弾かれる —— 一度も録画を持たなかったjobを人が二度と再開できない。
+    # 録画の実在を確かめるのは、録画を持つjobだけの問いである。
+    owns_recording = job["recording_id"] is not None
     if job["state"] in runtime.storage.REQUEUEABLE_STATES:
-        if await asyncio.to_thread(
+        if owns_recording and await asyncio.to_thread(
                 runtime.storage.get_recording, job["recording_id"]) is None:
             raise HTTPException(status_code=404, detail="録画が見つかりません（削除済み）。")
         await media_jobs.media_job_queue.requeue([job_id])
         return {"job_id": job_id, "requeued": 1, "total": 1}
+    if not owns_recording:
+        # 完了済みからのやり直しは「同じ行の再開」ではなく**新しい投入**である。録画を
+        # 持たないjobの投入には、その種別ごとの前提(highlightの行のstatusで二重投入を
+        # 抑える等)が要る —— ここで作ると台帳だけが増え、抑止を素通りした2本目が走る。
+        # 出所の画面から投げ直してもらう方が、確実で説明もできる。
+        raise HTTPException(
+            status_code=409,
+            detail="完了したこの種別のjobは、元の画面から実行し直してください"
+                   "（録画に属さないjobなのでここからは作り直せません）。")
     recording = await asyncio.to_thread(runtime.storage.get_recording, job["recording_id"])
     if recording is None:
         raise HTTPException(status_code=404, detail="録画が見つかりません（削除済み）。")

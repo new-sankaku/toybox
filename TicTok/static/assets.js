@@ -193,9 +193,9 @@ function renderKinds() {
     button.className = "as-kind" + (info.kind === currentKind ? " active" : "");
     button.dataset.kind = info.kind;
     button.setAttribute("aria-pressed", info.kind === currentKind ? "true" : "false");
-    button.title = info.scanned_at
-      ? `集計時点: ${fmtDateTime(info.scanned_at)}（${assetElapsedText(info.scanned_at)}）`
-      : "この種別はまだ集計していません。「この種別を再集計」で数えられます。";
+    // 集計時点は棚の数字が「いつの姿か」で、画面のどこにも出ていない。未集計は棚の
+    // meta が「未集計」と名乗るのでhoverは要らない。
+    if (info.scanned_at) button.title = assetElapsedText(info.scanned_at);
     const name = document.createElement("span");
     name.className = "as-kind-name";
     name.textContent = info.label || info.kind;
@@ -209,7 +209,6 @@ function renderKinds() {
   const root = document.createElement("div");
   root.className = "as-kind-note";
   root.textContent = assetSummary && assetSummary.pool_root ? assetSummary.pool_root : "";
-  root.title = "素材poolの場所";
   pane.appendChild(root);
 }
 
@@ -379,9 +378,9 @@ function assetStatRow(stat, sortKey) {
   value.className = "v";
   value.textContent = `${fmtNum(stat.value)}${stat.unit || ""}`;
   row.append(label, value);
-  // labelは幅で省略されるので、全文はtooltipに残す。
-  row.title = `${label.textContent}: ${value.textContent}`
-    + (sorted ? "（今この数字で並んでいます）" : "");
+  // labelは幅で省略されるので、全文はtooltipに残す。並んでいる項目は is-sorted の
+  // 見た目が名乗るので、hoverには書かない。
+  row.title = `${label.textContent}: ${value.textContent}`;
   return row;
 }
 
@@ -399,11 +398,9 @@ function assetTile(item, sortKey) {
   pick.type = "checkbox";
   pick.className = "as-pick";
   pick.checked = assetSelected.has(item.id);
-  pick.setAttribute("aria-label", `${item.name || item.id} を選ぶ`);
-  if (!cached) {
-    pick.disabled = true;
-    pick.title = "この素材はcacheが無いため(未取得)、選択もDownloadもできません。";
-  }
+  pick.setAttribute("aria-label", item.name || String(item.id));
+  // 未取得はタイルの見た目(as-missing)と「未取得」の文字が名乗るので、hoverは要らない。
+  if (!cached) pick.disabled = true;
   pick.addEventListener("change", () => togglePick(tile, item, pick.checked));
 
   const thumb = document.createElement("div");
@@ -459,7 +456,6 @@ function assetTile(item, sortKey) {
     dl.className = "as-dl btn btn-small";
     dl.href = fileUrl(item, true);
     dl.textContent = "保存";
-    dl.title = "この素材だけをDownloadします。";
     tile.appendChild(dl);
     // タイルのどこを押しても選択が動く。Downloadのlinkだけはlinkの仕事に任せる。
     tile.addEventListener("click", (event) => {
@@ -509,11 +505,9 @@ function renderPlaceholder() {
   }
   if (!assetItems.length && assetNeedsRescan()) {
     // 0件の理由が「この配信者は使っていない」ではなく「まだ集計していない」場合。
-    // 同じ「素材はありません。」で出すと、集計すれば出てくる物を無いことにする。
+    // 同じ「素材なし」で出すと、集計すれば出てくる物を無いことにする。
     const label = (assetKindInfo(currentKind) || {}).label || "この種別";
-    setListMessage(empty,
-      `${label}はまだ集計していません（0件という意味ではありません）。`
-      + "「この種別を再集計」を押すと、配信者ごとの絞込と集計順が使えるようになります。");
+    setListMessage(empty, `${label}はまだ集計していません（0件ではありません）。「再集計」で数えられます。`);
     return;
   }
   setListState(empty, assetItems.length ? "ok" : "empty");
@@ -565,7 +559,7 @@ function render() {
         + `（差の ${fmtNum(hidden)}件は名前を辿れず一覧に出ませんが、全件ZIPには入ります）`);
     }
     if (assetListState === "ok") {
-      parts.push(`一致 ${fmtNum(assetTotal)}件のうち ${fmtNum(assetItems.length)}件を表示`);
+      parts.push(`${fmtNum(assetTotal)}件中 ${fmtNum(assetItems.length)}件`);
     }
     summary.textContent = parts.join(" / ");
   } else {
@@ -577,8 +571,7 @@ function render() {
   // (countは未集計だとnullで、その種別だけ数を言えなくなる)。
   const headOnly = assetHeadOnly && assetListState === "ok";
   document.getElementById("as-note").textContent = headOnly
-    ? `${fmtNum(assetTotal)}件あります。先頭 ${fmtNum(assetItems.length)}件だけを出しています。`
-      + "目的の素材は名前かIDで絞り込んでください。"
+    ? `${fmtNum(assetTotal)}件中 先頭 ${fmtNum(assetItems.length)}件`
     : "";
 
   // 続きの読み込み。語なしの大きな種別では出さない ―― 19万件を100件ずつ押し進める
@@ -690,7 +683,7 @@ async function runArchive(ids, title, note) {
   const busy = document.getElementById("as-busy");
   document.getElementById("as-zip-selected").disabled = true;
   document.getElementById("as-zip-all").disabled = true;
-  setFormMessage(busy, "ZIPに入れる素材を数えています…");
+  setFormMessage(busy, "数えています…");
   let ticket = null;
   try {
     const body = { kind: currentKind };
@@ -711,7 +704,6 @@ async function runArchive(ids, title, note) {
   }
   const lines = [`${fmtNum(ticket.count)}件 / ${fmtBytes(ticket.bytes)} をZIPにします。`];
   if (note) lines.push(note);
-  lines.push("作成には時間がかかり、終わるまでbrowserの保存は始まりません。");
   const ok = await confirmDialog(lines.join(""), { title, confirmLabel: "ZIPを作る" });
   if (!ok) return;
   // 券には期限がある。切れた券を引くと404が返るが、受け取りは隠しiframeの中で起きるので
@@ -721,10 +713,9 @@ async function runArchive(ids, title, note) {
     return;
   }
   startDownload(ticketUrl(ticket.ticket));
-  showToast([
-    `${fmtNum(ticket.count)}件 / ${fmtBytes(ticket.bytes)} のZIPをserverが作っています。`,
-    "作り終わるとbrowserの保存が始まります。それまでこの画面で待つ必要はありません。",
-  ], null, { title });
+  showToast(
+    `${fmtNum(ticket.count)}件 / ${fmtBytes(ticket.bytes)} のZIPを作成中…`,
+    null, { title });
 }
 
 document.getElementById("as-zip-selected").addEventListener("click", () => {
@@ -754,7 +745,7 @@ document.getElementById("as-rescan").addEventListener("click", async (event) => 
   const info = assetKindInfo(kind);
   if (!info) return;
   button.disabled = true;
-  setFormMessage(busy, `${info.label || kind}を集計しています…（件数の多い種別は十数秒かかります）`);
+  setFormMessage(busy, `${info.label || kind}を集計中…`);
   try {
     applySummary(await apiSend("POST", "/api/assets/rescan", { kind }));
     setFormMessage(busy, "");

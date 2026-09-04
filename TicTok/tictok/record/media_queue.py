@@ -44,7 +44,11 @@ FINISHED_STATES = ("completed", "failed", "cancelled", "skipped", "interrupted")
 # 通常のworkerは既定で2本、しかも同じ録画で走っているjobがあると次を拾わない。スクショを
 # その列に入れると、長い焼き込みの裏で押した1枚が数時間保存されないままになる。laneは順番
 # ではなく**枠**を分ける仕組みで、順番の優先度(priority)とは別物である。
-INSTANT_KINDS = ("still",)
+#
+# highlightの突き合わせが入るのは両方を満たすため: 実測7.5〜16.3秒で終わり(1週間ぶん105時間
+# を候補にした場合。doc/HIGHLIGHT_MATCH.md)、読むのは録画の.tsと指紋sidecarだけで、書くのは
+# DBの行と指紋のcacheである。人はその1本の結果を画面の前で待っている。
+INSTANT_KINDS = ("still", "highlight_match")
 
 # 画面の状態filter → 台帳のstate。Job画面のselectはこのkeyを送る。台帳を絞るのは画面では
 # なくここで、「新しい200行に紛れなかった古い失敗」が0件として消えないようにする。
@@ -278,7 +282,8 @@ class MediaJobQueue:
 
     # ===== 投入 / 取り消し =====
 
-    async def enqueue(self, job_id: str, kind: str, recording_id: int, *,
+    async def enqueue(self, job_id: str, kind: str,
+                      recording_id: Optional[int] = None, *,
                       session_id: Optional[int] = None, group_id: str = "",
                       title: str = "", priority: int = 0,
                       params: Optional[dict] = None, sweep: bool = False) -> dict:
@@ -326,7 +331,7 @@ class MediaJobQueue:
             await self._emit_group(group_id, gate=False)
         return rows
 
-    def pending_for(self, kind: str, recording_id: int) -> Optional[dict]:
+    def pending_for(self, kind: str, recording_id: Optional[int]) -> Optional[dict]:
         return self._storage.pending_media_job_for(kind, recording_id)
 
     async def promote(self, job_id: str, priority: int = 0) -> bool:
@@ -422,7 +427,12 @@ class MediaJobQueue:
         while not self._stopping:
             # 取得と同時にrunningへ落とす。workerが複数居るとき、選んでから開始を書くまでの
             # 隙間に別のworkerが同じ行を拾えてしまう。
-            job = self._storage.claim_next_pending_media_job(
+            #
+            # threadで引くのは、これがDBの書き込みlockを取るため。loop上で取ると、VACUUMや
+            # ANALYZEがlockを握っている間(実測17〜21秒)event loopごと止まり、live接続が
+            # 切れて録画が分断される(2026-09-03の監査でstall stackの2件がここだった)。
+            job = await asyncio.to_thread(
+                self._storage.claim_next_pending_media_job,
                 sweep_limit=config.get_media_queue_sweep_concurrency(),
                 kinds=kinds, allow_busy_recording=allow_busy_recording)
             if job is None:

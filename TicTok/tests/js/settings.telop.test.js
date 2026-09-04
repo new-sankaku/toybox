@@ -145,11 +145,11 @@ describe("settings.js の見本つき選択肢", () => {
     expect(card.querySelector("input[type=radio]")).not.toBeNull();
   });
 
-  it("「既定値へ戻す」は見本つきの並びでも効く", async () => {
+  it("「戻す」は見本つきの並びでも効く", async () => {
     await open([styleRow()]);
 
     const button = Array.from(doc.querySelectorAll(".s-default button")).find(
-      (b) => b.textContent === "既定値へ戻す",
+      (b) => b.textContent === "戻す",
     );
     button.click();
 

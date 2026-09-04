@@ -26,6 +26,7 @@ from tictok.core.league import display_league, display_league_sql
 from tictok.search.normalize import MentionNames
 from tictok.store._common import (
     NON_IDENTITY_KEYS,
+    USER_ALIAS_MAX,
     _MENTION_NAMES_TTL_SECONDS,
     _USER_CACHE_MAX,
     _USER_UPSERT_TTL_SECONDS,
@@ -514,6 +515,168 @@ class UsersMixin:
             "streamers": streamers,
             "sessions": sessions,
         }
+
+    def set_user_alias(self, identity_key: str, alias: str) -> dict:
+        """投稿へ貼る文面で名前の代わりに出す省略形を1人ぶん置く。空なら行ごと消す。
+
+        users表へ書かないのは、あちらがeventの来るたび最新の非空値で上書きされるためで
+        ある(次の配信で消えて付け直しになる)。人が付けた層は別の表に置く。
+
+        1人を指さないkey(NON_IDENTITY_KEYS)は受け取らない —— '' や '(unknown)' は複数の
+        別人が畳まれた跡なので、省略形を付けると別人の名前として貼られる。
+        """
+        key = (identity_key or "").strip()
+        if key in NON_IDENTITY_KEYS:
+            raise ValueError(f"1人を指さないidentity_keyです: {identity_key!r}")
+        text = " ".join((alias or "").split())
+        if len(text) > USER_ALIAS_MAX:
+            raise ValueError(
+                f"省略形は{USER_ALIAS_MAX}文字までです: {len(text)}文字")
+        with self._lock:
+            if text:
+                self._conn.execute(
+                    "INSERT INTO user_aliases (identity_key, alias, updated_at)"
+                    " VALUES (?, ?, ?) ON CONFLICT(identity_key) DO UPDATE SET"
+                    " alias = excluded.alias, updated_at = excluded.updated_at",
+                    (key, text, time.time()),
+                )
+            else:
+                self._conn.execute(
+                    "DELETE FROM user_aliases WHERE identity_key = ?", (key,))
+            self._conn.commit()
+        return {"identity_key": key, "alias": text}
+
+    def list_user_aliases(self) -> dict:
+        """identity_key -> 省略形。付いている人だけが入る(空の行は置かない)。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT identity_key, alias FROM user_aliases").fetchall()
+        return {row["identity_key"]: row["alias"] for row in rows}
+
+    def _merge_person_locked(self, conn, key: str) -> dict:
+        """束ねの画面へ出す1人ぶんの名乗り。users表に行が無いkeyも名前を作らずに返す ——
+        束ねた相手が最近現れていないだけで、束ね自体は残っているためである。"""
+        row = conn.execute(
+            "SELECT u.identity_key AS identity_key, u.user_id AS user_id,"
+            " u.unique_id AS unique_id, u.nickname AS nickname, u.avatar AS avatar,"
+            " COALESCE(a.alias, '') AS alias"
+            " FROM users u LEFT JOIN user_aliases a ON a.identity_key = u.identity_key"
+            " WHERE u.identity_key = ?",
+            (key,),
+        ).fetchone()
+        if row is None:
+            return {"identity_key": key, "user_id": "", "unique_id": "",
+                    "nickname": "(unknown)", "avatar": "", "alias": ""}
+        return {
+            "identity_key": row["identity_key"],
+            "user_id": row["user_id"] or "",
+            "unique_id": row["unique_id"] or "",
+            "nickname": row["nickname"] or "(unknown)",
+            "avatar": row["avatar"] or "",
+            "alias": row["alias"] or "",
+        }
+
+    def _merge_key_locked(self, key: str) -> str:
+        """そのkeyの集計先。束ねられている側なら主のkey、そうでなければ自分自身。"""
+        row = self._conn.execute(
+            "SELECT primary_key FROM user_merges WHERE member_key = ?", (key,)
+        ).fetchone()
+        return row["primary_key"] if row else key
+
+    def merge_users(self, member_key: str, primary_key: str) -> dict:
+        """サブアカウント(member)を主アカウント(primary)へ束ねる。
+
+        束ねるのは日のGifterの集計だけで、eventもusers表も書き換えない —— 観測した
+        事実(どのアカウントが投げたか)は残したまま、人の判断だけを別の層に置く
+        (省略形をuser_aliasesへ分けたのと同じ理由)。
+
+        段は作らない。primaryが既に誰かへ束ねられていればその主へ寄せ、memberが主に
+        なっている束ねはその全員ごと連れて行く。段を許すと「AはBへ、BはCへ」の途中で
+        環ができ、集計の畳み先が引く順で変わる。
+
+        1人を指さないkey(NON_IDENTITY_KEYS)は受け取らない —— '' や '(unknown)' は
+        複数の別人が畳まれた跡なので、束ねると無関係の人のコインが1人に積まれる。
+        """
+        member = (member_key or "").strip()
+        primary = (primary_key or "").strip()
+        for key in (member, primary):
+            if key in NON_IDENTITY_KEYS:
+                raise ValueError(f"1人を指さないidentity_keyです: {key!r}")
+        if member == primary:
+            raise ValueError("同じアカウントは束ねられません")
+        with self._lock:
+            primary = self._merge_key_locked(primary)
+            if primary == member:
+                # 主にしようとした相手が、既にこのアカウントのサブである。ここで書くと
+                # 主とサブが入れ替わる(人が意図したのか読めない)ので、外してから束ね直す。
+                raise ValueError("既にこのアカウントへ束ねている相手です")
+            now = time.time()
+            # memberが主だった束ねは、その全員ごと新しい主へ寄せる。置き去りにすると、
+            # 主だけが移って残りが「主の居ない束ね」になる。
+            self._conn.execute(
+                "UPDATE user_merges SET primary_key = ?, updated_at = ?"
+                " WHERE primary_key = ?", (primary, now, member))
+            self._conn.execute(
+                "INSERT INTO user_merges (member_key, primary_key, updated_at)"
+                " VALUES (?, ?, ?) ON CONFLICT(member_key) DO UPDATE SET"
+                " primary_key = excluded.primary_key,"
+                " updated_at = excluded.updated_at",
+                (member, primary, now))
+            self._conn.commit()
+        logger.info(
+            "サブアカウントを束ねました",
+            extra={"event": "user_merge_set",
+                   "ctx": {"member_key": member, "primary_key": primary}})
+        return self.user_merge_group(primary)
+
+    def unmerge_user(self, member_key: str) -> dict:
+        """束ねを1件外す。外すのはサブ側の行だけで、同じ主の他のサブは残る。"""
+        member = (member_key or "").strip()
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM user_merges WHERE member_key = ?", (member,))
+            self._conn.commit()
+        logger.info(
+            "サブアカウントの束ねを外しました",
+            extra={"event": "user_merge_cleared", "ctx": {"member_key": member}})
+        return {"member_key": member}
+
+    def user_merge_group(self, primary_key: str) -> dict:
+        """主1人ぶんの束ね(主+サブの名乗り)。サブが1人も居なければmembersは空。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT member_key, updated_at FROM user_merges"
+                " WHERE primary_key = ? ORDER BY updated_at",
+                (primary_key,),
+            ).fetchall()
+            group = {
+                "primary": self._merge_person_locked(self._conn, primary_key),
+                "members": [self._merge_person_locked(self._conn, row["member_key"])
+                            for row in rows],
+                "updated_at": max([row["updated_at"] for row in rows], default=0.0),
+            }
+        return group
+
+    def list_user_merges(self) -> list:
+        """束ねの一覧。1件が主1人ぶんで、直近に触った束ねが先。
+
+        名乗りまで込みで返すのは、束ねたサブが日の顔ぶれから消えるためである ——
+        keyだけ返すと、外したい相手を画面から選べなくなる。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT member_key, primary_key, updated_at FROM user_merges"
+            ).fetchall()
+            groups: dict = {}
+            for row in rows:
+                group = groups.setdefault(
+                    row["primary_key"],
+                    {"primary": self._merge_person_locked(self._conn, row["primary_key"]),
+                     "members": [], "updated_at": 0.0})
+                group["members"].append(
+                    self._merge_person_locked(self._conn, row["member_key"]))
+                group["updated_at"] = max(group["updated_at"], row["updated_at"] or 0.0)
+        return sorted(groups.values(), key=lambda g: -g["updated_at"])
 
     def dismiss_discovery_candidate(self, unique_id: str) -> None:
         with self._lock:

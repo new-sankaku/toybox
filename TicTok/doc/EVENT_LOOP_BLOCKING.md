@@ -198,3 +198,74 @@ event loopが879ms止まっている最中のstackです（同時刻に処理中
   ので `Callable` にした。`metrics` は指標が増えると要素数が変わるので `tuple` 注釈にした。
   `search.py` の `state` dict は int と str が同居して値が `object` に潰れていた
 - `F541` 1件 — placeholderの無い f-string(連結の一部)。`f` を外しただけ
+
+
+## 3巡目 — loopが「diskに触る」こと自体を止める（2026-09-03）
+
+2巡目で仕込んだ `http.loop_stall_stack` が、未解明だった **15〜20秒 × 約100秒間隔の
+反復停止** の正体を写しました。
+
+### 何が起きていたか
+
+停止の時刻は **Windows Update が更新の直前に作る「システムの復元ポイント」** と秒単位で
+一致していました（Application log の `System Restore 8194 … wuauserv`、同時に VSS が
+`8219/8220 Ran out of time`）。復元ポイント = VSS snapshot で、作成中は volume の I/O を
+止めて dirty data を書き切ります（flush and hold）。録画 ffmpeg と DB が書き続けている
+最中だったため、C: の file 操作（stat・dir 列挙・exe の起動）が **15〜19秒返りません**でした。
+
+それ自体は Windows の仕様です。被害を大きくしていたのは、その間 loop thread が同期の
+file 操作の中に居たことです（stall stack 26件の内訳）:
+
+| 場所 | 件数 |
+| --- | ---: |
+| `recorder.progress_token`（5秒ごとの録画進捗 check、scandir + stat） | 6 |
+| `recorder._segment_facts`（確定時、segment ごとの stat × 4〜5 pass） | 5 |
+| `ffprobe.run` / `recorder._launch` の `CreateProcess` | 5 |
+| `media_queue._run` の writer lock 待ち（VACUUM 中） | 2 |
+| `shutil.disk_usage`、`avatar_pool` の stat / write | 3 |
+| OS の sleep（`select` の中、対象外） | 3 |
+
+**連鎖**: stall ≥3秒の直後 3秒以内に live 接続断（5/5件）→ 再接続 → 録画が別 file へ分断
+（66秒・86秒・8秒の断片）→ 断片ごとに finalize → その finalize が loop 上で stat を数千回
+→ 次の stall。08-21 以降の録画 128 本中 83 本が前の録画の終了から 120 秒以内の再開でした
+（接続断 76 件のうち stall 起因は 5 件、残りは TikTok 側）。
+
+### 判定基準の更新
+
+2巡目の「量が有界で小さいか」では足りません。**stat 1回でも、disk が応答しなければ
+応答するまで loop が止まります。** loop 上で disk（と writer lock）に触らない、が基準です。
+触る必要のある処理は `asyncio.to_thread` で worker thread へ出し、loop は結果を待つだけに
+します（その間 websocket の ping は送れるので、disk が凍っても接続は切れません）。
+
+### 直したもの
+
+- `collector._recording_stalled` → `progress_token` を thread で
+- `recorder._finalize_body` → 空き容量・segment 数・採用 segment の走査を thread で 1 回だけ
+  取り、確定中は `_finalize_kept` の写しを `_playlist_segments()` が返す（timing map・尺・
+  検証・結合の 4 箇所が同じ答えを共有。以前は 4〜5 回走査していた）
+- `recorder._validate_source` / `_write_timing_map` / `_await_healthy` / `start()` の preflight
+  → file 操作を thread で
+- `ffprobe.run` → `run_sync` を thread で（Windows の `create_subprocess_exec` は process 生成を
+  loop thread で行う）。cancel token は contextvar なので `to_thread` がそのまま持ち込む。
+  試験は Popen を差し替える（`tests.conftest.popen_via`）
+- `media_queue._run` → `claim_next_pending_media_job` を thread で
+- `asset_prefetch` → 投入側は disk を見ない。「取得済み」の記憶（`_known`）だけで落とし、初見は
+  queue を通して worker が thread で確かめる。`avatar_pool.persist` の stat / write も thread へ
+- `ingest._journal_append` → 専用 thread（`_journal_loop`）へ queue で渡す。以前は event ごとに
+  loop 上で write+flush。失う窓は「disk が凍っている最中に process が死ぬ」同時発生に限られ、
+  journal は元々 fsync しない（電源断は非対象）ので実質の trade-off は無い
+
+### 3巡目で意図的に残したもの
+
+- `recorder._launch`（ffmpeg 本体の起動、stall stack 1件）— asyncio の Process API に
+  24 箇所が依存しており、Popen 化は録画の待ち合わせの書き直しになる
+- collector の `record_ops_event`（14 箇所）と session 系の書き込み（17 箇所）— writer lock を
+  loop 上で取るが、stall stack には 1 件も出ていない（lock 保持は drain の 0.1ms、VACUUM 中を
+  除く）
+- gift icon / emote の pool の `persist`（write）— 投入側の stat は無くしたが、worker 側の
+  write は loop 上のまま（件数が少ない）
+
+### OS 側
+
+Store app の自動更新を止める、または C: の「システムの保護」（復元ポイント）を切れば、
+発生そのものが無くなります。code 側の修正は「起きても録画が分断されない」ためのものです。

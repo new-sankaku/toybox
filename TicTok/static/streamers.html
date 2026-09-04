@@ -24,20 +24,85 @@
       <!-- 左: 配信者リスト -->
       <aside class="sm-list-pane">
         <div class="a-actions">
-          <button id="sm-discover-btn" title="過去のBattleで繰り返し当たっている未監視の配信者を、接触の多い順に提示します。却下した候補も同じ画面で確認できます。">未監視を探す</button>
+          <button id="sm-discover-btn">未監視を探す</button>
         </div>
         <input id="sm-search" type="text" aria-label="配信者で絞込" placeholder="🔎 配信者で絞込" autocomplete="off" />
         <div class="sm-list" id="sm-list"></div>
-        <div id="sm-list-empty" class="a-empty" data-label="配信者一覧">配信者がいません。</div>
+        <!-- 0件のときは何も出さない。空の一覧そのものが見れば分かる。この箱は
+             取得失敗・読み込み中を名乗るためだけに残す(setListStateが書く)。 -->
+        <div id="sm-list-empty" class="a-empty" data-label="配信者一覧"></div>
       </aside>
 
       <!-- 右: 選択配信者の集約プロファイル -->
       <main class="sm-detail" id="sm-detail">
-        <div class="sm-placeholder" id="sm-placeholder">配信者を選択していません。</div>
+        <!-- 未選択のときは空。取得失敗のときだけJSが理由を書く。 -->
+        <div class="sm-placeholder" id="sm-placeholder"></div>
 
         <div class="sm-body hidden" id="sm-body">
           <!-- 見出し -->
           <div class="sm-head" id="sm-head"></div>
+
+          <!-- 週のメンション一覧: ショート動画の説明文へ貼る@IDを作る口。先頭に置くのは、
+               投稿の前にここだけ見て閉じる使い方が主だからである。週の境目はこの節だけ
+               土曜の朝7時始まり(投稿の周期に合わせる)で、下のランキングの「週」は月曜0時
+               始まりのままなので、見出しの隣に実際の範囲(時刻つき)を出して取り違えを防ぐ。
+               コイン額の区分ごとに別の枠へ分けるのは、区分ごとに別の投稿を作るためで、
+               copyも枠ごとに持たせる。 -->
+          <section class="result-block sm-mn-block">
+            <h3 class="result-subtitle">■ 週のGifter <span id="sm-mn-range" class="result-sub-note"></span></h3>
+            <div class="sm-period">
+              <button class="btn btn-small" id="sm-mn-prev" type="button" title="前の週">‹</button>
+              <select id="sm-mn-week" aria-label="週"></select>
+              <button class="btn btn-small" id="sm-mn-next" type="button" title="次の週">›</button>
+              <!-- 週ぶんをまとめて1本で写す口。範囲→区分→名前という投稿の並びそのものを
+                   作るので、週の選択の隣に置く(区分の枠まで下りて継ぐ手間を畳む)。 -->
+              <button class="btn btn-small" id="sm-mn-copy-all" type="button" disabled>コピー</button>
+              <span class="sm-period-note" id="sm-mn-note"></span>
+            </div>
+            <div class="sm-mn-tiers" id="sm-mn-tiers"></div>
+            <div id="sm-mn-empty" class="feed-empty" data-label="週のGifter"></div>
+          </section>
+
+          <!-- 日ぶんの貢献: 上で選んだ週を、週と同じ時刻(7時)で1日ずつに割る。0時で切ると
+               深夜の配信が2日へ割れるうえ、土曜の未明の分が「週は前の週・日は当日」という
+               別々の箱に入り、日の合計と週の合計が合わなくなる。7時で切れば7日ぶんが
+               ちょうど上の週になる。貼る文面はServerが組んだ物をそのまま出す(画面側で
+               組ませると名乗りの形が2つに割れる)。 -->
+          <section class="result-block sm-md-block">
+            <h3 class="result-subtitle">■ 日のGifter <span id="sm-md-note" class="result-sub-note"></span></h3>
+            <!-- 名前の省略形: 貼る文面(トップ3貢献・顔ぶれ)だけで表示名の代わりに出す。
+                 畳んで置くのは、普段は開かない枠だからである(日の札を下へ押し下げない)。
+                 効くのは文面だけで、下の表は表示名のまま —— あちらは順位の根拠なので、
+                 省略形だけにすると誰のことか確かめられない。
+                 右はサブアカウントの統合。同じ枠に置くのは、どちらも「この人をどう
+                 名乗らせるか」を1人ずつ決める操作で、材料(その週に出た顔ぶれ)も同じ
+                 だからである。左の行を掴んで、主アカウントの行か右の束ねへ重ねる。 -->
+            <details class="sm-al" id="sm-al">
+              <summary class="sm-al-summary">名前の省略形 <span id="sm-al-note" class="result-sub-note"></span>
+                ・サブアカウント <span id="sm-mg-note" class="result-sub-note"></span></summary>
+              <div class="sm-al-body sm-al-cols">
+                <div class="sm-al-col">
+                  <div class="table-wrap sm-al-wrap">
+                    <table class="result-table">
+                      <thead>
+                        <tr><th>Gifter</th><th class="num">トップ3</th><th>省略形</th></tr>
+                      </thead>
+                      <tbody id="sm-al-rows"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <!-- 統合の一覧。束ねたサブは左の顔ぶれから消えるので、外す相手はここでしか
+                     選べない。空のときも枠は残す —— 掴んだ行の行き先が無いと、掴めること
+                     自体が読めない。 -->
+                <div class="sm-al-col sm-mg" id="sm-mg">
+                  <div class="sm-mg-groups" id="sm-mg-groups"></div>
+                  <div class="sm-mg-hint" id="sm-mg-hint"></div>
+                </div>
+              </div>
+            </details>
+            <div class="sm-md-days" id="sm-md-days"></div>
+            <div id="sm-md-empty" class="feed-empty" data-label="日のGifter"></div>
+          </section>
 
           <!-- 通算KPI -->
           <div class="a-kpibar" id="sm-kpi"></div>
@@ -49,65 +114,29 @@
           <section class="result-block">
             <h3 class="result-subtitle">■ 推移
               <select id="sm-trend-unit" class="sm-head-select">
-                <option value="session">単位: 配信ごと</option>
-                <option value="week">単位: 週合計</option>
-                <option value="month">単位: 月合計</option>
+                <option value="session">配信ごと</option>
+                <option value="week">週合計</option>
+                <option value="month">月合計</option>
               </select>
               <span id="sm-trend-note" class="result-sub-note"></span>
             </h3>
             <div class="x-chartstack x-cs-tall" id="sm-trend"></div>
             <div class="a-kpibar sm-eng-bar" id="sm-growth"></div>
-            <p class="chart-note">
-              横軸は<b>実日付</b>です（1目盛＝1日）。6段が同じ時間軸に載っているので、縦に並んだ位置は同じ時点を指します。
-              配信の無かった日はそのぶん横に空きます。
-              段ごとに縦の目盛りは独立なので、段の高さどうしは比べられません。
-              <b>コイン</b>だけは配信ごとではなく<b>その日1日の合計</b>で、コインの付いた時刻で数え直しています
-              ―― 同じ配信が再接続で複数のsessionに割れること（実測で配信者×日の71.7%が2本以上）と、
-              配信の35.6%が日をまたぐことがあり、配信ごとの棒は「その日いくら出たか」を指さないためです。
-              下の「大口（実弾）の日次人数」と同じ日付・同じ数え方なので、縦に読み比べられます。
-              移動平均は短期・中期・長期の3本を別の段に分けています（棒に重ねると線が棒に埋もれるため）。
-              薄い線ほど短い窓で、窓が埋まるまでは引きません。
-              <b>コメント</b>は1分あたりで、分母は名目の配信時間ではなく実際に観測できていた時間です
-              ―― 収集が落ちた区間はコメントも記録されていないので、名目で割るとその配信だけ率が半分に見えます。
-              <b>平均同接</b>は観測時間で加重した平均です（賑わった区間だけが濃く効かないよう、値を階段状に
-              保持して時間で積分しています。単純平均だと実測で最大3割ほど高く出ます）。
-              同じ段の<b>宝箱窓を除く</b>（破線）は、宝箱の告知から開封＋3分までを外して測り直した平均です。
-              宝箱の待ち行列で人が流れ込むため窓の中の同接は窓の外の2〜5.6倍あり、
-              全体の平均は宝箱を何回落としたかで動きます。素の視聴の水準はこの破線で読んでください。
-              窓を除いた後に何割の時間が残ったかは点に重ねると出ます（残りが少ない配信ほど代表性は落ちます）。
-              宝箱の記録が無い期間には破線を引きません。
-              <b>Peak同接</b>を別の段にしたのは、実測で平均の5〜10倍あり、同じ段に置くと目盛りをPeakが決めて
-              平均が下端へ潰れるためです（平均が2.4倍になった週でも線はほぼ水平に見えます）。
-              平均が伸びているかは各段の点線（移動平均）で、もっと均したいときは見出しの単位を週合計・月合計へ切り替えてください
-              （単位を切り替えるとコインも週合計・月合計になります）。
-            </p>
           </section>
 
           <!-- 大口(実弾)の日次人数: その日1日のコイン合計で帯分けした人数 -->
           <!-- 帯を1枚へ積み上げると、下の帯が動いた分だけ上の帯の底が上下するので、その帯自身が
                増えたのかが読めない。帯ごとに独立目盛りの小型panelを縦へ並べ、日付軸だけ共有する。 -->
           <section class="result-block">
-            <h3 class="result-subtitle">■ 大口（実弾）の日次人数 <span class="result-sub-note">（その日1日のコイン合計で判定・帯は排他・段ごとに縦の目盛りは独立）</span> <span id="sm-whale-note" class="result-sub-note"></span></h3>
+            <h3 class="result-subtitle">■ 大口（実弾）の日次人数 <span id="sm-whale-note" class="result-sub-note"></span></h3>
             <div class="x-chartwrap sm-whale-panels" id="sm-whale-panels"></div>
-            <p class="chart-note">
-              1人が同じ日に複数回投げた場合は合算して帯を決めます。帯は重ならないので、
-              最上段の合計がその日「<span class="sm-whale-total-floor"></span>以上を投げた人数」で、
-              <span class="sm-whale-total-floor"></span>から上の各段がその内訳です。
-              <span class="sm-whale-floor"></span>〜<span class="sm-whale-total-floor"></span>の段は大口に届く手前の層で、合計には含みません。
-              段ごとに人数の桁が違うため縦の目盛りは段ごとに独立で、段の高さどうしは比べられません。
-              実数は棒の上の数字で読みます（日数が増えて数字が入らなくなった段は、右肩の「最大N人」と、
-              点に重ねたときの表示で読んでください）。
-              棒に重ねると、その日その段の顔ぶれ（表示名・@ID・アイコン・その日の合計コイン）を額の多い順に出します。
-              金額はBS(バトルスコア)ではなく実弾(コイン)です。
-            </p>
-            <div id="sm-whale-empty" class="feed-empty"><span class="sm-whale-floor"></span>以上を投げた視聴者はまだいません。</div>
           </section>
 
           <!-- AI 講評（集約profile→強み/課題/改善提案） -->
           <section class="result-block sm-aireview">
             <h3 class="result-subtitle">■ AI 講評 <span id="sm-ai-note" class="result-sub-note"></span>
               <button id="sm-ai-btn" class="btn btn-small" disabled>講評する</button>
-              <button id="sm-ai-rerun" class="btn btn-small hidden" title="保存済みの講評を捨てて、もう一度ローカルAIに生成させます。">再講評</button>
+              <button id="sm-ai-rerun" class="btn btn-small hidden">再講評</button>
             </h3>
             <div id="sm-ai-status" class="form-message"></div>
             <div id="sm-ai-meta" class="chart-note"></div>
@@ -118,11 +147,10 @@
           <section class="result-block">
             <h3 class="result-subtitle">
               ■ 時間帯分布
-              <span class="result-sub-note">（曜日×時刻15分刻み・実際に発生した時間に集計）</span>
               <select id="sm-hm-metric" class="sm-head-select">
-                <option value="diamonds">色: コイン</option>
-                <option value="active_seconds">色: 配信時間</option>
-                <option value="comments">色: コメント</option>
+                <option value="diamonds">コイン</option>
+                <option value="active_seconds">配信時間</option>
+                <option value="comments">コメント</option>
               </select>
             </h3>
             <div class="sm-hm-wrap"><div class="hm" id="sm-heatmap"></div></div>
@@ -135,24 +163,17 @@
                内訳は積み上げない。土台(継続)が動くと上の系列の底も動き、系列ごとの
                増減が読めなくなるため。Activeは合計の破線で別に引く。 -->
           <section class="result-block">
-            <h3 class="result-subtitle">■ ファン継続率（日次コホート） <span id="sm-cohort-note" class="result-sub-note"></span></h3>
+            <h3 class="result-subtitle">■ ファン継続率 <span id="sm-cohort-note" class="result-sub-note"></span></h3>
             <div class="sm-cohort-pair">
               <div class="sm-cohort-col">
-                <div class="sm-subtitle sm-cohort-head">その日に来た人の内訳（人・破線はActive合計）</div>
+                <div class="sm-subtitle sm-cohort-head">その日に来た人の内訳</div>
                 <div class="x-chartwrap"><canvas id="sm-cohort-chart"></canvas></div>
               </div>
               <div class="sm-cohort-col">
-                <div class="sm-subtitle sm-cohort-head">継続率（前回配信日に来た人が、その日も来た割合）</div>
+                <div class="sm-subtitle sm-cohort-head">継続率</div>
                 <div class="x-chartwrap sm-cohort-rate"><canvas id="sm-cohort-rate-chart"></canvas></div>
               </div>
             </div>
-            <p class="chart-note">
-              <b>継続</b>＝前回配信日にも来ていた人 ／ <b>復帰</b>＝以前来ていたが前回配信日は不在だった人 ／
-              <b>新規</b>＝この日が初観測の人。3本の合計が Active（その日に来た実人数）で、
-              上のグラフの破線がその Active です。
-              下の率は <b>継続 ÷ 前回配信日の Active</b> です。初日は比べる前の配信日が無いため率を出しません。
-            </p>
-            <div id="sm-cohort-empty" class="feed-empty">視聴データがまだありません。</div>
           </section>
 
           <!-- Gifter × 配信日: 1つの期間の断面(下のGifter表)だけでは、誰が伸びて誰が
@@ -162,7 +183,6 @@
                その日へ合わせる。 -->
           <section class="result-block">
             <h3 class="result-subtitle">■ Gifter × <span id="sm-gmx-unit">配信日</span>
-              <span class="result-sub-note">（濃さ＝その列のコイン・新しい列が右）</span>
               <span id="sm-gmx-note" class="result-sub-note"></span>
             </h3>
             <div class="sm-mx-tools">
@@ -173,23 +193,16 @@
                 <button class="seg-item" type="button" data-value="month">月</button>
               </div>
               <label class="x-field"><span>期間</span>
-                <input id="sm-gmx-since" type="date" aria-label="この日から" title="この日から。選んだ日の属する列から出します。" />
+                <input id="sm-gmx-since" type="date" aria-label="この日から" />
               </label>
               <label class="x-field"><span>〜</span>
-                <input id="sm-gmx-until" type="date" aria-label="この日まで" title="この日まで。選んだ日の属する列まで出します。" />
+                <input id="sm-gmx-until" type="date" aria-label="この日まで" />
               </label>
-              <button class="btn btn-small" id="sm-gmx-latest" type="button"
-                      title="期間の指定を外して、新しい側から既定の列数を出します。">最新へ</button>
-              <span class="sm-period-note">見出しを押すと並び替わります。日付の見出しは下のGifter表もその期間にします。</span>
+              <button class="btn btn-small" id="sm-gmx-latest" type="button">最新へ</button>
             </div>
             <div class="sm-mx-wrap"><table class="sm-mx" id="sm-gmx"></table></div>
             <div class="hm-legend" id="sm-gmx-legend"></div>
-            <p class="chart-note">
-              見出しを押すとその列で並び替わり、もう一度押すと昇順になります。
-              「伸び」は窓の後半と前半の差です（後半 − 前半）。列数が奇数のときは中央の列を後半に数えます。
-              空欄はその列で投げていないという意味で、配信そのものが無かった期間は列に出ません。
-            </p>
-            <div id="sm-gmx-empty" class="feed-empty" data-label="Gifter × 配信日">Giftの記録がありません。</div>
+            <div id="sm-gmx-empty" class="feed-empty" data-label="Gifter × 配信日"></div>
           </section>
 
           <div class="sm-grid">
@@ -217,17 +230,17 @@
               </div>
               <div class="table-wrap">
                 <table class="result-table">
-                  <thead><tr><th>#</th><th>Gifter</th><th>コイン</th><th>Gift数</th><th>出現Session</th><th title="1つ前の期間の順位との差です。前の期間に居なかった人は new、比べる前の期間が無いときは — と出ます。">前期比</th></tr></thead>
+                  <thead><tr><th>#</th><th>Gifter</th><th>コイン</th><th>Gift数</th><th>出現Session</th><th>前期比</th></tr></thead>
                   <tbody id="sm-gifters"></tbody>
                 </table>
               </div>
-              <div id="sm-gifters-empty" class="feed-empty" data-label="Gifter">Giftの記録がありません。</div>
+              <div id="sm-gifters-empty" class="feed-empty" data-label="Gifter"></div>
             </section>
 
             <!-- ライバーからのギフト: 比率だけでは「誰が投げたのか」が読めないため、
                  リーグ帯の内訳と本人の一覧を並べる。 -->
             <section class="result-block">
-              <h3 class="result-subtitle">■ ライバーからのギフト <span class="result-sub-note">（自分でも配信している人）</span></h3>
+              <h3 class="result-subtitle">■ ライバーからのギフト</h3>
               <div class="a-kpibar sm-conc" id="sm-liver-tiers"></div>
               <div class="table-wrap">
                 <table class="result-table">
@@ -235,75 +248,51 @@
                   <tbody id="sm-livers"></tbody>
                 </table>
               </div>
-              <div id="sm-livers-empty" class="feed-empty">ライバーからのGiftはまだ確認できていません。</div>
+              <div id="sm-livers-empty" class="feed-empty"></div>
             </section>
           </div>
 
           <!-- 共演構成: 配信時間をコラボ / Battle / ソロへ分解する。割合と、1時間あたりの回数。 -->
           <section class="result-block">
-            <h3 class="result-subtitle">■ 共演構成 <span class="result-sub-note">（配信時間に占めるコラボ・Battleの割合と、配信1時間あたりの回数）</span> <span id="sm-coop-note" class="result-sub-note"></span></h3>
+            <h3 class="result-subtitle">■ 共演構成</h3>
             <!-- コラボ窓(LinkMic)の判定は録画映像で検証済み。v4は47録画(33.3GB・映像38.36h)
                  との照合で、幻0.11h / 取りこぼし0.88h。v3で見つかった欠陥(退出snapshotで
                  窓が開く / 再接続retry期間を飲み込む / serverが落ちると開いていた窓が消える
                  / 自室のゲストをコラボに数える)は
                  doc/COOP_COMPOSITION.md に記録した。過去の窓は生captureから作り直してある。 -->
-            <p class="result-sub-note">
-              コラボ窓（LinkMic）の判定は録画47本・映像38.4時間と突き合わせて検証しています（v4）。
-              照合できた範囲で、映像にコラボが映っていないのに窓がある時間が0.1時間、
-              逆に映っているのに窓が無い時間が0.9時間残っています（後者のほとんどは、
-              収集を始めた時点で既にコラボ中だった配信です）。
-              コラボ収集を始める前の配信は集計対象外です。
-            </p>
             <div class="a-kpibar sm-conc" id="sm-coop"></div>
             <div class="sm-mix" id="sm-coop-mix"></div>
             <div class="sm-mix-legend" id="sm-coop-legend"></div>
 
             <!-- コラボ比率の推移: 配信ごとの「配信時間に占めるコラボの割合」と、その移動平均 -->
-            <h4 class="result-subtitle sm-subtitle">コラボ比率の推移 <span class="result-sub-note">（古い→新しい・棒=その配信のコラボ比率）</span> <span id="sm-coop-trend-note" class="result-sub-note"></span></h4>
+            <h4 class="result-subtitle sm-subtitle">コラボ比率の推移 <span id="sm-coop-trend-note" class="result-sub-note"></span></h4>
             <div class="x-chartwrap"><canvas id="sm-coop-trend"></canvas></div>
-            <div id="sm-coop-trend-empty" class="feed-empty">コラボの記録がありません。</div>
-
-            <p class="chart-note">
-              コラボはBattle以外のLinkMic（共演）です。BattleもLinkMic上で起きるため、
-              重なった時間はBattle側にだけ数えます（二重計上を避けるため）。
-              長さ0で閉じた窓は回数に数えません。
-            </p>
-            <div id="sm-coop-empty" class="feed-empty">配信時間の記録がありません。</div>
           </section>
 
           <!-- Battle 分析（過去の全Battleを集約） -->
           <section class="result-block">
-            <h3 class="result-subtitle">■ Battle 分析 <span class="result-sub-note">（過去の全Battleを集約）</span> <span id="sm-battle-note" class="result-sub-note"></span></h3>
+            <h3 class="result-subtitle">■ Battle 分析 <span id="sm-battle-note" class="result-sub-note"></span></h3>
             <div class="a-kpibar sm-conc" id="sm-battle"></div>
 
             <!-- スコア推移: 過去バトル順（古い→新しい）に自陣/敵陣Scoreを並べる。
                  縦軸・横軸の取り方は見出しのselectで選ぶ（既定は対数×戦順）。 -->
             <h4 class="result-subtitle sm-subtitle">スコア推移
-              <span class="result-sub-note">（古い→新しい・自陣/敵陣Score、棒=Batt中コイン）</span>
-              <select id="sm-battle-trend-x" class="sm-head-select" title="横軸の取り方。戦順は1戦=1枠の等間隔なので、密に戦った日も潰れません。日時は実際の時間で並べるので、配信の空いた期間がそのまま空白として見えます。">
-                <option value="seq">横軸: 戦順</option>
-                <option value="time">横軸: 日時</option>
+              <select id="sm-battle-trend-x" class="sm-head-select" aria-label="横軸">
+                <option value="seq">戦順</option>
+                <option value="time">日時</option>
               </select>
-              <select id="sm-battle-trend-y" class="sm-head-select" title="縦軸の取り方。対数は全戦を残したまま桁差を圧縮します。線形は差をそのまま出しますが、跳ねた1戦があると他が潰れます。常用域は上位5%を上端で頭打ちにします。">
-                <option value="log">縦軸: 対数</option>
-                <option value="linear">縦軸: 線形</option>
-                <option value="clip">縦軸: 常用域</option>
+              <select id="sm-battle-trend-y" class="sm-head-select" aria-label="縦軸">
+                <option value="log">対数</option>
+                <option value="linear">線形</option>
+                <option value="clip">常用域</option>
               </select>
               <span id="sm-battle-trend-note" class="result-sub-note"></span>
             </h4>
             <div class="x-chartstack" id="sm-battle-trend"></div>
-            <p class="chart-note">
-              生誕祭のようなイベント回は通常の数十〜数百倍まで跳ねるため、線形軸のままだと残りの全戦が軸の底へ潰れます。
-              既定の対数軸は、跳ねた戦を残したまま桁の違いを圧縮して通常回どうしの差を読めるようにするものです。
-              常用域は上位5%を上端で頭打ちにし、頭打ちにした戦は▲（Score）と濃い棒（コイン）で示します。
-              どの表示でも跳ねた戦を一覧から外すことはしません（外すと、いつ跳ねたのかが読めなくなるため）。実値は点に重ねると読めます。
-            </p>
-            <div id="sm-battle-trend-empty" class="feed-empty">Battleの記録がありません。</div>
 
             <!-- Battle Gifter × 配信日。Gifter側と同じ作りで、数えるのはBattle窓のGiftだけ。
                  戦の無い日は列に残す(空欄が「その日は戦っていない」を名乗る)。 -->
             <h4 class="result-subtitle sm-subtitle">Battle Gifter × <span id="sm-bmx-unit">配信日</span>
-              <span class="result-sub-note">（濃さ＝その列のBatt中コイン・新しい列が右）</span>
               <span id="sm-bmx-note" class="result-sub-note"></span>
             </h4>
             <div class="sm-mx-tools">
@@ -314,23 +303,21 @@
                 <button class="seg-item" type="button" data-value="month">月</button>
               </div>
               <label class="x-field"><span>期間</span>
-                <input id="sm-bmx-since" type="date" aria-label="この日から" title="この日から。選んだ日の属する列から出します。" />
+                <input id="sm-bmx-since" type="date" aria-label="この日から" />
               </label>
               <label class="x-field"><span>〜</span>
-                <input id="sm-bmx-until" type="date" aria-label="この日まで" title="この日まで。選んだ日の属する列まで出します。" />
+                <input id="sm-bmx-until" type="date" aria-label="この日まで" />
               </label>
-              <button class="btn btn-small" id="sm-bmx-latest" type="button"
-                      title="期間の指定を外して、新しい側から既定の列数を出します。">最新へ</button>
-              <span class="sm-period-note">見出しを押すと並び替わります。日付の見出しは下のBattle Gifter表もその期間にします。</span>
+              <button class="btn btn-small" id="sm-bmx-latest" type="button">最新へ</button>
             </div>
             <div class="sm-mx-wrap"><table class="sm-mx" id="sm-bmx"></table></div>
             <div class="hm-legend" id="sm-bmx-legend"></div>
-            <div id="sm-bmx-empty" class="feed-empty" data-label="Battle Gifter × 配信日">Battle中のGift記録がありません。</div>
+            <div id="sm-bmx-empty" class="feed-empty" data-label="Battle Gifter × 配信日"></div>
 
             <div class="sm-grid">
               <!-- Battle Gifter: Battle中に投げたファン（どんなギフターで出てきたか） -->
               <section class="result-block">
-                <h4 class="result-subtitle sm-subtitle">Battle Gifter <span class="result-sub-note">（Battle中に投げたファン）</span></h4>
+                <h4 class="result-subtitle sm-subtitle">Battle Gifter</h4>
                 <!-- Battleは開始時刻の属する期間へ数える。窓が日付を跨いでも戦を割らない
                      (割ると、1戦の貢献が2つの期間に散って「誰の戦だったか」が読めなくなる)。 -->
                 <div class="sm-period">
@@ -350,18 +337,18 @@
                 </div>
                 <div class="table-wrap">
                   <table class="result-table">
-                    <thead><tr><th>#</th><th>Gifter</th><th>コイン</th><th>Gift数</th><th>出現Battle</th><th title="1つ前の期間の順位との差です。前の期間に居なかった人は new、比べる前の期間が無いときは — と出ます。">前期比</th></tr></thead>
+                    <thead><tr><th>#</th><th>Gifter</th><th>コイン</th><th>Gift数</th><th>出現Battle</th><th>前期比</th></tr></thead>
                     <tbody id="sm-battle-gifters"></tbody>
                   </table>
                 </div>
-                <div id="sm-battle-gifters-empty" class="feed-empty" data-label="Battle Gifter">Battle中のGift記録がありません。</div>
+                <div id="sm-battle-gifters-empty" class="feed-empty" data-label="Battle Gifter"></div>
               </section>
 
               <!-- 対戦相手別 W/L -->
               <section class="result-block">
                 <h4 class="result-subtitle sm-subtitle">対戦相手別 <span id="sm-opp-note" class="result-sub-note"></span></h4>
                 <div class="x-toolbar sm-opp-tools">
-                  <input id="sm-opp-search" type="text" aria-label="対戦相手で絞込" placeholder="🔎 表示名 / @ID で絞込" autocomplete="off" />
+                  <input id="sm-opp-search" type="text" aria-label="対戦相手で絞込" placeholder="🔎 絞込" autocomplete="off" />
                   <label class="x-field"><span>対戦数</span>
                     <select id="sm-opp-min">
                       <option value="1">全て</option>
@@ -386,15 +373,15 @@
                     <tbody id="sm-opponents"></tbody>
                   </table>
                 </div>
-                <div id="sm-opponents-empty" class="feed-empty">Battleの記録がありません。</div>
+                <div id="sm-opponents-empty" class="feed-empty"></div>
               </section>
             </div>
 
             <!-- Battle 履歴: 1戦ごとのScore/結果/相手/Batt中コイン（新しい順） -->
-            <h4 class="result-subtitle sm-subtitle">Battle 履歴 <span id="sm-battle-history-note" class="result-sub-note">（新しい順）</span></h4>
+            <h4 class="result-subtitle sm-subtitle">Battle 履歴</h4>
             <div class="x-toolbar sm-opp-tools sm-bh-filter hidden" id="sm-battle-history-filter">
               <span id="sm-battle-history-filter-label"></span>
-              <button id="sm-battle-history-clear" class="btn btn-small">絞込を解除</button>
+              <button id="sm-battle-history-clear" class="btn btn-small" aria-label="絞込を解除">✕</button>
             </div>
             <div class="table-wrap">
               <table class="result-table">
@@ -402,12 +389,12 @@
                 <tbody id="sm-battle-history"></tbody>
               </table>
             </div>
-            <div id="sm-battle-history-empty" class="feed-empty">Battleの記録がありません。</div>
+            <div id="sm-battle-history-empty" class="feed-empty"></div>
             <!-- 再生は表の直下でそのまま行う。対戦の記録と映像を同時に見られる。 -->
             <div id="sm-video-box" class="sm-video-box hidden">
               <div class="sm-video-head">
                 <span id="sm-video-title" class="result-sub-note"></span>
-                <button id="sm-video-stop" class="btn btn-small">再生を止める</button>
+                <button id="sm-video-stop" class="btn btn-small" aria-label="再生を止める">■</button>
               </div>
               <video id="sm-video" class="sm-video" controls playsinline preload="metadata"></video>
               <div id="sm-video-message" class="form-message"></div>
@@ -428,11 +415,11 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sm-battle-title">
       <div class="modal-head">
         <h2 id="sm-battle-title">Battle結果</h2>
-        <button id="sm-battle-close" class="modal-close">閉じる ✕</button>
+        <button id="sm-battle-close" class="modal-close" aria-label="閉じる">✕</button>
       </div>
       <div class="modal-body">
         <div class="bcards" id="sm-battle-cards"></div>
-        <div id="sm-battle-empty" class="feed-empty hidden">Battleの詳細がありません。</div>
+        <div id="sm-battle-empty" class="feed-empty hidden"></div>
       </div>
     </div>
   </div>
@@ -445,11 +432,10 @@
         <div class="modal-head-actions">
           <button id="sm-discover-tab-candidates" class="btn btn-small">候補</button>
           <button id="sm-discover-tab-dismissed" class="btn btn-small">却下した候補</button>
-          <button id="sm-discover-close" class="modal-close">閉じる ✕</button>
+          <button id="sm-discover-close" class="modal-close" aria-label="閉じる">✕</button>
         </div>
       </div>
       <div class="modal-body">
-        <div id="sm-discover-note" class="chart-note"></div>
         <div id="sm-discover-message" class="form-message"></div>
         <div class="table-wrap">
           <table class="result-table">
@@ -457,7 +443,7 @@
             <tbody id="sm-discover-rows"></tbody>
           </table>
         </div>
-        <div id="sm-discover-empty" class="a-empty" data-label="発見候補">条件に合う候補がありません。</div>
+        <div id="sm-discover-empty" class="a-empty" data-label="発見候補"></div>
       </div>
     </div>
   </div>

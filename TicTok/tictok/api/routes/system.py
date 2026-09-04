@@ -208,7 +208,9 @@ async def perf_reset_api() -> dict:
 # 録画mp4は失えば再取得できないが作り直せる導線がある。DBは違い、eventも解析結果も設定も
 # ここにしか無い。退避はSQLiteのbackup APIで無停止に取り、file copyはしない(WAL mode では
 # tictok.db単体のcopyは古い・破れた像になる)。
-_maintenance_lock = asyncio.Lock()
+# lockはruntimeが持つ。配信終了後の自動退避(startup)も同じlockを取るためで、ここだけの
+# lockにすると自動のsnapshotと手動のVACUUMが重なる。
+_maintenance_lock = runtime.maintenance_lock
 
 
 class VacuumRequest(BaseModel):
@@ -244,6 +246,10 @@ def _maintenance_failure(kind: str, job_id: str):
 async def maintenance_status_api() -> dict:
     db = await asyncio.to_thread(runtime.storage.db_file_status)
     backups = await asyncio.to_thread(dbmaint.list_backups)
+    # 見張りと世代の層はどちらもfile(退避先の台帳・退避folderの一覧)を読む。event loopの
+    # 上で読むとnetwork driveの退避先で止まるので、他と同じくthreadへ逃がす。
+    guard = await asyncio.to_thread(dbmaint.guard_status)
+    scheduled = await asyncio.to_thread(dbmaint.scheduled_layers)
     return {
         "db": db,
         "backups": backups,
@@ -252,6 +258,11 @@ async def maintenance_status_api() -> dict:
         "before_migration": get_db_backup_before_migration(),
         "premigration": getattr(runtime.storage, "premigration_backup", None),
         "running": _maintenance_lock.locked(),
+        # 行数の見張り(凍結状態と前回の行数)と、暦で層化した自動世代の内訳。
+        # 凍結中は世代が増え続けるので、画面がそれを名乗れないと「退避folderが減らない」
+        # という別の症状として現れる。
+        "guard": guard,
+        "scheduled": scheduled,
     }
 
 
@@ -278,7 +289,39 @@ async def maintenance_backup_api() -> dict:
                 detail={"path": result["path"], "bytes": result["bytes"],
                         "reason": result["reason"], "pruned": result["pruned"]},
             )
+            # 行数の急減・刈り取りの凍結はops_eventsへ。record_backup_ops_events に集めて
+            # あるのは、退避を呼ぶ経路(画面・migration前・録画確定)のどれから取っても同じ
+            # 行が残るようにするため。
+            await asyncio.to_thread(
+                dbmaint.record_backup_ops_events,
+                runtime.storage, runtime.logger, result, job_id=job_id,
+            )
     return {"backup": result, "backups": await asyncio.to_thread(dbmaint.list_backups)}
+
+
+@router.post("/api/maintenance/unfreeze")
+async def maintenance_unfreeze_api() -> dict:
+    """行数の急減で止めた「古い世代の刈り取り」を再開する。
+
+    人の操作でしか解けない。減った理由が正常(録画の削除・retention)だったのか事故だったのか
+    を決められるのは人だけで、時間や次回のsnapshotで自動解除すると、気付く前に解けて気付く
+    前に世代が回る —— 凍結を置いた理由がそのまま消える。"""
+    _maintenance_busy()
+    async with _maintenance_lock:
+        async with runtime._tracked_job("maintenance", "退避の刈り取り凍結の解除") as job_id:
+            with _maintenance_failure("unfreeze", job_id):
+                result = await asyncio.to_thread(dbmaint.unfreeze_prune)
+            if result["was_frozen"]:
+                await asyncio.to_thread(
+                    runtime.storage.record_ops_event,
+                    runtime.logger,
+                    "maintenance.prune_unfrozen",
+                    "退避の刈り取りの凍結を解除しました: {reason}".format(
+                        reason=(result["frozen"] or {}).get("reason", "")),
+                    job_id=job_id,
+                    detail={"frozen": result["frozen"]},
+                )
+    return {**result, "guard": await asyncio.to_thread(dbmaint.guard_status)}
 
 
 @router.post("/api/maintenance/integrity-check")

@@ -126,35 +126,6 @@ function ownerOf(monitor, uid) {
   return { unique_id: uid, nickname: uid, avatar: "" };
 }
 
-function tabTooltip(monitor, uid) {
-  const snap = monitor.snapshot || {};
-  const status = snap.status || "idle";
-  const stats = snap.stats || {};
-  const owner = ownerOf(monitor, uid);
-  const rec = snap.recording;
-  const recording = !!rec && (rec.state === "recording" || rec.state === "stopping");
-  const label = (STATUS_LABELS[status] || STATUS_LABELS.idle).badge;
-  const dataOnly = snap.record_video === false ? " · データのみ" : "";
-  let tip = `${owner.nickname || uid}  @${uid}\n${label}${recording ? " · ●REC" : ""}${dataOnly}`;
-  if (["connected", "reconnecting"].includes(status)) {
-    tip += `\n視聴 ${fmtCompact(stats.viewers)} · コイン ${fmtCompact(stats.diamonds)}`;
-  }
-  return tip;
-}
-
-// stats受信のたびに変わるのはtooltipの数値だけなので、tab自体（avatar含む）は
-// 作り直さずtitle/aria-labelのみ書き換える（毎回再構築するとavatarがちらつく）。
-function updateTabTooltips() {
-  els.tabBar.querySelectorAll(".a-tab").forEach((tab) => {
-    const uid = tab.dataset.uid;
-    const monitor = uid ? monitors.get(uid) : null;
-    if (!monitor) return;
-    const tip = tabTooltip(monitor, uid);
-    tab.title = tip;
-    tab.setAttribute("aria-label", tip);
-  });
-}
-
 function renderTabs() {
   els.tabBar.innerHTML = "";
   monitors.forEach((monitor, uid) => {
@@ -185,10 +156,8 @@ function renderTabs() {
     name.textContent = owner.nickname || uid;
     tab.appendChild(name);
 
-    // @id / 数値 / 詳細な状態は hover の tooltip に退避して横幅を抑える。
-    const tip = tabTooltip(monitor, uid);
-    tab.title = tip;
-    tab.setAttribute("aria-label", tip);
+    // 表示名だけでは同名の配信者を見分けられないので、@idはhoverに残す。
+    tab.title = `@${uid}`;
 
     tab.addEventListener("click", () => {
       setActiveTab(uid);
@@ -289,9 +258,6 @@ function updateRecordVideoToggle(state) {
   const on = state.record_video !== false;
   els.recordVideoBtn.textContent = on ? "🎥 動画保存: ON" : "🚫 動画保存: OFF";
   els.recordVideoBtn.classList.toggle("on", on);
-  els.recordVideoBtn.title = on
-    ? "この監視対象の配信を録画します。OFFにするとデータのみ収集します。"
-    : "この監視対象はデータのみ収集し、動画は保存しません。";
 }
 
 let hlsInstance = null;
@@ -310,7 +276,7 @@ function stopPlayer() {
   playerUid = null;
   els.liveVideo.classList.add("hidden");
   els.videoMsg.classList.remove("hidden");
-  els.videoMsg.textContent = "● LIVE Preview（録画中に表示）";
+  els.videoMsg.textContent = "● LIVE Preview";
 }
 
 function startPlayer(uid) {
@@ -319,7 +285,7 @@ function startPlayer(uid) {
   playerUid = uid;
   els.liveVideo.classList.remove("hidden");
   els.videoMsg.classList.remove("hidden");
-  els.videoMsg.textContent = "映像を読み込み中…（数秒の遅延があります）";
+  els.videoMsg.textContent = "読み込み中…";
   const src = `/api/monitors/${encodeURIComponent(uid)}/record/live/index.m3u8`;
   const video = els.liveVideo;
   video.muted = !audioEnabled;
@@ -335,7 +301,7 @@ function startPlayer(uid) {
     hlsInstance.on(window.Hls.Events.ERROR, (_e, data) => {
       if (data.fatal) {
         els.videoMsg.classList.remove("hidden");
-        els.videoMsg.textContent = "映像を待機中…";
+        els.videoMsg.textContent = "待機中…";
         setTimeout(() => {
           if (playerUid === uid && hlsInstance) hlsInstance.startLoad();
         }, 2000);
@@ -346,7 +312,7 @@ function startPlayer(uid) {
     video.addEventListener("loadedmetadata", () => video.play().catch(() => {}));
     els.videoMsg.classList.add("hidden");
   } else {
-    els.videoMsg.textContent = "このBrowserはHLS再生に対応していません。";
+    els.videoMsg.textContent = "HLS非対応のBrowser";
   }
 }
 
@@ -376,34 +342,25 @@ function applyRecording(state) {
   if (!state.ffmpeg_available) {
     els.recordBtn.disabled = true;
     els.recordBtn.textContent = "● 録画 (ffmpeg未install)";
-    els.recordBtn.title = "録画にはサーバーにffmpegのinstallが必要です。";
     els.recordBtn.classList.remove("rec", "on");
   } else if (recording) {
     els.recordBtn.disabled = rec.state === "stopping";
     els.recordBtn.textContent = "■ 録画停止";
     els.recordBtn.classList.add("rec", "on");
-    els.recordBtn.title = "";
   } else if (state.record_video === false) {
     els.recordBtn.disabled = true;
     els.recordBtn.textContent = "● 録画 (動画保存OFF)";
-    els.recordBtn.title = "この監視対象は動画保存OFF（データのみ収集）です。動画保存をONにすると録画できます。";
     els.recordBtn.classList.remove("rec", "on");
   } else {
     els.recordBtn.disabled = !connected;
     els.recordBtn.textContent = "● 録画開始";
     els.recordBtn.classList.remove("rec", "on");
-    els.recordBtn.title = connected ? "" : "配信に接続中のみ録画できます。";
   }
 
   // 見どころは動画の中の位置を指すので、録画中だけ押せる。録画していない配信に印を
   // 置いても、後から戻る先が無い。
   const canBookmark = !!rec && rec.state === "recording" && !!rec.recording_id;
   els.bookmarkBtn.disabled = !canBookmark;
-  if (!canBookmark) {
-    els.bookmarkBtn.title = "録画中のみ記録できます。";
-  } else {
-    els.bookmarkBtn.title = "いま見ている場面を見どころとして記録します（キー: B）。";
-  }
 
   if (rec && (recording || finalizing || rec.state === "completed" || rec.state === "failed")) {
     els.recBadge.classList.remove("hidden");
@@ -912,11 +869,6 @@ function renderPkSupport(battles, owner) {
   });
   panel.appendChild(list);
 
-  const note = document.createElement("p");
-  note.className = "pk-note";
-  note.textContent = "タップでコピー → TikTokのコメント欄に貼り付け";
-  panel.appendChild(note);
-
   panel.classList.remove("hidden");
   ensurePkTicker();
 }
@@ -1188,7 +1140,7 @@ function collabPeerBlock(peer, monitor) {
     const line = document.createElement("div");
     line.className = "cvs-line";
     const formLabel = document.createElement("span");
-    formLabel.textContent = `直近${Math.min(rec.battles, COLLAB_FORM_LIMIT)}戦（古→新）`;
+    formLabel.textContent = `直近${Math.min(rec.battles, COLLAB_FORM_LIMIT)}戦`;
     const stats = document.createElement("span");
     stats.textContent =
       `平均 自陣 ${pkScore(rec.avgOwn)} / 敵陣 ${pkScore(rec.avgOpp)}（${pkSigned(rec.avgOwn - rec.avgOpp)}） · ` +
@@ -1208,7 +1160,7 @@ function collabDetail(peer, rows) {
 
   const trendHead = document.createElement("p");
   trendHead.className = "cvs-sec";
-  trendHead.textContent = "戦ごとのscore推移（古→新・自陣/敵陣）";
+  trendHead.textContent = "戦ごとのscore推移";
   wrap.appendChild(trendHead);
   const trendBox = document.createElement("div");
   trendBox.className = "cvs-chart";
@@ -1234,15 +1186,16 @@ function collabDetail(peer, rows) {
 
   const seriesHead = document.createElement("p");
   seriesHead.className = "cvs-sec";
-  seriesHead.textContent = "1戦の中のscore曲線（行をclick）";
+  seriesHead.textContent = "1戦の中のscore曲線";
   wrap.appendChild(seriesHead);
   const seriesBox = document.createElement("div");
   seriesBox.className = "cvs-chart";
   seriesBox.id = "cvs-series-box";
+  // 読み込み中・取得失敗・時系列なしの名乗りに使う。開いた直後は空でよい ―― 行をclickすれば
+  // 曲線が出ることは、表と曲線の枠が並んでいれば分かる。
   const seriesMsg = document.createElement("p");
   seriesMsg.className = "cvs-note";
   seriesMsg.id = "cvs-series-msg";
-  seriesMsg.textContent = "戦を選ぶと、その戦の点の入り方を出します。";
   wrap.append(seriesBox, seriesMsg);
 
   // chartはcanvasがDOMへ入ってからでないと寸法が0で作られる。
@@ -1527,7 +1480,7 @@ async function refreshHistory() {
     // 失敗するとrenderComparisonまで届かず、前のtabの比較表が見出しだけ今の配信者にして
     // 残る。かといって空で描くと「過去の配信履歴がありません」という別の事実になる。
     if (uid === activeTab) {
-      els.cmpLabel.textContent = `過去配信との比較（@${uid}）`;
+      els.cmpLabel.textContent = "過去配信との比較";
       els.cmpBody.innerHTML = "";
       setListState(els.cmpEmpty, "failed", err);
     }
@@ -1539,7 +1492,7 @@ async function refreshHistory() {
 
 function renderComparison(monitor) {
   const data = monitor && monitor.history;
-  els.cmpLabel.textContent = `過去配信との比較（@${activeTab} · 直近${data ? data.count : 0}配信）`;
+  els.cmpLabel.textContent = `過去${data ? data.count : 0}配信との比較`;
   els.cmpBody.innerHTML = "";
   if (!data || data.count === 0) {
     els.cmpEmpty.classList.remove("hidden");
@@ -1618,10 +1571,7 @@ function handleMessage(msg) {
     }
   } else if (msg.type === "stats") {
     if (monitor.snapshot) monitor.snapshot.stats = msg.data;
-    if (uid === activeTab) {
-      applyStats(msg.data);
-      updateTabTooltips();
-    }
+    if (uid === activeTab) applyStats(msg.data);
   } else if (msg.type === "battles") {
     monitor.battles = (msg.data && msg.data.battles) || [];
     if (uid === activeTab) renderBattles(monitor.battles);
@@ -1637,12 +1587,14 @@ function handleMessage(msg) {
 els.addBtn.addEventListener("click", async () => {
   const uniqueId = els.uniqueId.value.trim().replace(/^@/, "");
   if (!uniqueId) {
-    els.addMessage.textContent = "TikTok IDを入力してください。";
-    showToast("TikTok IDを入力してください。", "error", { title: "監視開始" });
+    els.addMessage.textContent = "TikTok IDを入力";
+    denyPress(els.addBtn);
+    showToast("TikTok IDを入力", "error", { title: "監視開始" });
     return;
   }
+  ackPress(els.addBtn);
   els.addBtn.disabled = true;
-  els.addMessage.textContent = "監視開始をRequest中…";
+  els.addMessage.textContent = "開始中…";
   try {
     const recordVideo = els.addRecordVideo ? els.addRecordVideo.checked : true;
     await apiSend("POST", "/api/monitors", { unique_id: uniqueId, record_video: recordVideo });
@@ -1654,6 +1606,7 @@ els.addBtn.addEventListener("click", async () => {
     // 停止・再開・録画と同じくtoastで名乗る。#add-messageはtopbarの折返し行にある
     // 小さな文言で、しかも次の成功まで消えないため、失敗がここだけだと気付けない。
     els.addMessage.textContent = err.message;
+    denyPress(els.addBtn);
     showError(err, "監視開始");
   } finally {
     els.addBtn.disabled = false;
@@ -1691,7 +1644,7 @@ els.restartBtn.addEventListener("click", async () => {
 els.removeBtn.addEventListener("click", async () => {
   if (!activeTab) return;
   const ok = await confirmDialog(
-    `@${activeTab} を監視対象から外しますか？（収集済みSessionは履歴に残ります）`,
+    `@${activeTab} を監視対象から外す`,
     { title: "監視対象から外す", confirmLabel: "外す" },
   );
   if (!ok) return;
@@ -1721,16 +1674,34 @@ els.recordBtn.addEventListener("click", async () => {
 // 登録直後の位置はwall-clock由来の暫定値で、録画のfinalizeでmp4のPTS軸へ載せ直される。
 async function markBookmark() {
   if (!activeTab || els.bookmarkBtn.disabled) return;
+  // 押した事はServerの応答を待たずに返す。往復を待つと、待っている間は無反応と区別が
+  // 付かず、同じ場面へ二重に印を打つことになる。
+  ackPress(els.bookmarkBtn);
   els.bookmarkBtn.disabled = true;
   try {
     await apiSend("POST", `/api/monitors/${encodeURIComponent(activeTab)}/bookmark`, { memo: "" });
+    flyBookmarkToTimeline();
     flashBookmarkSaved();
   } catch (err) {
+    // 効かなかった事は押した物そのもので返す。toastだけでは、押下点と返答が離れている。
+    denyPress(els.bookmarkBtn);
     showError(err, "見どころの記録");
   } finally {
     // 状態はWSのsnapshotで戻るが、失敗時に押せないままにしないよう即座に戻す。
     els.bookmarkBtn.disabled = false;
   }
+}
+
+// 見どころの印はTIMELINEの右端(=いまの時刻)に立つ。押下点からその位置へ線を飛ばし、
+// 「どこに何が増えたか」を人が探し直さずに済むようにする。timelineがまだ描かれていない
+// (配信前・chartの高さが0)場合は何も飛ばさない ―― 着地点が無いのに線だけ走らせると、
+// 存在しない場所を指すことになる。
+function flyBookmarkToTimeline() {
+  const chart = document.getElementById("timeline-chart");
+  if (!chart) return;
+  const box = chart.getBoundingClientRect();
+  if (!box.width || !box.height) return;
+  flyTo(els.bookmarkBtn, { x: box.right - 4, y: box.top + box.height / 2 });
 }
 
 function flashBookmarkSaved() {
@@ -1763,7 +1734,7 @@ els.recordVideoBtn.addEventListener("click", async () => {
   const recording = rec && (rec.state === "recording" || rec.state === "stopping");
   if (!next && recording) {
     const ok = await confirmDialog(
-      `@${activeTab} の動画保存をOFFにすると進行中の録画を停止します。よろしいですか？`,
+      `@${activeTab} の録画を停止して動画保存をOFFにする`,
       { title: "動画保存をOFFにする", confirmLabel: "OFFにする" },
     );
     if (!ok) return;

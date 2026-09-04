@@ -100,6 +100,26 @@
   --battle-lane4-b: #18b89b;
   --battle-lane5-a: #ff7ba8;
   --battle-lane5-b: #e64fa6;
+
+  /* ── 動画の表示領域(枠)の高さ ─────────────────────────────────────
+     動画を観る場所は4つある(配信者動画タブと、ストーリーの一覧・検証・出力)。どれも
+     「列の残り高さいっぱい」で組んでいたため、面ごとに下へ積む物(時間軸・配信者の棚・
+     通し再生の操作)の厚みがそのまま動画の大きさの差になっていた ―― 同じ縦動画
+     (720x1280)を観ているのに、実測で 718 / 484 / 630px と別々の大きさで出ていた。
+     同じ物を観る枠は面をまたいで1つの寸法にする。基準は配信者動画タブの枠で、
+     残り高さではなくこの値そのものを4面が読む。
+     式は基準の実測(窓の高さ 800 / 1002 / 1300px で 433 / 620 / 904px)に沿わせたうえで、
+     **必ずその内側に入る**よう少し下へ置いてある ―― 基準の側は自分の列より高くは描けない
+     ので、式が実測を1pxでも上回ると基準だけが列の高さで頭打ちになり、4面が揃わない。
+     窓に追従させるのは、固定値だと縦の狭い窓で下に積む物を画面外へ押し出すためで、
+     両端の clamp はその行き過ぎだけを止める。 */
+  --vd-stage-b: clamp(16rem, calc(92vh - 19.5rem), 60rem);
+  /* 枠の上に載る見出し行(「■ 観る」等)1行と、その下の隙間ぶんの取り分。枠を置く面が
+     「枠＋見出し」の高さを確保するのに要る値なので、両方から読めるようここで持つ。 */
+  /* ストーリーの3面(一覧・検証・出力)の枠の余白。**1組しか無い** —— tabごとに違うと、
+     同じ「観る」場所である動画の左上がtabを移るたびにずれる(利用者の指摘)。 */
+  --st-pane-pad-b: 0.4rem;
+  --st-pane-pad-i: 0.6rem;
 }
 
 * {
@@ -524,10 +544,13 @@ body {
   gap: 0.8rem;
 }
 
-/* 設定: 項目 / 設定値 / 説明 の3カラム一覧（1設定=1行） */
+/* 設定: 項目 / 設定値 / 説明 の3カラム一覧（1設定=1行）
+   設定値の列をmax-contentにすると、選択肢の一番長い1項目が全155行の列幅を決め、
+   数値1つの欄まで画面の半分を占めて説明が右端へ潰れる(実測: 値57% 説明15%)。
+   比率で割って、説明が折り返さずに読める幅を先に確保する。 */
 .settings-form {
   display: grid;
-  grid-template-columns: max-content minmax(min-content, max-content) minmax(0, 1fr);
+  grid-template-columns: max-content minmax(min-content, 2fr) minmax(0, 3fr);
   border: 1px solid var(--line);
   margin: 0.8rem 0 1rem;
 }
@@ -563,6 +586,10 @@ body {
   line-height: 1.4;
 }
 
+/* 経緯の長文はhoverへ逃がしてある。印を付けないのは、ほぼ全項目が持つ印は
+   何も区別しないためで、hoverで出ることはcard冒頭の一文で伝える。 */
+.s-note-more { cursor: help; }
+
 /* section見出し。3カラムを跨いで1行を占め、列見出し(.s-head, top:0)の直下へ吸着する。
    畳まない(collapseしない)ので、browserのCtrl+Fは全項目に効いたままになる。 */
 .s-section {
@@ -579,10 +606,29 @@ body {
   letter-spacing: 0.12em;
 }
 
-/* 「既定値へ戻す」と環境変数の注記。設定値の入力欄の下へ回り込ませる。 */
+/* 「既定値へ戻す」と環境変数の注記。入力欄の右へ置く(下へ回すと全行が2段になり、
+   1行しか無い項目でも行の高さが倍になる)。入りきらない行だけが折り返す。 */
 .s-control {
-  flex-direction: column;
-  gap: 0.3rem;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.6rem;
+}
+
+.s-control > :first-child {
+  flex: 1 1 12rem;
+  min-inline-size: 0;
+}
+
+/* 見本画像を並べる行だけ、説明の列まで使って横へ広げる(説明はこの中に入る)。 */
+.s-control-wide {
+  grid-column: 2 / -1;
+}
+
+.s-note-inline {
+  order: -1;
+  flex: 1 1 100%;
+  padding: 0;
+  border-bottom: 0;
 }
 
 .s-default {
@@ -620,7 +666,7 @@ body {
 }
 
 .s-control {
-  align-items: stretch;
+  align-items: center;
 }
 
 /* 設定値列を埋めることで、全てのテキストボックス幅を揃える */
@@ -640,12 +686,13 @@ body {
   background: rgba(255, 250, 230, 0.6);
 }
 
+/* 選択肢は折り返す。nowrapのままだと選択肢の多い1項目(codec等)が設定値列を広げ、
+   その幅が全155行に効いて説明の列を潰す。折り返すのはその行だけで済む。 */
 .radio-group {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 0.4rem 1.2rem;
   padding: 0.2rem 0;
-  white-space: nowrap;
 }
 
 .radio-option {
@@ -654,6 +701,7 @@ body {
   gap: 0.4rem;
   cursor: pointer;
   color: var(--ink-strong);
+  white-space: nowrap;
 }
 
 .radio-option input {
@@ -1108,14 +1156,29 @@ select optgroup, select option {
   max-height: 40vh;
   overflow-y: auto;
   border: 1px solid var(--line);
+  /* 枠も中身なり。表を左詰めにしても枠だけが横いっぱいに伸びていると、枠の中の右半分が
+     「表の一部の空欄」に見える。中身が枠を超えるときは100%で止まり、横scrollへ落ちる。 */
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  background: var(--sand-panel-muted);
 }
 
+/* 表は左詰め。幅を100%にすると余った幅が全列へ按分され、右寄せの数値列が列の右端まで
+   逃げるため、名前と数字の間に読み飛ばせない空白が空く(3列の表では数百px)。幅を中身
+   なりにすると列は隣り合ったまま並び、余りは表の右の一箇所へ集まる。中身が枠を超える
+   ときの挙動は変わらない ―― 表は最小幅で止まり、.table-wrapが横へ流す。 */
 .result-table {
-  inline-size: 100%;
+  inline-size: auto;
   border-collapse: collapse;
   font-size: 0.78rem;
   background: var(--sand-panel-muted);
 }
+
+/* 例外: 「余りの受け皿」を持つ表(.rec-table / .vd-cliplist)。他の列を中身なり(1%)に
+   詰めて余った幅を1列へ全部渡す組み方で、これ自体が左詰めである。幅を中身なりにすると
+   渡す余りが消え、受け皿の列(file名)が潰れる。枠と表の両方を幅いっぱいのままにする。 */
+.table-wrap-fill { inline-size: 100%; }
+.table-wrap-fill > .result-table { inline-size: 100%; }
 
 /* headerは短い語しか置かないので、列が狭まっても「画/質」のように割らない。
    headerの最小幅が列幅の下限になり、data側の潰れ(#6/76 等)も抑えられる。 */
@@ -1145,9 +1208,31 @@ select optgroup, select option {
   overflow-wrap: anywhere;
 }
 
-.result-table tbody tr:nth-child(odd) {
-  background: rgba(255, 250, 230, 0.18);
+/* **表の行に載るbuttonは、密なpanelのbuttonと同じ寸法にする。**
+   .btn-smallは.btnより前に定義されており、同specificityでは後の.btnが勝つ ―― padding
+   1.4rem・letter-spacing 0.15em・font:inherit(font-sizeまで既定へ戻す)が全部そのまま
+   当たるので、`btn btn-small`と書いた行の操作buttonは1つも小さくなっていない。
+   実測(出力済みclip・窓1946px): 「視聴」75px+「pathをcopy」136px+「削除」75px＋gap
+   11.2px = 297.2pxで、cellの内寸296pxを1.2px超えて折り返し、1行が2段=行高90pxだった。
+   画面ごとに上書きして回ると同じ穴が表の数だけ再発する(実際に.row-actions・.job-target・
+   .ops-table・グループ対比paneで4回書かれている)ので、「表の行の中」という条件で1度だけ直す。
+   **:where()で括るのは弱くするため。** この規則は.btnの既定を行向けに直すだけの物で、
+   個別に密度を決めてあるbutton(.btn-compact / .st-playbtn / .st-caret / .row-actions等)に
+   勝ってはいけない。:whereは0 specificityなので、この規則は.btnと同じ強さのまま
+   「.btnより後に書いてある」ぶんだけ勝ち、個別指定には譲る。
+   文字は折り返さない ―― 列が細いときに「シ/ー/ン/検/索」と1文字ずつ縦に割れると、
+   button 1つで行が5段になる。 */
+:where(.result-table td) .btn {
+  padding: 0.25rem 0.65rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
+
+/* **縞(zebra)は引かない。** 行の区切りはcellの上罫線が既に持っており、縞はそこへ2本目の
+   区切りを重ねる。行そのものが意味を持つ表(出ていない・対象外・NG済・選ばれている)では、
+   1行おきに変わる地がその意味の地と混ざり、どちらの理由で色が違うのかが読めなくなる
+   ―― 検証tabで「地の模様で分ける」形にしたときに、縞のせいで画面が騒がしいという
+   指摘が出た。地は1色に保ち、行の意味だけが地を変える。 */
 
 /* jobの「結果」列。失敗時はffmpeg由来の長文が入る。1行で切ってtooltipへ逃がしていた頃は、
    肝心の失敗理由がhoverした時にしか読めなかった。全文を折り返して出し、隣の進捗barが
@@ -1172,33 +1257,65 @@ select optgroup, select option {
   white-space: nowrap;
   margin-block-start: 0.25rem;
 }
-.job-stages {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.1rem 0.6rem;
+/* 段階の経過を、通った順に横へ並べた鎖。縦積みだと段階の数だけ行が伸び、「どこまで
+   来たか」を読むのに目が縦へ往復する。窓が狭ければ折り返して2段になるが、その時も
+   並びの向きは左から右のまま。 */
+.job-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
   margin: 0.3rem 0 0;
   padding: 0;
   list-style: none;
   font-size: 0.72rem;
 }
-.job-stages li {
-  display: grid;
-  grid-template-columns: subgrid;
-  grid-column: 1 / -1;
-  align-items: baseline;
+.job-chain li {
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
 }
-.job-stages .s-label { color: var(--ink-muted); overflow-wrap: anywhere; }
-.job-stages .s-time {
+/* 段の間をつなぐ線。線は「次の段へ入った」という記録なので、後ろの段が持つ。 */
+.job-chain li + li::before {
+  content: "";
+  flex: none;
+  inline-size: 1.2rem;
+  block-size: 0.28rem;
+  background-image: repeating-linear-gradient(90deg,
+    var(--line) 0 0.2rem, transparent 0.2rem 0.6rem);
+  background-size: 0.6rem 100%;
+}
+/* 流れるのは実行中の1本だけで、意味は「今ここが動いている」。速さは持たせない
+   (段ごとの処理速度をserverが返していないので、速さは何も指せない)。 */
+.job-chain li.s-current::before {
+  background-image: repeating-linear-gradient(90deg,
+    var(--accent-deep) 0 0.2rem, transparent 0.2rem 0.6rem);
+  animation: jc-flow 0.9s linear infinite;
+}
+@keyframes jc-flow {
+  to { background-position-x: 0.6rem; }
+}
+.job-chain .jc-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  border: 1px solid var(--line);
+  background: var(--sand-panel);
+  padding: 0.16rem 0.42rem;
+  min-inline-size: 0;
+}
+.job-chain .s-label { color: var(--ink-muted); overflow-wrap: anywhere; }
+.job-chain .s-time {
   color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  text-align: right;
 }
-/* 落ちた段階と、いま居る段階。同じ「最後の1行」でも意味が違うので色を分ける。 */
-.job-stages .s-failed .s-label { color: var(--warn-ink); font-weight: 600; }
-.job-stages .s-failed .s-time { color: var(--warn-ink); font-weight: 600; }
-.job-stages .s-current .s-label,
-.job-stages .s-current .s-time { color: var(--ink-strong); }
+/* 落ちた段階と、いま居る段階。同じ「最後の1つ」でも意味が違うので分ける。 */
+.job-chain .s-failed .jc-box { border-color: var(--warn); }
+.job-chain .s-failed .s-label,
+.job-chain .s-failed .s-time { color: var(--warn-ink); font-weight: 600; }
+.job-chain .s-current .jc-box { border-color: var(--accent-deep); }
+.job-chain .s-current .s-label,
+.job-chain .s-current .s-time { color: var(--ink-strong); }
 /* 実行中の段階名は詳細(frame位置・encode位置)まで含むため長い。Job一覧では折り返して
    全文を出す — 段階名こそが「どこで時間を食っているか」の手掛かりで、そこを省略すると
    進捗列が%だけの列になる。他画面の進捗(downloadなど)は1行のままにする。 */
@@ -1711,9 +1828,8 @@ select optgroup, select option {
 .ops-table td.act { padding: 0.05rem 0.25rem; }
 .ops-table .act { text-align: center; }
 
-/* 1件=2行(本体+詳細)で組むため、共通の縞(tr:nth-child(odd))は全ての本体行に当たり縞に
-   ならない。無効にして、件数で数えたclassに置き換える。 */
-.ops-table tbody tr:nth-child(odd) { background: transparent; }
+/* 1件=2行(本体+詳細)で組むため、1行おきの縞では縞にならない。件数で数えたclassで引く
+   (共通の.result-tableは縞を持たない)。 */
 .ops-table tbody tr.ops-row-alt > td { background: rgba(255, 250, 230, 0.32); }
 /* 重要度は色でも判る。errorは行ごと、warningは控えめに。左端の帯はborderだと文字位置が
    ずれるためinset shadowで引く。 */
@@ -2276,7 +2392,7 @@ select optgroup, select option {
 .a-stat.rate { border-style: dashed; background: rgba(255, 250, 230, 0.25); }
 
 /* 過去配信比較テーブル */
-.a-cmp { inline-size: 100%; border-collapse: collapse; font-size: 0.66rem; }
+.a-cmp { inline-size: auto; border-collapse: collapse; font-size: 0.66rem; }
 .a-cmp th, .a-cmp td {
   padding: 0.18rem 0.4rem;
   border-top: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
@@ -2403,7 +2519,7 @@ select optgroup, select option {
 .rank-sec-n { font-size: 0.62rem; letter-spacing: 0.06em; color: var(--ink-muted); }
 .rank-sec-n:empty { display: none; }
 
-.a-rank { inline-size: 100%; border-collapse: collapse; font-size: 0.7rem; }
+.a-rank { inline-size: auto; border-collapse: collapse; font-size: 0.7rem; }
 .a-rank th { position: sticky; top: 0; background: var(--sand-panel); color: var(--ink-muted); border-bottom: 1px solid var(--ink-muted); text-align: left; padding: 0.25rem 0.4rem; font-size: 0.62rem; }
 .a-rank td { padding: 0.22rem 0.4rem; border-top: 1px solid color-mix(in srgb, var(--line) 45%, transparent); }
 .a-rank td.n { text-align: right; font-variant-numeric: tabular-nums; }
@@ -2648,8 +2764,9 @@ select optgroup, select option {
 .x-field > span { color: var(--ink-muted); white-space: nowrap; }
 .x-field > select { min-inline-size: 0; }
 
-.x-tablewrap { flex: 1 1 auto; overflow: auto; min-height: 0; }
-.xtab { inline-size: 100%; border-collapse: collapse; font-size: 0.7rem; white-space: nowrap; }
+.x-tablewrap { flex: 1 1 auto; overflow: auto; min-height: 0; background: var(--sand-panel-muted); }
+/* 幅は中身なり(左詰め)。理由は.result-tableと同じ。 */
+.xtab { inline-size: auto; border-collapse: collapse; font-size: 0.7rem; white-space: nowrap; }
 .xtab th { position: sticky; top: 0; z-index: 1; background: var(--sand-panel); color: var(--ink-muted); border-bottom: 1px solid var(--ink-muted); text-align: left; padding: 0.3rem 0.55rem; font-size: 0.62rem; cursor: pointer; border-right: 1px solid color-mix(in srgb, var(--line) 45%, transparent); }
 .xtab th.n, .xtab td.n { text-align: right; font-variant-numeric: tabular-nums; }
 .xtab td { padding: 0.25rem 0.55rem; border-top: 1px solid color-mix(in srgb, var(--line) 40%, transparent); border-right: 1px solid color-mix(in srgb, var(--line) 25%, transparent); }
@@ -2774,7 +2891,7 @@ select optgroup, select option {
 /* まだ戦を選んでいない曲線枠。空のまま高さを取ると、案内文との間に無地の穴が空く。 */
 .cvs-chart:empty { block-size: 0; }
 .cvs-tablewrap { max-block-size: 12rem; overflow-y: auto; }
-.cvs-table { inline-size: 100%; border-collapse: collapse; font-size: 0.66rem; font-variant-numeric: tabular-nums; }
+.cvs-table { inline-size: auto; border-collapse: collapse; font-size: 0.66rem; font-variant-numeric: tabular-nums; }
 .cvs-table th { text-align: start; font-weight: 700; color: var(--ink-muted); border-block-end: 1px solid var(--line); padding: 0.15rem 0.3rem; position: sticky; inset-block-start: 0; background: var(--sand-panel); }
 .cvs-table th.n, .cvs-table td.n { text-align: end; }
 .cvs-table td { padding: 0.15rem 0.3rem; border-block-end: 1px solid var(--line); white-space: nowrap; }
@@ -2867,7 +2984,7 @@ select optgroup, select option {
 .bt-mem.self { background: var(--sand-panel-muted); }
 .bt-mem.self .bt-sc { color: var(--ok-ink); font-weight: 600; }
 
-.ctab { inline-size: 100%; border-collapse: collapse; font-size: 0.68rem; }
+.ctab { inline-size: auto; border-collapse: collapse; font-size: 0.68rem; }
 .ctab th { text-align: left; font-size: 0.6rem; font-weight: 600; color: var(--ink-muted); padding: 0.1rem 0.4rem 0.2rem; border-bottom: 1px solid var(--line); letter-spacing: 0.08em; }
 .ctab th.n { text-align: right; }
 .ctab td { padding: 0.18rem 0.4rem; border-top: 1px solid color-mix(in srgb, var(--line) 40%, transparent); }
@@ -3428,6 +3545,415 @@ select optgroup, select option {
 .sm-period-note { font-size: 0.68rem; color: var(--ink-muted); }
 .sm-period-note:empty { display: none; }
 
+/* 週のメンション。コイン額の区分ごとに別の枠へ分ける―― 区分ごとに別の投稿を
+   作るための一覧なので、copyも枠ごとに持たせる。縦に5つ積むと画面の先頭を占領するので、
+   横へ並べて余っている幅を使う。幅は持たず、入るだけ並べて残りは折り返す。 */
+/* 節そのものの区切り。sm-bodyの節どうしはgapしか無く、この節は中に枠が4つ並ぶぶん
+   縦に長いので、始まり(見出しの下線)と終わり(注記の上の破線)を線で閉じる。閉じないと
+   下のKPI帯まで地続きに見え、どこまでが「週のGifter」なのか読めない。 */
+.sm-mn-block > .result-subtitle {
+  padding-block-end: 0.3rem;
+  border-block-end: 1px solid var(--line);
+}
+.sm-mn-block > .chart-note {
+  border-block-start: 1px dashed var(--line);
+  padding-block-start: 0.35rem;
+}
+/* 注記は話ごとに1行。行の間は空けるが、段落の余白は足さない(節が縦に伸びる)。 */
+.sm-mn-block > .chart-note > span { display: block; }
+.sm-mn-block > .chart-note > span + span { margin-block-start: 0.2rem; }
+.sm-mn-tiers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  /* 枠どうしの隙間は、間の地(枠より暗い)が「間」だと分かる幅まで取る。0.5remでは
+     枠線どうしが近すぎて、4つが1つの大きな表に見えていた。 */
+  gap: 0.85rem;
+  margin-block-end: 0.5rem;
+}
+.sm-mn-tier {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  border: 1px solid var(--line);
+  background: var(--sand-panel);
+}
+/* 枠の題は画面の他のcard(.a-card > h3)と同じ組み方 ―― 面は塗らず、太い下線1本で立てる。
+   地を足して立てると、枠の中に地の色が幾つも並んで纏まらなくなる(見出し・貼る場所・欄・
+   一覧で4色になっていた)。枠の中の地は1色(--sand-panel)だけにして、区切りは線と余白で出す。
+   見出しは必ず1行。折り返すと桁数の違いで枠ごとに1行/2行が変わり、横に並んだ表の頭が
+   揃わない。入り切らないときは人数・コインだけを詰める(名前と区分の境目は消さない)。 */
+.sm-mn-tier-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+  padding: 0.35rem 0.5rem;
+  border-block-end: 0.15rem solid var(--ink-muted);
+  font-size: 0.72rem;
+}
+.sm-mn-tier-name {
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  flex: none;
+  color: var(--ink-strong);
+}
+/* 区分は排他なので、上限も一緒に出す。区分の名前より弱めて、名前の後ろに従える。 */
+.sm-mn-tier-range,
+.sm-mn-tier-count { color: var(--ink-muted); white-space: nowrap; }
+.sm-mn-tier-range { flex: none; }
+.sm-mn-tier-count {
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* copyは常に枠の右端。人数の長さで位置が動くと、枠をまたいで探すことになる。
+   既定の.btn(実線の枠＋面)のままだと1枠に3つ並んで枠の中で一番強い要素になり、
+   読みたい区分と人が後ろへ下がる。面は透かし枠線は薄く落として、押せる合図は
+   hover/focusで出す(枠の太さは変えない ―― 変えると押すたびに文字位置が動く)。 */
+.sm-mn-tier-copy {
+  margin-inline-start: auto;
+  padding: 0.15rem 0.45rem;
+  letter-spacing: 0;
+  font-size: 0.68rem;
+  flex: none;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--line) 55%, transparent);
+  color: var(--ink);
+}
+.sm-mn-tier-copy:hover:not(:disabled),
+.sm-mn-tier-copy:focus-visible {
+  background: var(--sand-panel);
+  border-color: var(--accent-deep);
+  color: var(--ink-strong);
+}
+/* 貼る場所。地は敷かない ―― 一覧との違いは「欄が枠線を持っている」ことで足りる。
+   下の1本で一覧との境目を閉じる。 */
+.sm-mn-copybox {
+  padding: 0.4rem 0.5rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border-block-end: 1px solid var(--line);
+}
+/* 貼るものの名乗り＋人数＋copyで1行。欄に添える名札なので、区分の名前より弱める。 */
+.sm-mn-copy-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+  font-size: 0.7rem;
+}
+.sm-mn-copy-name { letter-spacing: 0.06em; white-space: nowrap; color: var(--ink-muted); }
+.sm-mn-copy-count { color: var(--ink-muted); white-space: nowrap; }
+.sm-mn-text {
+  inline-size: 100%;
+  min-inline-size: 0;
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  resize: vertical;
+  padding: 0.3rem 0.4rem;
+  /* 地は枠と同じまま、枠線だけ持たせる。地の色で一覧と分けようとすると、一覧の
+     見出し(明るい地)・行(暗い地)のどちらかと必ず同じ色になる。 */
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  background: transparent;
+  color: var(--ink-strong);
+}
+/* 初期表示で10行ぶんの高さを取っておく。人数の少ない区分でも枠の高さが揃い、週を移った
+   ときに下の節が上下へ跳ねない。行を開くとgift一覧がこの中へ入るので、送るのも中だけ。
+   --mn-row は実測の1行(アイコン＋名前＋@IDの2段)の高さで、ここを直すと10行の見えも動く。 */
+.sm-mn-wrap {
+  --mn-row: 2.5rem;
+  block-size: calc(var(--mn-row) * 10 + 1.9rem);
+  overflow-y: auto;
+}
+/* 名前と@IDはどこでも折る。@IDは長いものが24文字あり(@user15479683579…)、
+   折らないとこの列の最小幅がその長さになり、区分ごとの狭い枠でコイン列が
+   外へ押し出されて横にscrollする。切り詰めずに折るのは、@IDそのものが目的の値だから。 */
+/* .u .u-name は既定で nowrap + 三点リーダ。nowrap のままだと表の自動列幅が
+   「折らないときの幅」を下限にするので、ここだけ折れるように戻す。 */
+.sm-mn-tier .u .u-name {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.sm-mn-tier .uid { overflow-wrap: anywhere; }
+/* 印の列は中身(checkbox 1つ)なりに詰める。幅は持たせない。 */
+.sm-mn-pick { white-space: nowrap; }
+/* メンションに使えない(＝@IDが取れていない)行。落とさずに薄くして、数だけは合わせる。 */
+.sm-mn-noid { opacity: 0.55; }
+
+/* ---- 名前の省略形 ---- */
+/* 日の札の上に畳んで置く枠。普段は開かないので、閉じている間は1行しか取らない。 */
+.sm-al {
+  border: 1px solid var(--line);
+  background: var(--sand-panel);
+  margin-block-end: 0.5rem;
+}
+.sm-al-summary {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--ink-strong);
+  cursor: pointer;
+}
+.sm-al[open] .sm-al-summary { border-block-end: 1px solid var(--line); }
+.sm-al-body { padding: 0.4rem 0.5rem 0.5rem; }
+/* 一覧は高さを取り過ぎないよう既定の.table-wrapに任せる(超えたらこの中でscrollする)。 */
+.sm-al-wrap { margin-block-start: 0.4rem; }
+/* 入力欄は列の幅なり。固定幅にすると、長い省略形が欄からはみ出す。 */
+.sm-al-input {
+  inline-size: 100%;
+  min-inline-size: 0;
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  background: var(--sand-bg);
+  color: var(--ink-strong);
+}
+.sm-al-input:focus-visible {
+  border-color: var(--accent-deep);
+  outline: none;
+}
+/* 省略形の表と統合を横に並べる。幅が足りなければ縦へ落ちる(列の幅は決め打たない)。
+   余った幅を表の側へ多く配るのは、行が「icon+名前+@ID+日数+入力欄」の5つを持つのに対し、
+   束ねの札は「icon+名前+外す」しか持たないためである。 */
+.sm-al-cols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: start;
+}
+.sm-al-col {
+  flex: 1 1 18rem;
+  min-inline-size: 0;
+}
+.sm-al-col:first-child { flex-grow: 1.6; }
+
+/* ---- サブアカウントの統合 ---- */
+/* 掴み手は名前だけ。行を掴み手にすると、同じ行の省略形の欄で文字を選べなくなる。 */
+.sm-al [draggable="true"],
+.sm-mg-member[draggable="true"] { cursor: grab; }
+.sm-mg-dragging { opacity: 0.5; }
+/* 受け皿に入った印。地は変えず縁だけを立てる(一覧の縞と喧嘩させない)。 */
+.sm-mg-over { outline: 0.12rem solid var(--accent-deep); outline-offset: -0.12rem; }
+.sm-mg-groups { display: flex; flex-direction: column; gap: 0.35rem; }
+/* 1件 = 主1人 + そこへ束ねたサブ。札そのものが受け皿である。 */
+.sm-mg-group {
+  border: 1px solid var(--line);
+  background: var(--sand-bg);
+  padding: 0.3rem 0.35rem;
+  font-size: 0.72rem;
+  min-inline-size: 0;
+}
+/* 主は下線1本で立てる。サブは主より一段内側へ寄せて、どちらが主かを位置で読ませる。 */
+.sm-mg-primary {
+  padding-block-end: 0.25rem;
+  border-block-end: 1px solid var(--line);
+  min-inline-size: 0;
+}
+.sm-mg-member {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0 0.2rem 0.8rem;
+  min-inline-size: 0;
+}
+.sm-mg-member .u { min-inline-size: 0; }
+.sm-mg-group .u-name { overflow-wrap: anywhere; }
+.sm-mg-group .uid { overflow-wrap: anywhere; }
+/* 外すは行の右端。面は透かして、束ねの中身より前へ出さない。 */
+.sm-mg-off {
+  margin-inline-start: auto;
+  flex: none;
+  padding: 0.1rem 0.35rem;
+  letter-spacing: 0;
+  font-size: 0.68rem;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--line) 55%, transparent);
+  color: var(--ink);
+}
+.sm-mg-off:hover:not(:disabled),
+.sm-mg-off:focus-visible {
+  background: var(--sand-panel);
+  border-color: var(--accent-deep);
+  color: var(--ink-strong);
+}
+.sm-mg-hint {
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+  padding: 0.3rem 0.1rem;
+}
+
+/* ---- 日のGifter ---- */
+/* 週の区分の枠と同じ組み方(面は1色・区切りは線と余白)。列数は幅任せで、固定しない。
+   1日ぶんが1枚の札で、7枚並ぶ。 */
+.sm-md-days {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: 0.85rem;
+  margin-block-end: 0.5rem;
+  /* 札の高さは中身なり。伸ばして揃えると、人の少ない日の札に空の面が大きく残る。 */
+  align-items: start;
+}
+.sm-md-day {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  border: 1px solid var(--line);
+  background: var(--sand-panel);
+}
+/* 題は区分の枠と同じく太い下線1本で立てる。必ず1行 ―― 折り返すと日ごとに1行/2行が
+   変わり、横に並んだ札の頭が揃わない。入り切らないときは窓の端から詰める。 */
+.sm-md-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+  padding: 0.35rem 0.5rem;
+  border-block-end: 0.15rem solid var(--ink-muted);
+  font-size: 0.72rem;
+}
+.sm-md-title {
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  flex: none;
+  color: var(--ink-strong);
+}
+/* 窓の端と人数は、どちらも縮んで良い。縮められない要素を1つでも置くと、その最小幅が
+   札の幅の下限になり、日の一覧そのものが横にscrollする。先に詰めるのは窓の端 ――
+   日付は題が持っているうえ、7時〜翌7時であることは節の見出しに書いてある。 */
+.sm-md-range,
+.sm-md-count {
+  color: var(--ink-muted);
+  white-space: nowrap;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sm-md-range { flex: 1 1 auto; }
+.sm-md-count { flex: 0 1 auto; }
+/* copyは札の右端。区分ごとのcopyと同じ弱め方(面は透かし、枠線は薄く)。 */
+.sm-md-copy {
+  margin-inline-start: auto;
+  padding: 0.15rem 0.45rem;
+  letter-spacing: 0;
+  font-size: 0.68rem;
+  flex: none;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--line) 55%, transparent);
+  color: var(--ink);
+}
+/* 右へ寄せるのは先頭の1つだけ。並んだcopyの両方へ掛けると、余った幅が2つに割れて
+   同じ札のcopy同士が離れる。 */
+.sm-md-copy + .sm-md-copy { margin-inline-start: 0; }
+.sm-md-copy:hover:not(:disabled),
+.sm-md-copy:focus-visible {
+  background: var(--sand-panel);
+  border-color: var(--accent-deep);
+  color: var(--ink-strong);
+}
+/* 貼る文面。textareaにしないのは、行数が名前の長さで変わるためである ―― 固定の行数だと
+   名前が折り返した日だけ最後の行(「1k⬆◯名」)が隠れ、貼る物を確かめられなくなる。
+   丸ごと出して選べれば、copyが拒否されたときも手で拾える。地は敷かず枠線だけ持たせる
+   (区分ごとの欄と同じ作り)。 */
+.sm-md-text {
+  margin: 0.4rem 0.5rem;
+  min-inline-size: 0;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  color: var(--ink-strong);
+  /* 改行はそのまま、長い名前はどこでも折る。折らないと札の幅を名前1つが決めてしまう。 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+/* 顔ぶれ。高さは中身なりで、途中で切らない ―― 件数はServer側で上限を掛けてあるので、
+   ここで更に切ると行の途中で切れた見た目になる(.table-wrapの既定は400pxで頭打ち)。
+   札は縦に詰まっていた方が、7日ぶんを一度に見渡せる。 */
+.sm-md-wrap {
+  border-block-start: 1px solid var(--line);
+  max-block-size: none;
+}
+.sm-md-day .u .u-name {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.sm-md-day .uid { overflow-wrap: anywhere; }
+/* メダルの付く行。地は変えず左の帯で印す(rank-topと同じ手) ―― 1位の印であって
+   警告ではないので、色は強調の役の物を使う。 */
+.sm-md-medal-row td:first-child {
+  box-shadow: inset 0.18rem 0 0 var(--accent-deep);
+}
+.sm-md-rank { white-space: nowrap; }
+/* 貼る文面で出る省略形。表示名の後ろへ弱く添える —— 置き換えではなく、同じ人の別の
+   名乗りであることが読めるようにする。 */
+.sm-md-alias {
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  overflow-wrap: anywhere;
+}
+/* サブアカウントを畳んだ行の印。省略形と同じ弱さで名前の後ろへ添える —— 順位の隣に
+   強い色を置くと、メダルの印(rank-topと同じ手)と役が重なる。 */
+.sm-md-merged {
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+  margin-inline-start: 0.25rem;
+}
+.sm-md-more {
+  border-block-start: 1px solid var(--line);
+  padding: 0.4rem;
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+}
+
+/* 行を開くと出るgift一覧。合計コインからは「何が飛んだか」が読めないので、1件ずつ出す。 */
+.sm-mn-tier tbody tr:not(.sm-mn-gifts) { cursor: pointer; }
+/* 開いている行。地は変えず、左の帯で印す(他の一覧の.rank-topと同じ手) ―― 地を変えると
+   一覧の中に色が1つ増え、行の縞と喧嘩する。 */
+.sm-mn-row-open > td:first-child { box-shadow: inset 0.2rem 0 0 var(--ink-muted); }
+.sm-mn-caret {
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  margin-inline-end: 0.2rem;
+  flex: none;
+}
+.sm-mn-who { display: inline-flex; align-items: center; min-inline-size: 0; }
+.sm-mn-gifts > td {
+  background: var(--sand-panel-muted);
+  padding: 0.2rem 0.4rem 0.4rem 1.4rem;
+}
+.sm-mn-gift-list { display: flex; flex-direction: column; }
+/* 1件 = 日時・icon・名前・コイン。名前だけを伸ばし、日時とコインは端で縦に揃える。 */
+.sm-mn-gift {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  padding-block: 0.1rem;
+  min-inline-size: 0;
+}
+.sm-mn-gift-when { color: var(--ink-muted); font-variant-numeric: tabular-nums; flex: none; }
+.sm-mn-gift-icon { block-size: 1.2em; inline-size: auto; flex: none; }
+.sm-mn-gift-name { flex: 1 1 auto; min-inline-size: 0; overflow-wrap: anywhere; }
+/* 記録にgift名が無い行。実際のgift名と同じ強さで出すと、そういう名前のgiftに読める。 */
+.sm-mn-gift-noname { color: var(--ink-muted); }
+.sm-mn-gift-coins {
+  color: var(--ink-strong);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.sm-mn-gifts-note { font-size: 0.68rem; color: var(--ink-muted); }
+.sm-mn-gifts-failed { color: var(--warn-ink); }
+
 /* 前期比。上下は矢印そのものが向きを名乗るので色は足さない(この画面の「良い」「危ない」の
    2色に新しい意味を乗せない)。初登場と横ばいだけ、読み飛ばせるよう薄くする。 */
 .rk-new,
@@ -3555,7 +4081,7 @@ select optgroup, select option {
 .sm-mx-tools .x-field > input { font-size: 0.7rem; min-inline-size: 0; }
 .sm-mx-tools button.btn { padding: 0.2rem 0.5rem; letter-spacing: 0; font-size: 0.75rem; }
 .sm-mx-wrap { inline-size: 100%; overflow-x: auto; }
-.sm-mx { border-collapse: collapse; inline-size: 100%; font-size: 0.72rem; background: var(--sand-panel-muted); }
+.sm-mx { border-collapse: collapse; inline-size: auto; font-size: 0.72rem; background: var(--sand-panel-muted); }
 .sm-mx th {
   position: sticky;
   top: 0;
@@ -3909,7 +4435,9 @@ select optgroup, select option {
      ここは左列28 : 右列72 で切り、右列の内訳は .vd-stage の列で決める。
      表を35から28へ落としたぶんは動画へ回す — 表の列は身元(配信者・配信日)+2〜3列しか
      持たないので28%で足り、実録画は全て16:9で、映像は横幅がそのまま画の大きさになる。 */
-  grid-template-columns: minmax(0, 28fr) minmax(0, 72fr);
+  /* 左列の取り分は人が決められる(--vd-split-a)。既定の28frは変えず、棒を掴んだ時だけ
+     この変数が書き変わる。列そのものに寸法を持たせないので、窓を狭めても比率は保たれる。 */
+  grid-template-columns: var(--vd-split-a, minmax(0, 28fr)) auto var(--vd-split-b, minmax(0, 72fr));
   /* 1行目=検索結果とplayer、2行目=全幅の時間軸row。 */
   grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
@@ -3938,14 +4466,15 @@ select optgroup, select option {
 .vd-hits .xtab td.vd-col-wide { white-space: normal; overflow-wrap: anywhere; }
 /* 録画一覧(検索語なし)でも表・動画・右エリアの割り当ては変えない。左列だけmax-contentへ
    逃がすと、同じ画面なのに検索語の有無で3領域の幅が入れ替わって見える。 */
-.vd-split.vd-browse { grid-template-columns: minmax(0, 28fr) minmax(0, 72fr); }
+.vd-split.vd-browse { grid-template-columns: var(--vd-split-a, minmax(0, 28fr)) auto var(--vd-split-b, minmax(0, 72fr)); }
 /* メモ欄は列の幅いっぱいまで広げる。.vd-memoの既定(size属性ぶん=20文字)のままだと、
    列に余りが在っても欄だけが20文字で止まり、右に読めない余白が残る。 */
 .vd-hits .xtab td.vd-col-memo { padding-block: 0.15rem; }
 .vd-hits .xtab .vd-memo { inline-size: 100%; min-inline-size: 6ch; }
 .vd-more { flex: 0 0 auto; padding: 0.5rem; text-align: center; }
+.vd-split > .split-bar { grid-column: 2; grid-row: 1; }
 .vd-player {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 1;
   display: flex;
   flex-direction: column;
@@ -3984,10 +4513,23 @@ select optgroup, select option {
 .vd-stage { display: grid; grid-template-columns: minmax(0, 27fr) minmax(0, 45fr); grid-template-rows: minmax(0, 1fr); align-items: stretch; gap: 0.6rem; min-inline-size: 0; flex: 1 1 auto; min-block-size: clamp(16rem, 42vh, 34rem); }
 /* 未選択(録画の縦横比がまだ判らない)の間は枠いっぱい。<video>の既定の実寸は300x150なので、
    下のvd-has-arの規則をそのまま当てると小さな黒い箱が残る。 */
+/* 動画の入れ物。**cqw(=列の実幅)の出どころを作るためだけに居る。** 列の幅はgridのfrで
+   決まるので、containmentを入れても幅が中身に引きずられることはない。高さは行(1fr)から
+   受け取るので、中の動画の block-size:% が解決先を持つ。 */
+.vd-fitbox {
+  min-inline-size: 0;
+  display: flex;
+  align-items: start;
+  container-type: inline-size;
+}
 .vd-video {
   inline-size: 100%;
   block-size: 100%;
   min-inline-size: 0;
+  /* 枠は面をまたいで同じ寸法(--vd-stage-b)。列の残り高さの方が大きい窓では、その余りは
+     右の文字起こし側へ渡す ―― 動画だけがこの面で1回り大きくなると、ストーリーの3面と
+     揃わない。 */
+  max-block-size: var(--vd-stage-b);
   object-fit: contain;
   background: #000;
 }
@@ -3996,15 +4538,26 @@ select optgroup, select option {
    上限だけ枠」にするのが唯一の形 ―― 置換要素は縦横比を保ったまま上限まで縮むので、
    縦は高さで、横長は幅で決まる(実測: 640x1280→343x686 / 1280x720→602x338)。
    inline-size:100%を残すと縦動画で左右に黒帯が戻り、block-size:100%を残すと横長で
-   上下に黒帯が戻る。max-*の%は .vd-stage の行が minmax(0,1fr) で高さを持つ前提。 */
+   上下に黒帯が戻る。max-*の%は .vd-stage の行が minmax(0,1fr) で高さを持つ前提。
+
+   **ただし「両寸auto＋上限だけ」では素材のpixel数が枠の大きさを決めてしまう。**
+   置換要素は両寸autoだと**実寸**で出るので、上限に届かない素材だけ一回り小さく出る
+   (実測・窓1080: 320x640→320x640 / 432x864と640x1280→341x682。窓1440では
+   320x640 / 432x864 / 450x900 と3種類に割れる)。配信者側の適応bitrateで解像度は
+   配信中に上下する(実例: 1本の中で320x640・432x864・640x1280が約100回入れ替わる)ため、
+   録画を選び直すたびに、同じ1本の再生中にも枠が伸び縮みしていた。
+   **枠は「収まる最大」で決める。** 高さを確定値にすれば実寸には依らなくなるが、
+   高さと幅は軸が違うのでCSSのmin()では比べられない ―― 幅で足りない窓では高さが縮まず
+   透明の帯が出る(実測: 259x682・横長896x682)。**列の実幅をcontainer query単位で
+   高さ側へ持ち込む**のが、実寸に依らず帯も出さない唯一の形である。cqwの出どころは
+   .vd-fitbox。比率(--vd-ar)と高さ/幅(--vd-ar-inv)はvideos.jsが素材から入れる。 */
 .vd-video.vd-has-ar {
   inline-size: auto;
-  block-size: auto;
+  /* 上限は「列の残り高さ」「4面共通の枠」「列幅から出せる高さ」の一番小さい方。 */
+  block-size: min(100%, var(--vd-stage-b), calc(100cqw * var(--vd-ar-inv)));
   aspect-ratio: var(--vd-ar);
   max-inline-size: 100%;
-  max-block-size: 100%;
   align-self: start;
-  justify-self: start;
 }
 /* 見出しの柱(.vd-rowlabel / .vd-heat-label)を畳む判断は、窓幅ではなくこの列の実幅で
    決める。同じ窓幅でも動画の縦横比で列の幅が変わるため、媒体queryでは合わない。
@@ -4082,6 +4635,15 @@ select optgroup, select option {
 .vd-group-note { font-size: 0.66rem; color: var(--ink); }
 .vd-group-note:empty { display: none; }
 .vd-row { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+/* **表の行の中では折り返さない。** 折り返しを許すと、この束のmin-contentは「一番広い
+   button 1つぶん」になる ―― tableのauto layoutはmin-contentまで容赦なく列を詰めるので、
+   隣の列が伸びたぶんだけ操作列が痩せ、また2段に戻る(実測: 出力済みclipでfile列が
+   115→319pxへ伸びた結果、操作列が316→201px(内寸182px)まで痩せ、buttonを密にしても
+   206px÷182pxで折り返しが残った)。nowrapにすればmin-contentが束の合計になり、
+   **列がそれ以下に痩せなくなる**。入り切らないときは.table-wrapが横へ流す。
+   :where()で括るのは、この規則を弱いまま(.vd-rowと同じ強さ)に保つため —— 画面ごとに
+   別の畳み方を決めている指定(.vd-gops-pane等)に勝ってはいけない。 */
+:where(.result-table td) .vd-row { flex-wrap: nowrap; }
 /* 行の中の右寄せ。既定の.spはmargin-leftしか持たないので、flex行では効き方が揃わない。 */
 .vd-row > .sp, .vd-heat-head > .sp { margin-inline-start: auto; }
 /* 1行に別種の操作(copyと生成job)を並べたときの区切り。折り返しても残るよう、行の高さ分の
@@ -4396,6 +4958,13 @@ select optgroup, select option {
 /* blockは中身の高さで縦に積む。共通の.result-blockは flex:1 1 45% で等分に伸びるため、
    1画面に2つ(切り出し・見どころ)置くと互いの領域へ中身がはみ出して重なる。 */
 .vd-gmain > .result-block { flex: 0 0 auto; }
+/* 見どころtabの時間軸。シーン検索と**同じ1つの要素**を面ごとに移して出す —— 実装を
+   2つ持つと、片方を直した日にもう片方が別の操作感のまま残る。面(.vd-view)の直下に
+   置いて左右いっぱいに使う: 同じ縦幅でも横pixelが多いほど細かく狙えるので、棚の幅も
+   時間軸に回す(シーン検索側も表と動画の2列にまたがって全幅を取っている)。
+   .vd-split用のgrid行の指定(grid-column/grid-row)はflexの中では効かないので、
+   縦積みの最後の1行として置き直すだけでよい。 */
+.vd-view > .vd-timeline { flex: 0 0 auto; }
 
 /* 見どころtab・切り出しリストtab: 左=視聴・右=一覧。左paneの棚から数えて
    グループ→動画→表 と読ませる。観る対象を選ぶ場所と観る場所が同時に見えるので、
@@ -4404,20 +4973,26 @@ select optgroup, select option {
 .vd-msplit {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  grid-template-columns: var(--vd-msplit-a, minmax(0, 0.85fr)) auto var(--vd-msplit-b, minmax(0, 1.15fr));
   gap: 0.6rem;
   min-block-size: 0;
 }
 /* 列数の多い表(見どころ・出力済みclip)は既定の配分では列が潰れ、行のbuttonが折り返って
-   行高が動画1本ぶんまで伸びる。縦動画は高さで載るので、幅は表側へ回してよい。 */
-.vd-msplit-marks, .vd-msplit-wide { grid-template-columns: minmax(0, 1fr) minmax(0, 2.5fr); }
+   行高が動画1本ぶんまで伸びる。縦動画は高さで載るので、幅は表側へ回してよい。
+   **比は列の並び順に書く。** 見どころは 動画→表、出力済みclipは 表→動画 の並びで、
+   同じ「1fr 2.5fr」を両方へ当てていた頃は出力済みclipだけ表が1frで痩せていた。10列に
+   3つのbuttonを載せた行がその幅で全て折り返し、1行が5〜6段に伸びて表だけが縦に長く
+   見えていた(利用者の指摘)。 */
+.vd-msplit-marks { grid-template-columns: var(--vd-msplit-a, minmax(0, 1fr)) auto var(--vd-msplit-b, minmax(0, 2.5fr)); }
+.vd-msplit-wide { grid-template-columns: var(--vd-msplit-a, minmax(0, 2.5fr)) auto var(--vd-msplit-b, minmax(0, 1fr)); }
 /* メモ・ラベルは行を見分けるための文字そのもの。操作列(折り返さないbuttonの束)に押されて
    数文字まで詰まると、行の中身が読めない一覧になる。字の大きさに追従する下限を置く
    (窓幅への追従は残る — 上限は.vd-row > .vd-memo の22remのまま)。 */
 .vd-mlist .result-table .vd-memo { min-inline-size: 10ch; }
 /* button内の文字は折り返させない。列数が多いぶん細く見積もられた列では、放っておくと
    「シーン検索視聴」も1列目の「視聴」も1文字ずつ縦に割れて行高が伸びる。button単位での
-   折り返し(.vd-rowのflex-wrap)は残すので、狭い時は操作列が2段に畳まれる。
+   折り返しも表の行の中では止めてある(:where(.result-table td) .vd-row 参照) —— 畳める
+   ことが列幅の下限を下げ、結局2段に戻るためである。
    一覧の表はどれも同じ組み(1列目が視聴)なので、まとめて効かせる。 */
 .vd-mlist .result-table .btn { white-space: nowrap; }
 /* 列番号は 視聴・選択・順・出所・配信者・配信日・位置・尺・メモ・グループ・操作 の並び。
@@ -4428,10 +5003,32 @@ select optgroup, select option {
 /* 一組として扱うbuttonの束(観る2つ)。この束が列幅の下限になる。 */
 .vd-row-pair { flex-wrap: nowrap; }
 /* file名は録画1本ぶんで長く、折り返すと1行が5段になる。1行へ収めて全体はtooltip(解決済みの
-   path)で読ませる。 */
+   path)で読ませる ―― この方針は変えない。
+   **幅そのものは持たせない。** 寸法をここで決めていた頃(6rem → min(40ch,22vw))は、
+   nowrapのぶんこの値が列の上限であると同時に**下限**にもなり、列がそれ以下に痩せられ
+   なかった。他の列が中身ぶんを要求すると表が容器を越え、横scrollが出る。幅は入れ物
+   (.vd-cliplistの受け皿の列)が決め、ここはその中で1行に収めて溢れを省略するだけにする。 */
 .vd-file {
-  display: block; max-inline-size: 6rem;
+  display: block; max-inline-size: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 出力済みclipの表(列は 配信者・file・種別・IN・OUT・尺・容量・作成・保存先・操作)。
+   **1つも折り返させない。** 値はどれも形の決まった短い物(配信者名・種別の名乗り・日時・
+   容量)で、折り返して読む物は1つも無い。共通の既定(white-space:normal +
+   overflow-wrap:anywhere)のままだと、列が痩せたときに語の途中で割れて1行が2段になる
+   ―― 実測で `pomiiiip` が `pomiii`/`ip` に、`09/02 21:18:32` が2段に割れていた。
+   折り返しを禁じれば、auto layoutは各列へ中身ぶんの幅を割り当てる。 */
+.vd-cliplist th, .vd-cliplist td { white-space: nowrap; }
+/* **余りの受け皿はfile名の列(2)。** 他の列が中身ぶんを取った残り全部をここへ回す。
+   max-inline-size:0 は「この列に0pxを与える」指定ではなく、**auto layoutへ幅を要求しない**
+   ことの書き方である(中身の申告をこの値で打ち切る)。実際の幅は inline-size:100% が拾う
+   残りで決まり、窓が狭まればこの列だけが縮む —— 逆に他の列を痩せさせると、また語の途中で
+   割れて2段に戻る。file名は成果物を見分ける主keyだが、**行が1行であることの方を採る**。
+   切れたぶんは今までどおり行のtooltip(解決済みのpath)で読める。 */
+.vd-cliplist th:nth-child(2), .vd-cliplist td:nth-child(2) {
+  inline-size: 100%;
+  max-inline-size: 0;
 }
 .vd-mlist, .vd-mstage {
   min-inline-size: 0; min-block-size: 0;
@@ -4446,7 +5043,9 @@ select optgroup, select option {
 
 /* tabの中で観るためのplayer。列の残り高さを動画へ渡し、幅は実比率へ任せる
    (幅を主にすると縦動画が画面高を越え、下の一覧が押し出される)。 */
-.vd-mplay { display: flex; flex-direction: column; gap: 0.3rem; min-block-size: 0; }
+/* container-typeは動画の枠のためである(cqw=列の実幅。.vd-video.vd-has-ar の但し書き参照)。
+   幅は上の列割りで決まるので、containmentを入れても中身に引きずられない。 */
+.vd-mplay { display: flex; flex-direction: column; gap: 0.3rem; min-block-size: 0; container-type: inline-size; }
 .vd-mstage > .vd-mplay { flex: 1 1 auto; }
 .vd-mplay-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .vd-mplay-head .result-subtitle { margin: 0; }
@@ -4458,6 +5057,35 @@ select optgroup, select option {
   /* 縦動画を列幅へ引き伸ばさない。左右に黒が出るが、実比率のまま高さいっぱいに載る。 */
   object-fit: contain;
   background: #000;
+}
+/* 見どころ・出力済みclipの動画は、シーン検索の枠(.vd-video.vd-has-ar)と同じ形にする。
+   列の残り高さいっぱいを取らせていた頃は、同じ縦動画が面ごとに別の大きさで出ていたうえ、
+   箱だけが列いっぱいへ広がって中の映像の左右に地の黒が帯として残っていた。
+   両寸autoで上限だけ2つ与えれば黒帯は出ない —— 置換要素は上限が2つあると比率を保った
+   まま両方へ収まるところまで縮むので、縦動画は高さで、横長は幅で決まる。地も敷かない
+   (敷くと箱と映像の差が黒く残る)。**ただしこの形は枠の大きさを素材のpixel数に
+   委ねてしまうので、比率が読めた後は下の .vd-has-ar が引き取る。**
+   高さの上限は4面共通の枠(--vd-stage-b)。列の残りの方が大きい窓でも、その余りは
+   下に積む物(時間軸)へ渡してシーン検索と同じ大きさで止める。
+   スクショの<img>も同じclassで同じ場所に出るので、まとめて効かせる。 */
+.vd-mstage .vd-mvideo {
+  flex: 0 0 auto;
+  min-block-size: 5rem;
+  inline-size: auto;
+  block-size: auto;
+  max-inline-size: 100%;
+  max-block-size: var(--vd-stage-b);
+  /* 左上づめ。中央寄せだと動画の実幅と列幅の差が左右へ半分ずつ散り、tabごとに動画の
+     左端が別々の位置から始まる。 */
+  align-self: flex-start;
+  background: none;
+}
+/* 比率が読めた後は、枠を素材のpixel数ではなく「収まる最大」で決める
+   (理由と実測は .vd-video.vd-has-ar の但し書き)。読める前は上の規則のまま ――
+   まだsrcの無い<video>は内在寸法300x150なので、確定値を当てると横長の箱が居座る。 */
+.vd-mstage .vd-mvideo.vd-has-ar {
+  block-size: min(var(--vd-stage-b), calc(100cqw * var(--vd-ar-inv)));
+  aspect-ratio: var(--vd-ar);
 }
 .vd-mplay button.btn { padding: 0.25rem 0.65rem; letter-spacing: 0.04em; }
 /* playerを下げている間も右列は畳まない(畳むと観るたび左の表幅が動き、行を追えなくなる)。 */
@@ -4801,6 +5429,11 @@ tr[draggable="true"]:active { cursor: grabbing; }
   .vd-msplit > .vd-mstage { order: 1; }
   .vd-mlist .table-wrap { max-height: 45vh; }
   .vd-mstage { min-block-size: 50vh; }
+  /* ストーリーの3つのtab(一覧・検証・出力)の1列化は**この帯には置けない**。
+     .st-listwrap / .st-cover / .st-exsplit の定義はどれもこの @media より後ろに在り、
+     同じ詳細度では後発が勝つので、ここへ書いても打ち消される(実際に効いておらず、
+     窓幅900pxでも出力tabが2列のままだった)。それぞれの定義のすぐ後ろの @media へ
+     移してある。 */
   /* 狭い画面では左paneに割ける幅が無い(棚の幅ぶん表の列が潰れる)。棚を上へ戻し、
      横へ折り返して並べる。縦を食うのはこの幅のときだけ。 */
   .vd-gwrap, .vd-gops-wrap { grid-template-columns: minmax(0, 1fr); }
@@ -4820,6 +5453,8 @@ tr[draggable="true"]:active { cursor: grabbing; }
   .vd-group-sep { inline-size: 1px; block-size: auto; align-self: stretch; margin: 0 0.2rem; }
   /* .app-shellがheight:autoになりdocument scrollへ切り替わるため、1frは確定高さを持たない。
      .vd-stageに明示のmin-block-sizeを与えないとvideoが潰れる。 */
+  /* 縦積みでは左右の割り方そのものが無くなるので、棒は出さない。 */
+  .split-bar { display: none; }
   .vd-split,
   .vd-split.vd-browse {
     grid-template-columns: minmax(0, 1fr);
@@ -5392,3 +6027,2006 @@ a { color: var(--accent-ink); }
   font-size: 0.66rem;
 }
 .as-note:empty { display: none; }
+
+/* ===== ストーリー(TikTok highlightの突き合わせ) ===== */
+/* 既存tokenだけで組む。この画面が新しく持つ意味は「giftの割り出せなかったgift演出」と
+   「出力から外したgift演出」の2つだが、どちらも失敗でも警告でもないので色は足さず、
+   地に近い薄さ(--ink-muted)と打ち消し線で出す。 */
+
+/* 一覧・出力の表はpaneの高さいっぱいまで伸ばし、中身だけをscrollさせる
+   (共通の.table-wrapはmax-height:40vhで頭打ちになり、下に死んだ余白が残る)。 */
+.st-fill { flex: 1 1 auto; min-block-size: 0; }
+.st-fill > .table-wrap { flex: 1 1 auto; max-height: none; min-block-size: 0; }
+/* **表だけがscrollし、左の動画は動かない。** 共通の .vd-gmain > .result-block が
+   flex:0 0 auto を当てており(class 2つで .st-fill に勝つ)、表の箱は上限を外したまま
+   中身なりの高さまで伸びていた ―― 行が数十本あると面ごとscrollになり、表を送るたびに
+   動画が上へ流れて毎回戻す羽目になっていた(利用者の指摘)。列の残り高さで止めて、
+   溢れは表の箱の中で吸う。 */
+.vd-gmain > .result-block.st-fill { flex: 1 1 auto; }
+
+/* 操作の帯(x-toolbar と、開いたときだけ出る設定の板)を包む箱。**動画の右の列の1段目**に
+   置くための入れ物で、それ自身は縦に積むだけの物である。 */
+.st-tools {
+  display: flex; flex-direction: column; gap: 0.4rem;
+  min-inline-size: 0;
+}
+.st-opt { display: inline-flex; align-items: baseline; gap: 0.25rem; min-inline-size: 0; }
+.st-opt-l { color: var(--ink-muted); white-space: nowrap; font-size: 0.66rem; }
+.st-opt-note { flex: 0 0 auto; }
+/* 数値・時刻の入力欄は字数で決める。窓幅に追従しない固定幅を置くと、桁の多い値
+   (合計🪙は6桁を超える)が入った時に読めなくなる。 */
+.st-num { inline-size: 9ch; min-inline-size: 6ch; }
+
+/* 検証の面: **左=確かめるための動画、右=週のgiftの表。** 行を選んでも面は動かないので、
+   一覧と動画が同時に見えていることがこの配分の目的である(以前は行をclickすると別のtabへ
+   飛ばされ、1件確かめるたびに面が入れ替わっていた)。
+   表を広く取るのは、行が身元(配信時刻・gift・gifter)を横に持つのに対し、縦動画は幅を
+   要らないためである。
+   **左右の入れ替えはorderで行い、HTMLの並びは 表→動画 のまま**にしてある ―― 動画paneに
+   ぶら下がる物(時間軸)は「表で行を選んだあと」に触る物なので、読み上げと
+   tabの順は表が先でなければ意味が通らない。3つのtabで動画を同じ側へ揃えるための指定で、
+   一覧tab(.st-listwrap)も同じ側に動画を置く。 */
+/* **動画の列は28 : 表は72。** 配信者動画の画面と同じ配分である(あちらはシーン検索が
+   表28 : 動画27 : 右45、見どころ・出力済みclipが動画1 : 表2.5 で、どちらも動画は28%前後)。
+   ストーリーの3つのtabは面ごとに 38%下限・0.55fr と別々の配分を持っており、同じ画面の
+   同じ「観る」場所が、tabを移るたびに違う幅から始まっていた(利用者の指摘)。
+   表の列を max-content にして余りを動画へ回していた頃の作りはここで止める —— 動画の幅を
+   先に決める以上、余りは表の側に出る。表が広い列いっぱいへ引き伸ばされて値と値の間が
+   開かないよう、**列の詰めは表の側(inline-size:1% と、余りを吸う1列)で行う**。
+   **minmax()のmaxに min() は書けない** —— 書くと宣言ごと捨てられ、2列が1列へ落ちて
+   表が動画の下へ回る。 */
+.st-cover {
+  /* **基準は0にする(auto ではない)。** autoだと基準が表の実高(119行で4,218px)になり、
+     面が縦に足りないときの縮め分が基準の比で配られる ―― 表が長いだけで時間の帯まで
+     一緒に薄くされる。0にすれば、帯は自分の厚みのまま残り、余りをこの枠が取る形になる。 */
+  flex: 1 1 0;
+  display: grid;
+  /* 動画の列は**その動画の実幅**である(story.js が --st-vid-w へ、列の高さ×比率で書く)。
+     割合(28fr)で決めていた頃は、列の高さいっぱいに載せた縦動画の実幅より列が広く、
+     その差がそのまま右の余白として残っていた(利用者の指摘)。まだ1本も開いていない間
+     だけ既定の割合で場所を空ける。 */
+  /* **28fr の相方は 72fr である(1fr ではない)。** 1fr と書いていた間、まだ1本も開いて
+     いない面の列は 28:1、つまり動画が96%を取り、週のgiftの表が幅3%(実測70px)へ潰れて
+     いた ―― 開いた直後の面がこれで、行の中身は縦1文字ずつになっていた。既定の割合は
+     一覧の面(.st-listwrap)と同じ 28 : 72 で揃える。 */
+  grid-template-columns: var(--st-vid-w, minmax(0, 28fr)) minmax(0, 72fr);
+  /* 段は2つ。**動画はその2段を跨ぐ**(上端から下端まで1つの領域)ので、時間の帯は動画の
+     下ではなく**表の下**、つまり右の列の下段だけに敷かれる(利用者の指定)。横いっぱいの
+     1段として枠の外へ出していた頃は、その帯の厚みぶん動画が低くなっていた。
+     表が何行になっても軸が下へ送られないのは、表が自分の箱の中でscrollするからである
+     (.vd-mlist > .result-block > .table-wrap)。
+     **下限は「枠＋見出し」。** 縦に足りない窓でも動画がこれを下回らないようにする。
+     **min-content とは書けない。** 段には週のgiftの表も居て、中でscrollする箱を
+     抱えていても min-content は行数ぶんの高さ(119行で4,218px)を申告するため、段が
+     その高さまで伸びて画面が4,600pxのscrollになる。下限は枠の側から直に出す。 */
+  /* 段は3つ。**1段目は操作の帯で、動画の列は跨がない** —— 面の頭に横いっぱいの帯を
+     敷いていた頃は、動画がその厚みぶん下から始まり、帯を持たない一覧tabと縦位置が
+     揃わなかった(tabを移るたびに動画が上下に跳ねる。利用者の指摘)。 */
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "stage tools"
+    "stage list"
+    "stage axis";
+  gap: 0.6rem;
+  padding: var(--st-pane-pad-b) var(--st-pane-pad-i);
+  min-block-size: calc(var(--vd-stage-b) + 0.8rem);
+}
+.st-cover > .st-tools { grid-area: tools; }
+.st-cover > .st-stage { grid-area: stage; }
+.st-cover > .vd-mlist { grid-area: list; }
+.st-cover > .st-axis { grid-area: axis; }
+/* 時間の帯は表の下の1区画(区画割り "axis")である。動画の列は跨がないので、面の下端に
+   居座りながら動画の高さを1pxも削らない。左右の余白は .st-cover の padding が持つ。 */
+#view-cover .st-axis {
+  display: flex; flex-direction: column; gap: 0.35rem;
+  min-inline-size: 0;
+  /* **min-block-size:0 が要る。** 中身のcanvasは`height`属性(story.jsが実寸を代入する)を
+     **内在寸法**として持つため、autoのままだと箱が自分の自然な高さで固まる。
+     **同じ罠は「中に内在寸法を持つ物(canvas / img / video)を抱えたflex item」全部に在る。** */
+  min-block-size: 0;
+}
+/* 見出し行は縮めない。flexの縮め分は基準の比で配られるので、放っておくと軸を詰める
+   のに見出しからも取られ、時刻や速度の摘みが行から溢れる。削るのはcanvasの側だけ。 */
+#view-cover .st-axis > .vd-heat-head { flex: 0 0 auto; }
+#view-cover .st-axis > .vd-heat-wrap {
+  flex: 0 1 auto;
+  /* **column でなければ縮まない。** rowのままだとcanvasの主軸が横になり、flexが縮めるのは
+     幅だけで、block-size に書いた calc がそのまま残る。 */
+  display: flex; flex-direction: column;
+  min-block-size: calc(6rem + var(--strip-lane, 0px));
+}
+/* 軸の厚み。**段(auto)の高さをcanvasの内在寸法に決めさせない** —— canvasは story.js が
+   実寸を代入した`height`属性を内在寸法として持つので、段がそれを読み、その段の高さが
+   次の実寸になる、という循環で厚みが窓ごとに揺れる。厚みはここで決め打つ。
+   **帯(コマ)のぶんは足す** —— 出す設定にしている以上、絵の高さを削れば何が映っているのか
+   読めなくなる。8remは lane(区間14 + 演出8 + ruler14 = 36px)を引いても本体に90pxが残る
+   厚みで、gift iconが段を作って載る。 */
+#view-cover .st-timeline {
+  flex: 1 1 auto;
+  block-size: calc(8rem + var(--strip-lane, 0px));
+  min-block-size: calc(6rem + var(--strip-lane, 0px));
+}
+/* 狭い窓では動画と表を縦に積む。横並びのままだと縦動画の幅が足りず、表の列(配信時刻・
+   gift・gifter)も同時に潰れる。広い窓では動画を左へ置くが、縦積みのときは 表→動画 に
+   戻す(未選択の間も動画の空箱を越えないと1行目に届かなくなる) —— orderはHTMLの並び
+   そのものなので、打ち消すだけでよい。
+   **この @media は .st-cover の定義より後ろに置くこと。** 前に置くと同じ詳細度で後発の
+   定義に負け、1列化が丸ごと効かない(元は上の max-width:60rem の帯に在って効いていな
+   かった)。 */
+@media (max-width: 60rem) {
+  .st-cover {
+    /* 1列3段。動画の列を比率で決める作り(--st-vid-w)はここでは使わない —— 幅の方が
+       足りない窓なので、動画は列いっぱいに寝かせて高さの側を比率へ譲る。 */
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto;
+    grid-template-areas: "tools" "list" "stage" "axis";
+    /* 縦に積むと中身の高さが「表＋動画＋軸」になる。余りを取る作り(flex:1 1 0)のままだと
+       箱に収まらず、はみ出した表が下の時間軸へ重なる。中身なりの高さで置き、足りない
+       ぶんは面ごとscrollさせる —— この幅では「軸が常に下端」は成り立たない。 */
+    flex: 0 0 auto;
+    min-block-size: 0;
+  }
+  .st-cover > .st-stage { min-block-size: 50vh; }
+}
+/* 出力の面: **左=動画、中=ギフト、右=出来上がるfileの表**の3領域(利用者の指定)。
+   ギフトを動画の枠の中へ同居させていた頃は、帯の幅が動画の列から取られるので片方を
+   広げるともう片方が痩せた ―― 3つを同じ高さの領域にして、割り方は2本の棒でそれぞれ
+   決める。既定は 25 : 14 : 61。動画の列は
+   枠(--vd-stage-b)から出る動画の実幅がだいたい収まる割合で、余りは表へ回す。 */
+.st-exsplit {
+  flex: 1 1 auto;
+  display: grid;
+  /* ギフトの列だけ下限を持たせる。割合だけで決めると、窓を狭めた時にこの列から先に痩せて、
+     gift名が1〜2文字で切れる(1本の中の並びが読めなくなる)。動画の列は痩せても映像が
+     比率のまま小さくなるだけなので、下限は要らない。棒を掴んで決めた割り方は人の指定
+     なので、そちらはどの列も下限を持たない(JSが minmax(0, Nfr) を書く)。 */
+  /* 動画の列は、**人が棒を掴むまでは他の2面と同じ「その動画の実幅」**である
+     (story.js が --st-vid-w へ、列の高さ×比率で書く)。割合(25fr)で始めていた頃は、
+     同じ動画が一覧・検証では485px、出力では383pxで出ており、tabを移るたびに映像だけが
+     縮んでいた(利用者の指摘)。棒を掴めば --st-exsplit-a が入り、人の指定が勝つ。 */
+  grid-template-columns:
+    var(--st-exsplit-a, var(--st-vid-w, minmax(0, 25fr))) auto
+    var(--st-exsplit-b, minmax(min(10rem, 100%), 14fr)) auto
+    var(--st-exsplit-c, minmax(0, 61fr));
+  gap: 0.6rem;
+  /* 段は2つ。**1段目は操作の帯で、動画の列は跨がない**(検証の面と同じ) —— 面の頭に
+     横いっぱいの帯を敷いていた頃は、動画がその厚みぶん下から始まり、一覧tabと縦位置が
+     揃わなかった。2段目の中身は自分の箱の中でscrollさせる ―― 表の行数で段が伸びると、
+     動画も観る操作も一緒に押し下げられて面ごとscrollになる。 */
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: var(--st-pane-pad-b) var(--st-pane-pad-i);
+  min-block-size: 0;
+}
+/* この面はDOMの並び(帯→表が先)と見せる並び(動画 → ギフト → 表)が逆なので、区画は
+   全て明示して置く。**動画だけが2段を跨ぐ** —— 帯は右の3列の上に載り、動画は面の
+   上端から下端までを1つの領域として立てる(3つのtabで箱を1pxも動かさないため)。 */
+.st-exsplit > .st-tools { grid-column: 2 / -1; grid-row: 1; }
+.st-exsplit > .st-stage { grid-column: 1; grid-row: 1 / -1; }
+.st-exsplit > #ex-split-a { grid-column: 2; grid-row: 2; }
+.st-exsplit > .st-expane { grid-column: 3; grid-row: 2; }
+.st-exsplit > #ex-split-b { grid-column: 4; grid-row: 2; }
+.st-exsplit > .vd-mlist { grid-column: 5; grid-row: 2; }
+/* 中の領域。見出しの下でギフトの並びが残り高さを全部取る(動画の枠には合わせない ――
+   領域として独立したので、高さを動画の比率に縛る理由が無くなった)。 */
+.st-expane {
+  display: flex; flex-direction: column; gap: 0.35rem;
+  min-inline-size: 0; min-block-size: 0;
+  overflow: hidden;
+}
+/* 表は列の残り高さいっぱいまで伸ばす(一覧の面と同じ)。表の下に置いていた
+   「fileにならなかった人」の段は表の行そのものへ畳んだので、余りを残す理由が無い。 */
+/* 書き出し済みfileの棚。左paneの縦列から表の上の帯へ移したので、縦には積まず横へ流して
+   折り返す。段数が増えても表を押し出さないよう、高さは窓に追従する上限で止める
+   (溢れたぶんはこの箱の中でscrollする)。 */
+#ex-files { flex: 0 1 auto; flex-direction: row; flex-wrap: wrap; max-block-size: 18vh; }
+/* 横に並べると1本の札が行を占領しかねないので、名前の側に上限を置く(全文は札のtooltip)。
+   固定pxは置かず、字の大きさで決める。 */
+#ex-files > .st-pick { max-inline-size: min(100%, 22rem); }
+/* fileにならなかった人の名乗りも、長くなったときは自分の箱の中でscrollさせる ――
+   表のすぐ下という置き場は、面を押し下げてまで守る物ではない。 */
+#ex-skipped { flex: 0 1 auto; min-block-size: 0; max-block-size: 30vh; overflow-y: auto; }
+/* 狭い窓では縦に積む。理由も並べ替えも検証の面と同じで、**この @media も .st-exsplit の
+   定義より後ろに置くこと**(前に置くと後発の定義に負けて効かない —— 窓幅900pxで列が
+   241px / 620px の2列のままだったのがこれである)。 */
+@media (max-width: 60rem) {
+  .st-exsplit {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    /* 積んだ高さは中身なりに取る。1段(minmax(0,1fr))のまま縦へ積むと、2つ目の段が
+       箱の外へこぼれて下の物に重なる。 */
+    flex: 0 0 auto;
+  }
+  /* 縦積みでは区画の指定を解いて、並びは order に任せる。 */
+  .st-exsplit > * { grid-column: 1; grid-row: auto; }
+  /* 棒は意味を失う(左右に割る物が無い)。 */
+  .st-exsplit > .split-bar { display: none; }
+  .st-exsplit > .st-tools { order: 0; }
+  /* **高さは窓で決め打つ(中身なりにしない)。** 縦積みでは段の高さが中身なりになるので、
+     空の間は枠のぶんだけ、載せた後は素材の実寸(720x1280)まで伸び、同じ場所が観るたび
+     160px単位で伸び縮みしていた。上限が無ければ窓の3倍近い段が1つできて、下のギフトと
+     表がそこまで届かない。段を窓で決めれば、中の映像も枠も(どちらも max-block-size:100%)
+     その中へ収まり、載る前と後で場所が動かない。 */
+  .st-exsplit > .st-stage { order: 2; block-size: 60vh; }
+  .st-exsplit > .vd-mlist { order: 1; }
+  /* 縦積みではギフトが動画の下。並びを上から下で読む形は横のときと同じなので、
+     高さだけ抑える(面ごとscrollへ逃がさない)。 */
+  .st-exsplit > .st-expane { order: 3; max-block-size: 40vh; }
+}
+/* 面の余白は**枠の側が1組だけ持つ**(.st-listwrap / .st-cover / .st-exsplit)。列ごとに
+   持たせていた頃は、tabによって動画の左上が数pxずつ違う所から始まっていた。 */
+/* 出力の面は棚を持たない(素材は週で決まるので選ばせない)。共通の.vd-gwrapは棚のための
+   1列目を必ず持つので、そのままでは中身が幅6remの列へ押し込まれる。 */
+#view-export > .vd-gwrap { grid-template-columns: minmax(0, 1fr); }
+
+/* 一覧の面: 左=観る場所、その右=配信者の棚、右=台帳の表。左paneが棚だけだったときは、
+   行をclickすると検証tabへ飛ばされていた ―― 1本確かめるたびに面が入れ替わるので、
+   「これは要らないfileだ」と決めて消すところまで辿り着けなかった。**確かめる場所を
+   一覧と同じ面に置く**のは検証・出力の面と同じ約束である。
+   **棚は動画の下ではなく、表のすぐ左の縦列に置く**(利用者の指定)。動画と同じ列へ縦に
+   積んでいた頃は、絞る物(棚)と絞られる物(表)の間に動画1本ぶんの幅が挟まっていて、棚を
+   押した結果がどこに出るのかを目で追えなかった。
+   動画の列は検証・出力の面と同じ28%。棚の列は他tabの棚(.vd-gwrap)と同じ寸法で、表は
+   残りを取る ―― 固定幅は置かず、名前の長い棚でも上限で止める。 */
+.st-listwrap {
+  /* 動画の列は検証・出力の面と同じく**その動画の実幅**(story.js が --st-vid-w へ書く)。
+     棚の列は他tabの棚(.vd-gwrap)と同じ寸法で、表は残りを取る。 */
+  grid-template-columns:
+    var(--st-vid-w, minmax(0, 28fr)) minmax(6rem, 11rem) minmax(0, 72fr);
+  /* 余白と段の隙間は検証・出力の枠と同じ値。**3つのtabで動画の左上を同じ座標に置く**
+     ための1組で、ここだけ違うとtabを移るたびに動画がずれる(利用者の指摘)。 */
+  gap: 0.6rem;
+  padding: var(--st-pane-pad-b) var(--st-pane-pad-i);
+}
+/* 動画は列の上端から下端までを取る(この列は動画そのものである)。4面共通の枠
+   (--vd-stage-b)ちょうどで止めていた頃は、列の残り(実測982px)のうち156pxしか使わず、
+   下の800pxが空のまま残っていた(利用者の指摘)。横の余りは列の幅の側で無くす
+   (--st-vid-w)。 */
+.st-liststage { min-block-size: 0; }
+/* 棚の列。**絞り込みは上から続けて積む。** 棚(.vd-gside-list)に列の残り高さを取らせて
+   いた頃は、その下の「状態」だけが列の底(y≒935)へ押し出され、間の約700pxが空いて
+   同じ絞り込みの仲間どうしが切り離されて見えた(利用者の指摘)。
+   伸ばさない(0 1 auto)が縮みはする ―― 配信者が増えて棚が列に収まらなくなったら、棚だけが
+   自分の中でscrollし(.vd-gside-listの既定 overflow-y:auto)、「状態」は押し出されない。
+   余りは棚と状態の間ではなく**列の一番下**に残る(グループ操作tabの .vd-gbar-strip と同じ
+   作り)。 */
+.st-listshelf { overflow: hidden; }
+.st-listshelf > .vd-gside-list { flex: 0 1 auto; min-block-size: 0; }
+/* 狭い窓では3列を1列へ落とす。**この帯は定義の後ろに置くこと** ―― 同じ詳細度では後発が
+   勝つので、前方(@media (max-width: 60rem) の本体)へ書いても .st-listwrap の定義に負けて
+   効かない。動画だけは自分の段を持たせる(棚は .vd-gside の既定で横へ折り返すので、
+   折り返しの列に混ぜると札1枚ぶんの幅まで潰れる)。 */
+@media (max-width: 60rem) {
+  .st-listwrap { grid-template-columns: minmax(0, 1fr); }
+  .st-liststage { min-block-size: 40vh; }
+  .st-listshelf > .vd-gside-list { max-block-size: none; }
+}
+/* 一覧の動画の見え方は .st-stage > .vd-mvideo が決める(この要素は .st-stage も持つ)。
+   3つのtabで同じ規則を当てるため、ここでは上書きしない。 */
+
+/* dropの受け皿の名乗り。**dragを始めるまで受け皿が在ることが判らない**のが元の作りで、
+   覆い(.st-drop)はdragの間しか出ないため、drop できると知っている人にしか見えなかった。
+   帯を積み増さずに済むよう、投入buttonをそのまま破線の枠で囲って常設の名乗りにする。 */
+/* 枠は控えめにする。受け皿は画面全体であって、この箱ではない ―― 添える一言が受け皿の
+   名乗りを担うので、枠は「ここも落とせる」と判る程度の細い破線に留める。押せる物の色
+   (--accent-deep)は中のbuttonに譲り、地色も敷かない。 */
+.st-dropzone {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  min-inline-size: 0;
+  padding: 0.2rem 0.45rem;
+  border: 1px dashed var(--line);
+  background: none;
+}
+.st-dropzone-note {
+  font-size: 0.66rem; letter-spacing: 0.04em; color: var(--ink-muted);
+  white-space: nowrap;
+}
+/* dragの間は受け皿だと判る色にする(覆いと同じ縁の色)。 */
+.st-drop-on .st-dropzone {
+  border-color: var(--accent-deep);
+  background: var(--sand-panel-muted);
+}
+/* 一覧の棚: 置き場のfolder 1つ。置き場の下は利用者が作ったfolder(週ごとの
+   20260829-20260905 など)で仕分けられており、file名の平らな列では今どの週の素材を見て
+   いるのかが行から読めない。行(素材)と棚を地の色で分け、job一覧のgroup行(.job-subrow)と
+   同じ濃さに揃える。 */
+.result-table tbody tr.st-folder > td {
+  background: var(--sand-panel-muted);
+  border-block-start: 1px solid var(--line);
+}
+/* 見出しは1段に収める。folderが増えても棚1つが1行のままであること(帯を積み増さない)。
+   flexはcellの中の箱へ当てる —— td自身をflexにすると表のcellでなくなり、colspanが効かずに
+   1列ぶんの幅へ縮む(見出しが2段に折れる)。 */
+.st-folder-head {
+  display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap;
+}
+.st-folder-toggle { letter-spacing: normal; white-space: nowrap; }
+/* どの置き場のfolderか。名前(日付)と同じ濃さで並べると、どちらが棚の名前なのか読めない。 */
+.st-folder-place { font-size: 0.66rem; color: var(--ink-muted); }
+/* 段の字下げ。**棚の見出しと中身の行を同じ列で寄せる** —— 平らに並べると、行がどの棚の
+   中身なのかは見た目からは読めず、上へ目を戻して数えることになる。深さは行が
+   --st-depth で名乗る(段ごとにcellを足すと、表の列の意味が段によって変わる)。
+   1列目(選択のcheckbox)は段によらず同じ意味なので触らない。 */
+.result-table tbody tr.st-folder > td:nth-child(2),
+#hl-rows tr[data-folder] > td:nth-child(2) {
+  padding-inline-start: calc(0.3rem + var(--st-depth, 0) * 1.1rem);
+}
+/* 中身の行は棚の下に居ることを縦線でも見せる。字下げだけだと、窓を広げて列が伸びた
+   ときに1.1remの差が読み取りにくい。 */
+#hl-rows tr[data-folder] > td:nth-child(2) {
+  background-image: linear-gradient(var(--line), var(--line));
+  background-size: 1px 100%;
+  background-position: calc(var(--st-depth, 0) * 1.1rem - 0.5rem) 0;
+  background-repeat: no-repeat;
+}
+
+/* buttonで開け閉めするpanel(照合の設定・出力の設定)。`<details>` を畳んだときの1語より
+   button の方が押せる物だと判る(利用者の指定)ので、開いた中身だけをここで持つ。
+   帯の下へ1段ぶん広がるだけで、表の高さは残りを取る。 */
+.st-optspanel {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  margin-block-end: 0.2rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  background: var(--sand-panel);
+  font-size: 0.7rem;
+}
+/* 開いている間のbutton。押した状態が見えないと、開いたのが自分の操作の結果だと読めない。 */
+.btn.btn-on {
+  background: color-mix(in srgb, var(--accent) 22%, var(--sand-panel));
+  border-color: var(--accent-deep);
+}
+/* キー操作の名乗り。**この面は数百件を続けて確かめる面**なので、送る手段が在ることを
+   常に見えるところへ置く(helpの中に畳むと、在ることに気付かれない)。 */
+.st-keys-note { flex: 0 0 auto; white-space: nowrap; }
+/* 行の中の再生・NG。表の行高を動かさないよう、余白だけを詰める。 */
+.st-playbtn, .st-ngbtn { padding: 0.1rem 0.45rem; line-height: 1.4; white-space: nowrap; }
+/* 書き出し済みfileの棚。右列の残り高さの中でだけscrollさせる ―― 伸びるに任せると、
+   本数が増えたぶんだけplayerが上へ押し出される。 */
+.st-files {
+  flex: 0 1 auto; min-block-size: 0;
+  overflow-y: auto; overflow-x: hidden;
+}
+.st-filepick { text-align: start; cursor: pointer; font: inherit; }
+.st-filepick:hover { background: var(--sand-panel); }
+/* highlightの一覧は、身元(配信者)と数の列がどれも中身の幅で足りる。tableのauto layoutは
+   余りを全列へ配るので、そのままだと短い列の右に死んだ余白が並び、代わりにfile名だけが
+   詰まって読めない。shrink-to-fit(1%)で詰め、余りはfile名の列(3)へ全部寄せる
+   ―― 固定幅ではないので窓幅に追従する(配信者動画のシーン検索と同じ手)。 */
+/* nowrapは必須。共通の.result-table tdは overflow-wrap:anywhere を持つので、幅を
+   shrink-to-fitにした瞬間に「pomi / iiip」「08/ 29 01: 53: 20」と1文字ずつ縦に割れる。 */
+/* **cellに割合(1%)を置かない。** あれは表を列いっぱいへ広げるための指定である ——
+   auto layoutは割合指定の列から表の幅を逆算する(中身Wの列に1%と書けば表はW÷0.01を望む)
+   ので、幅をautoにしても表は必ず列いっぱいまで伸びる(実測で1130px)。列を字の幅で
+   止めるには、割合を外して中身なりに決めさせる。 */
+#hl-table th, #hl-table td { white-space: nowrap; }
+/* **表そのものを中身の幅で止める。** 動画の列を28%で先に決めたので、余りはこの列に出る。
+   共通の.result-tableは inline-size:100% なので、以前のように「余りを吸う1列」を決めると、
+   その1列だけが数百px伸びて字の右に穴が開く。幅をautoにすれば列は字の幅で止まり、余白は
+   表の**右側に一塊で**残る(左へ詰まる)。上限は列いっぱいで、file名の長い行が来たときは
+   今まで通り .st-file の省略が効く。 */
+#hl-table { inline-size: auto; max-inline-size: 100%; }
+/* file名は1行に収め、全体(解決済みのpath)は行のtooltipで読ませる。 */
+.st-file {
+  display: block; max-inline-size: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* gifterの名前は絵文字混じりで長さの上限が無い(実物に「🟡むらたろう🍑🏌️‍♂️🍔」が居る)。
+   伸びるに任せるとこの列だけで表が横scrollになり、右端の印が枠の外へ出る。
+   **上限は「入っているcellの幅」であって、字数ではない。** 以前は 16ch を敷いていたが、
+   これはcellにどれだけ余裕があっても同じ所で切る指定で、実測でgifterの列が172pxある行の
+   名前が97pxで省略され、その右に75pxの空白が残っていた ―― 「余白が空いているのに
+   見切れる」の正体である。列の幅を決めるのは下のnth-childの配分で、ここは配られた幅を
+   使い切るだけにする(全文はcellのtooltip)。 */
+.st-gifter { max-inline-size: 100%; }
+.st-gifter .u-name {
+  min-inline-size: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 週のgiftの表。共通の余白のままだと右端の列(印・NG)が枠の外へ出て、横scrollしないと
+   読めなくなる。列の余白だけを詰める(幅は窓に追従したまま)。
+   nowrapは必須 —— 共通の.result-table tdは overflow-wrap:anywhere を持つので、
+   幅の足りない列で「08/」「30」「14:」と1字ずつ縦に割れ、その1行だけで表の高さが
+   4倍になる。伸びてよいのはgiftとgifterの2列だけで、そこは中の要素が省略を持つ。
+   **右側の列は「区間・確からしさ・印・NG」の4つに絞ってある。** かつては位置の列が
+   別に在り、確からしさが「高 / 0.99」と2通りの言い方を並べ、印は行の全部に「未確認」を
+   足していた ―― 右半分が読めない短語で埋まったぶん、身元(gift・gifter)の列が押し潰されて
+   名前が切れていた。 */
+#cv-table th, #cv-table td { padding-inline: 0.35rem; white-space: nowrap; }
+/* **表そのものを中身の幅で止める。** #hl-table と同じ理由である。gift・gifterへ40%ずつ
+   配っていた頃は、動画の列を28%へ決めたぶんこの列が広くなり、実測で「Universe」の列が
+   369px、gifterの列が384pxまで伸びていた —— 字の右に300px近い穴が2つ並ぶ。幅をautoに
+   すれば両列とも字の幅で止まり、名前の長い行が来たときだけ列いっぱいまで広がって
+   .st-gift / .st-gifter の省略が効く。 */
+#cv-table { inline-size: auto; max-inline-size: 100%; }
+/* giftの名前は "Guardian's Pledge" のように長い。gifterと同じで、上限は配られたcellの幅
+   であって字数ではない(全文はcellのtooltip)。
+   **窓が8列ぶんに足りないときは、名前を削らずに.table-wrapを横へscrollさせる。** かつては
+   ここで 16ch に切って表を必ず収めていたが、収まるかどうかに関わらず同じ所で切るので、
+   幅の余っている窓(実測1600pxで列は233px)でも名前が97pxで切れていた ―― 直したいのは
+   そちらである。実測で1600pxでは8列とも収まり、横scrollは起きない。 */
+#cv-table .st-gift { max-inline-size: 100%; }
+
+/* 出来上がるfileの表。かつてはここに「出力file名」の列が在り、表の幅の46%(実測466px)を
+   1つの列で使っていた ―― 中身は順位・週・週合計🪙・gifterを並べ直した文字列で、どれも
+   隣に列として出ている物である。そのぶんgifterの列は139pxまで痩せ、名前の方が切れていた
+   (file名の中には同じ名前が全部出ているのに)。
+   **列を外して空いた幅は、shrink-to-fitで1列へ寄せない。** 寄せるとgifterの列が606pxに
+   なり、150pxの名前の右へ450pxの穴が開くだけである(切れる代わりに空くのでは直っていない)。
+   幅の指定を置かなければauto layoutが中身の量に比例して全列へ配り、一番長いgifterへ一番
+   多く回る。nowrapだけは残す —— 共通の.result-table tdは overflow-wrap:anywhere を持つ
+   ので、窓が狭いときに「19,」「380」と数字が縦に割れる。
+   束を開いた行(.st-subrow)は列の配分に混ぜない ―― 中は別の格子で組んだ並びである。 */
+#ex-table thead th,
+#ex-table tbody > tr:not(.st-subrow) > td { white-space: nowrap; }
+/* **表そのものを中身の幅で止める。** 動画の列を28%で先に決めたので、余りはこの列に出る。
+   共通の.result-tableは inline-size:100% で列いっぱいへ広がり、auto layoutが余りを7列へ
+   配るため、#や尺のような1〜2文字の列まで一緒に間延びしていた。幅をautoにすれば列は字の
+   幅で止まり、余白は表の**右側に一塊で**残る(左へ詰まる)。上限は列いっぱいなので、
+   名前の長い行が来たときは今まで通り広がって折り返しの無いまま横scrollへ逃げる。 */
+#ex-table { inline-size: auto; max-inline-size: 100%; }
+/* 行頭の柱。右列は幅が狭いので、一覧側(4.2rem)より細くして入力欄へ幅を回す。 */
+.st-stage,
+.st-axis { --rowlabel-w: 2.6rem; --rowlabel-hang: calc(var(--rowlabel-w) + 0.85rem + 1px); }
+.st-stage {
+  display: flex; flex-direction: column; gap: 0.35rem;
+  min-inline-size: 0;
+  /* 空の間の名乗り(.st-stage-empty)を player の上へ重ねるための基準。 */
+  position: relative;
+  /* **min-content とは書けない。** 動画は箱の幅いっぱいに載る指定なので、min-contentは
+     「その幅を比率で高さへ写した値」(実測: 幅855pxの縦動画で1,521px)を申告する ――
+     箱が高くなる→列が広がる→箱が更に高くなる、の堂々巡りで面が伸び続けた。
+     高さは段(枠の側)が決め、動画はそこへ収まる側である。下限は枠が持つ
+     (.st-cover の min-block-size)。 */
+  min-block-size: 0;
+  /* 列からはみ出させない。 */
+  overflow: hidden;
+}
+/* 動画は**与えられた領域そのもの**を占める(縦横とも100%)。箱を中身なりに置いていた
+   頃は、srcが入る前のvideoの内在寸法(300x150)がそのまま箱になり、開いた直後だけ小さな
+   黒箱が出て、1本目を読み込んだ瞬間に領域が跳ねていた(利用者の指摘)。高さの上限も
+   置かない —— 動画は列の上端から下端までを取る。
+   **領域と映像の差は列の幅の側で取り除く。** 縦動画を列の高さいっぱいに載せると実幅は
+   列より狭く、その差がそのまま右の余白になっていた。列の幅はその比率から出す
+   (story.js が --st-vid-w へ書く)ので、object-fit:contain の余白は残らない。
+   **その比率は面を開いた時点で決まっていて、再生では動かない** —— 観ている最中に列の幅が
+   動くと、右の表も時間軸も一緒にずれて面全体がちらつく(利用者の指摘)。比率の違う素材が
+   来た日は、箱を動かす代わりに object-fit:contain の余りを黒として見せ、次にこの面を
+   開いた時からその比率で組む。 */
+.st-stage > .vd-mvideo {
+  /* **基準は0(auto ではない)。** autoだと基準が「箱の幅を比率で高さへ写した値」になり、
+     幅が広がるほど箱が高くなる ―― 列の幅をその高さから決めている以上、堂々巡りになる。
+     0にすれば高さは段の残りそのもので、幅とは無関係に決まる。 */
+  flex: 1 1 0; min-block-size: 5rem;
+  block-size: auto; max-block-size: none;
+  inline-size: 100%; max-inline-size: 100%;
+  align-self: stretch;
+  /* 地は黒(共通の .vd-mvideo と同じ)。**何も載っていない間もこの箱がそのまま出る**ので、
+     開いた直後から「観る場所」が player の形で読める(配信者動画の面と同じ)。 */
+  background: #000;
+  /* 幅も高さも与えられている面ではこの比率は使われない。効くのは1列に落ちる狭い窓で、
+     箱の幅を実比率へ戻すとき(下の @media) ―― srcの無い<video>の内在比率(300x150)で
+     横長の箱が出るのを止める。比率は前に観た1本のもの(story.js が覚えている)。 */
+  aspect-ratio: var(--st-stage-ar, 9 / 16);
+}
+/* **player は最初から出しておく(配信者動画の面と同じ)。** かつては src が入るまで
+   player を退けて同じ形の枠へ差し替えていたが、そうすると開いた直後のこの列に「観る物」が
+   1つも無く、同じ「観る」場所なのに配信者動画の面とまるで違う出方をしていた(利用者の
+   指摘)。地が黒い箱と操作列がそのまま出ていれば、載る前でもそこがplayerだと読める。
+   置き換えを止めたので、**載る前と載った後で箱の寸法は1pxも動かない** —— 列の幅を決める
+   測り(story.js の fitStageWidth)も、常にこの player を測る。 */
+/* 載っている間は名乗りを退ける。**JSでは切り替えない** —— srcの出入りは複数の場所で
+   起きるので、片方だけ直した日に名乗りとplayerが二重に立つ。 */
+.vd-mvideo[src] + .st-stage-empty { display: none; }
+/* 空の間の名乗り。**player の上に重ねる**(場所は取らない) —— 観る場所は player 自身が
+   在ることで名乗れているので、ここが要るのは「まだ何も選んでいない」という一言だけである。
+   重ねる作りなら、1本目が載った瞬間に段が組み替わらない。押す物(playerの操作列)を塞が
+   ないよう当たり判定は持たせず、地が黒いので文字は暗地用の色を使う。
+   中の文言は場所の名乗りなので、枠が細いときは折り返さずに消す。 */
+.st-stage-empty {
+  position: absolute;
+  z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0.5rem;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--invert-fg-muted);
+  font-size: 0.72rem; letter-spacing: 0.12em; text-align: center;
+}
+/* 重ねる先は player の箱。**見出しの段はもう無い**(動画の上には何も置かない)ので、
+   枠いっぱいに重ねる。 */
+.st-stage > .st-stage-empty {
+  inset-inline: 0;
+  inset-block: 0;
+}
+/* 出せない理由(実体の無い行・URLを返さない行・再生できなかった)。**player の上へ
+   重ねる帯**で、空のときは段を作らない —— ここに字が出ているのは「出せない理由が
+   在るとき」だけ、という読み方に揃える。地が黒いので文字は暗地用の色を使う。 */
+.st-stage-note {
+  position: absolute;
+  z-index: 2;
+  inset-inline: 0;
+  inset-block-start: 0;
+  padding: 0.3rem 0.5rem;
+  background: color-mix(in srgb, #000 66%, transparent);
+  color: var(--invert-fg);
+  font-size: 0.7rem; line-height: 1.35;
+  pointer-events: none;
+}
+.st-stage-note:empty { display: none; }
+.st-stage-note.is-error {
+  background: color-mix(in srgb, var(--warn) 78%, #000);
+}
+/* 出力の面の player は領域の左上へ実比率のまま置くので、名乗りも同じ区画へ重ねる
+   (gridの同じcellに置く ―― 置かないと player の下に段が生えて領域が縦に伸びる)。 */
+.st-exwatch > .st-stage-empty {
+  /* **この面では浮かせない。** 浮かせると位置の基準が .st-stage(見出しを含む段)になり、
+     名乗りが player の上端へずれる。格子の同じcellへ置けば、重ね先は player そのものである。 */
+  position: static;
+  grid-area: 1 / 1;
+  /* 寸法の指定は player と同じ物を持つ(上の .st-exwatch > .vd-mvideo と対にして直すこと)。
+     cellいっぱいに広げると、列が動画より横に広い窓で名乗りだけが右へ寄る。 */
+  justify-self: start; align-self: start;
+  inline-size: auto; block-size: 100%;
+  max-inline-size: 100%; max-block-size: 100%;
+  aspect-ratio: var(--st-stage-ar, 9 / 16);
+}
+/* **動画の上には見出しの段を置かない。** 以前はここに面の名乗りと素材のfile名を出して
+   いたが、どれも右の表の行に出ている物で、その段のぶんだけ動画が低くなり、段を持つ面と
+   持たない面で動画の縦位置がずれていた(利用者の指定)。出せない理由だけは
+   .st-stage-note が player の上へ重ねて出す。 */
+/* 1列に落ちる幅では列の側を動画に合わせられない(--st-vid-w は使わない)ので、箱の幅の方を
+   実比率へ戻して左づめで置く。幅いっぱいの箱のままだと、映像は箱の真ん中に寄る一方で
+   playerの操作列だけが列いっぱいに伸び、押す物と観る物の左端が揃わなくなる。
+   **この帯は基の定義より後ろに置くこと**(同じ詳細度では後発が勝つ)。 */
+@media (max-width: 60rem) {
+  .st-stage > .vd-mvideo { inline-size: auto; max-inline-size: 100%; align-self: flex-start; }
+  /* 名乗りも player と同じ幅で左づめにする ―― 段いっぱいに広げたままだと、この幅では
+     player より横に広くなり、名乗りだけが動画の右へはみ出して見える。 */
+  .st-stage > .st-stage-empty {
+    inset-inline: 0 auto;
+    inline-size: auto; max-inline-size: 100%;
+    aspect-ratio: var(--st-stage-ar, 9 / 16);
+  }
+}
+/* 動画の領域。**flexでは高さが決まらない** ―― 高さを中身(動画)が決めると、置換要素は
+   幅の上限から比率で高さを出すので、列を広げるほど枠が伸びて面ごとscrollになる。
+   領域を先に決め、その中で動画が自分の比率に収まる形にする。 */
+.st-exwatch {
+  /* 領域は**見出しの下の残り全部**。4面共通の枠(--vd-stage-b)で止めていた頃は、列が
+     936pxあるのに682pxで切り上げ、下に250pxの空白が残っていた(利用者の指摘)。 */
+  flex: 1 1 auto;
+  block-size: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  justify-content: start;
+  min-block-size: 5rem; min-inline-size: 0;
+}
+/* **この面だけは列の幅を動画に合わせない。** 列の割り方は棒(splitter)で人が決める物
+   なので、動画の比率で列を詰めると人の指定を打ち消すことになる。動画は領域へ実比率の
+   まま収め、余りは領域の右下に残す(左上づめ) —— 寸法はどちらもautoにして上限だけ与える。
+   置き換え要素は上限が2つあると比率を保ったまま両方へ収まる形まで縮むので、縦動画では
+   高さが、横に短い列では幅が先に効き、どちらでも映像の周りに透明の帯は出ない。
+   srcが入るまでは塗らない(上の :not([src]))ので、内在寸法(300x150)の小さな箱が
+   開いた直後に見えることもない。 */
+.st-exwatch > .vd-mvideo {
+  grid-area: 1 / 1;
+  justify-self: start; align-self: start;
+  inline-size: auto; max-inline-size: 100%; max-block-size: 100%;
+  min-inline-size: 0; min-block-size: 0;
+  /* **高さは領域から、幅は比率から出す。** 両寸autoのままだと、srcの無い<video>は内在寸法
+     (300x150)の小さな黒い箱になり、1本目を載せた瞬間に別物の大きさへ跳ねる ―― この面でも
+     player は最初から在るので、箱の形は載る前から決まっていなければならない。比率は前に
+     観た1本のもの(story.js が --st-stage-ar で渡す)。 */
+  block-size: 100%;
+  aspect-ratio: var(--st-stage-ar, 9 / 16);
+  /* 地は黒(共通の .vd-mvideo と同じ)。比率の違う素材が来た日は object-fit:contain の
+     余りがこの黒として残る —— 箱を素材に合わせて動かすより、箱を据えて余りを見せる。 */
+  background: #000;
+}
+/* 時間軸は配信者動画の seek bar と同じ作り(上端=区間のhandle lane・下端=時刻ruler・その間の
+   本体にgift演出とgift icon、本体の下端に演出区間のlane)なので、laneのぶんだけ共通の.vd-heatより
+   厚く取る。iconと名前が段で載るため、薄くすると段が1つも作れない。上限を抑えるのは、
+   この帯が動画と表の下から高さを取る側だからである(横いっぱいへ移して幅が3倍以上に
+   なったぶん、iconが横へ散って段は作られにくくなっている)。 */
+/* 段(icon+gift名)が2つ入る高さを下限にする。1段しか作れない厚みだと、同じ数秒に飛んだ
+   giftが🪙の重い1件を残して全部落ちる —— 落ちたgiftは軸のどこにも出ない。
+   下限 = lane(上14+下14+印8) + 段2つぶん(icon 22 + 名前11 + 隙間2)/0.85。
+   コマ(filmstrip)の帯は**本体から削らず足す**。地へ敷いていた頃はgift iconと名前が絵に
+   紛れて読めなかったので、絵は軸の下の別の帯へ下ろした —— そのぶん本体を削ると、iconの
+   段が作れなくなって同じ問題(重なったgiftが落ちる)へ戻る。足す量は story.js が
+   --strip-lane で渡す(コマを切っているときは0)。 */
+/* 拡大軸(6.3〜7.5rem)を畳んだぶん、この1本を厚くする。**帯の総量は減っている** ―― 段が
+   2つ作れる厚みになるので、同じ数秒に飛んだgiftが🪙の重い1件を残して落ちることも減る。 */
+.st-timeline { block-size: calc(clamp(9rem, 16vh, 11.5rem) + var(--strip-lane, 0px)); }
+
+/* 候補の切り替え(このgiftが当たっているハイライト)。file名は長さがまちまちなので、幅は
+   決めずに**縮む側だけ許す** —— 幅を決めると、短いfile名で無駄に空き、長いfile名で行の
+   他の操作(速度・コマ)を押し出す。当たりが1本の行では disabled になる。 */
+.st-hitpick { flex: 0 1 auto; min-inline-size: 0; }
+
+/* hoverしている秒の絵。幅はServerへ頼んだ幅そのもの、縦は絵の実比率で決まる(縦動画を
+   画面側で潰さない)。 */
+.st-thumb-img { display: block; max-inline-size: 100%; block-size: auto; }
+
+/* この行だけの区間を持っている行の印。色は足さず、下線だけで「触ってある」を出す
+   ―― 色を足すと警告に見えるが、詰めてあることは異常ではない。 */
+.st-cut-own { text-decoration: underline dotted; text-underline-offset: 0.15em; }
+
+/* 1つのcellに再生系のbuttonを2つ並べる。表の行高を動かさないよう、隙間だけを持たせる。 */
+.st-playcell { display: inline-flex; gap: 0.25rem; }
+
+/* 章の帯。**繋いだ窓の並びそのもの**なので、横1列で並びが読める形にする。折り返させると
+   「何本目か」が視覚的な順序から外れる。狭いときは横へscrollさせる(固定幅は置かない)。 */
+.st-chapters {
+  /* 3領域の真ん中。縦に並べるのは「繋ぐ順」を上から下で読ませるためで、横1列だと
+     窓が3〜8個あるだけで横scrollになり、並び全体が一度に読めなかった。 */
+  display: flex; flex-direction: column; gap: 0.2rem;
+  /* 幅は領域(.st-exsplit の中の列)が決める。**中身の量では動かさない** ―― ここで幅を
+     主張すると、長いgift名が来た章で隣の動画と表の幅まで揺れる。切り落としは起きて
+     よい(名前も🪙も省略つきで、全文はchipのtooltipに出る)。 */
+  flex: 1 1 auto;
+  min-inline-size: 0; min-block-size: 0;
+  overflow-y: auto; overflow-x: hidden;
+  padding-inline-end: 0.15rem;
+}
+.st-chapter {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 0.3rem;
+  padding: 0.15rem 0.35rem;
+  font: inherit; font-size: 0.66rem; text-align: start; cursor: pointer;
+  background: var(--sand-panel); color: var(--ink);
+  border: 1px solid var(--line);
+}
+.st-chapter:hover { background: color-mix(in srgb, var(--accent) 22%, var(--sand-panel)); }
+/* いま流れている窓。**帯そのものが小さいので、縁の色だけでは目に入らなかった**
+   (利用者の指摘) —— 地ごと反転させ、左の柱を太くして、他の窓と一目で違う姿にする。
+   1色=1意味なので、色は選択の役(--accent-deep)のままである。 */
+.st-chapter-now {
+  border-color: var(--accent-deep);
+  border-inline-start-width: 0.35rem;
+  background: var(--accent-deep);
+  color: var(--invert-fg);
+  font-weight: 700;
+}
+/* 反転地の上の従属文字。明地専用の --ink-muted は暗地では地とほぼ同じ明度になる。 */
+.st-chapter-now .st-chapter-no,
+.st-chapter-now .st-chapter-meta { color: var(--invert-fg); }
+.st-chapter-now:hover { background: var(--accent-ink); }
+/* 流れている窓の頭に▶を出す。色を読み分けられない環境でも、どれが再生中かが形で判る。 */
+.st-chapter-now .st-chapter-no::before { content: "▶ "; }
+.st-chapter-no { flex: 0 0 auto; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.st-chapter-body { display: flex; flex-direction: column; min-inline-size: 0; }
+.st-chapter-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 🪙と尺。**溢れさせない** —— 横1列だった頃は幅に余裕があったが、縦へ積むと列が細く、
+   はみ出した分は帯の overflow に黙って切り落とされる(額の桁が消える)。 */
+.st-chapter-meta {
+  color: var(--ink-muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+
+/* **「切り出す範囲」の枠は置かない。** 開始・終了・長さの欄と相手の名乗りを時間軸の
+   下へ積んでいたが、範囲を触る受け皿は時間軸の帯(端のdragと [ ] , . キー)の側にあり、
+   同じ1つの値を2箇所に映していただけだった —— そのぶん軸が画面の下へ押し出され、
+   動画と軸が同時に見えない面になっていた(利用者の指定で外した)。
+   触っている相手はどの道**表で選んだ行**そのもので、行は選択の印を持っている。 */
+
+/* giftの名乗り(icon+名前)。iconだけでは何が飛んだのかしか読めず、名前だけでは
+   一覧の中でgiftを見分けられない。 */
+.st-gift { display: inline-flex; align-items: center; gap: 0.3rem; min-inline-size: 0; }
+.st-gift img { block-size: 1.2rem; inline-size: auto; }
+.st-gift-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* giftを割り出せなかったgift演出。取得の失敗ではなく「そこがgift地点ではなかった」という
+   正しい結果なので、警告色は当てない。**地には何も足さず、字の強さだけで引かせる。**
+   斜線の地紋は試したが、濃くすると沈んだ行ではなく強調された行に見え、薄くすると
+   模様として読めないという行き止まりだった。文字色だけで沈まなかった当時の原因は
+   自前の色を持つcell(gift名のicon・印)が濃さを保っていたことで、そちらは下の
+   継承指定とgrayscaleで塞いである。地(--sand-panel)に対し本文は3.33:1 —— 本文のAA
+   (4.5:1)は割るが、この行は「読ませる行」ではなく「読み飛ばす行」なので沈む側を採る。
+   3:1(大文字・UI部品の下限)は下回らせない。 */
+.result-table tbody tr.st-nogift td {
+  color: var(--row-dim, color-mix(in srgb, var(--ink-muted) 75%, var(--sand-panel-muted)));
+}
+.result-table tbody tr.st-nogift td * { color: inherit; }
+/* 当たった行。**色は足さない** —— 既定のcellが既に一番濃い墨(--ink-strong)なので、
+   濃さの上に伸ばす余地は無い。残る軸は字の太さで、薄くした「出ていない」行との落差が
+   そのまま照合の結果になる。地を塗る手は採らない(この表は行の意味で地を変える約束で、
+   多数派である当たり行を塗ると意味の地が読めなくなる)。 */
+.result-table tbody tr.st-hit td { font-weight: 600; }
+.result-table tbody tr.st-nogift img { filter: grayscale(1); opacity: 0.5; }
+/* hoverの手応えは残す。選んでいる行は変えない —— 変えると選択の印が消える。 */
+.result-table tbody tr.st-nogift.row-clickable:not(.st-current):hover td {
+  background-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+/* 出力から外したgift演出。色を足さず、繋がれないことだけを打ち消し線で出す。 */
+.result-table tbody tr.st-excluded td { text-decoration: line-through; color: var(--ink-muted); }
+/* 見終わった行(確認済み)。**沈めるのは地だけで、字の濃さと太さには触らない** ―― 濃さと
+   太さは「出ている / 出ていない / 対象外」という照合の結果を出す軸で、そこへ人の作業の
+   進み具合を混ぜると、済んだ当たり行と未確認の「出ていない」行が同じ見た目になる。
+   この面で一番読みたいのが後者なので、その取り違えだけは起こしてはならない。
+   **地も色は足さず、地の一番深い段(--sand-bg-deep)へ落とすだけにする** ―― 済んだことは
+   「進んだ」でも「危ない」でも「押せる」でもないので、役を持つ色(--ok / --warn / --accent)は
+   どれも当たらない。表の地(--sand-panel-muted)との落差そのものが「もう読まなくてよい行」で、
+   1段下(--sand-panel-muted)では表の地と同じ色になって何も起きない。
+   **沈めた行では薄い字を混ぜ直す(--row-dim)。** 「出ていない」行の薄さは地へ25%沈めた墨
+   なので、地だけ暗くすると3:1を割って読めなくなる ―― 沈んだ地の上では12%だけ沈めて、
+   同じ比(3.0:1)を保つ。
+   選んでいる行(.st-current)はこの**下**で地を上書きする(観ている行の印の方が先)。 */
+.result-table tbody tr.st-checked td {
+  background: var(--sand-bg-deep);
+  --row-dim: color-mix(in srgb, var(--ink-muted) 88%, var(--sand-bg-deep));
+}
+/* いま左の動画が映している行。**離れた場所を見ている間も、どの行を観ているのかが一目で
+   判ることが要件**である —— 表と動画は左右に分かれていて、視線は動画側に居る。
+   色は選択の役(--accent)のままで、濃さと左の柱だけを強くする(1色=1意味を崩さない)。 */
+.result-table tbody tr.st-current td {
+  background: color-mix(in srgb, var(--accent) 34%, var(--sand-panel));
+  color: var(--ink-strong);
+}
+.result-table tbody tr.st-current td:first-child {
+  box-shadow: inset 0.35rem 0 0 var(--accent-deep);
+}
+/* 束を開いた中の1件を観ているとき。行の地は上の親行と同じ役の色で、左の柱だけ細くする。 */
+.st-subitem.st-subitem-now {
+  background: color-mix(in srgb, var(--accent) 30%, var(--sand-panel));
+  box-shadow: inset 0.25rem 0 0 var(--accent-deep);
+  color: var(--ink-strong);
+}
+
+/* 出力tabの左pane。1枚=1 highlightで、選ぶことしかしないのでcheckboxと名前だけを持つ。 */
+.st-pick {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 0.35rem;
+  min-inline-size: 0;
+  padding: 0.2rem 0.3rem;
+  font-size: 0.66rem; color: var(--ink);
+}
+.st-pick-body { display: flex; flex-direction: column; gap: 0.1rem; min-inline-size: 0; }
+.st-pick-name {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-inline-size: 100%; color: var(--ink-strong);
+}
+.st-pick-meta { font-size: 0.62rem; color: var(--ink-muted); white-space: nowrap; }
+/* 対象の週の外の素材。**隠さない**(手で足せる)が、選ばれていない理由が見えるように薄くする。
+   警告色は当てない ―― 別の週の本が棚に在るのは正しい状態である。 */
+.st-pick-other .st-pick-name { color: var(--ink-muted); }
+/* 録画の名乗り(番号+日時)と印は、折り返すと1行が3段まで伸びる。10件のgift演出の表で見える行数が
+   その分だけ減るので1行に収め、全体はtooltipで読ませる。 */
+.st-nowrap { white-space: nowrap; }
+/* 微調整と時間軸のbuttonは、動画の脇に並ぶ他の画面のplayerと同じ小ささにする
+   (既定のbtnは行の高さを1.5倍にし、その分だけ動画が縮む)。 */
+.st-stage button.btn,
+.st-axis button.btn { padding: 0.25rem 0.65rem; letter-spacing: 0.04em; }
+/* 同じ数字が2箇所に出て意味が違う設定(照合の下限 / 出力の下限)に添える一言。
+   名前を変えるだけでは、隣の画面を見ていない人には別物だと判らない。 */
+.st-aside { flex: 0 0 auto; color: var(--ink-muted); }
+/* 出力tabの配信者。出力は配信者folderの下へ置かれるので跨げない ―― 1人しか居なければ
+   選ぶ物が無いのでdisableされ、その状態が見て判るようにする。 */
+#ex-streamer:disabled { color: var(--ink-muted); }
+/* 出力tabの2段の表。上段=gifterごとの束(=1本のmp4)、開くと下段にその人のgift演出が並ぶ。
+   常時全部を並べると、数百人ぶんで数千行になり「誰の束が何本できるか」が読めなくなる。 */
+.result-table tbody tr.st-group td { cursor: pointer; }
+.result-table tbody tr.st-group-open td { background: color-mix(in srgb, var(--accent) 14%, var(--sand-panel)); }
+.result-table tbody tr.st-group-open td:first-child { box-shadow: inset 0.2rem 0 0 var(--accent-ink); }
+/* 束を開くcaret。**行のclickは再生**なので、開け閉ては専用の的を持つ。gifter名の手前に
+   置いて、閉じている(▸)/開いている(▾)が名前の並びと同じ列で読めるようにする。 */
+.st-groupname { display: inline-flex; align-items: center; gap: 0.3rem; min-inline-size: 0; }
+.st-caret {
+  flex: 0 0 auto;
+  padding: 0 0.3rem; line-height: 1.4;
+  font-size: 0.7rem; color: var(--ink-muted);
+}
+.result-table tbody tr.st-group-open .st-caret { color: var(--accent-ink); }
+/* gift演出の行もclickで再生する。押せることが読めるように、行そのものへ的の見え方を与える
+   (▶だけが押せた頃は、行の余白を押しても何も起きなかった)。 */
+.st-subitem.st-subclick { cursor: pointer; }
+.st-subitem.st-subclick:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+/* 中身の行は表の列に合わせない ―― 束の列(件数・🪙・尺・file名)とgift演出の列(gift・🪙・尺)は
+   別物なので、同じ格子に載せると意味の違う値が縦に並ぶ。 */
+.result-table tbody tr.st-subrow > td { padding: 0.2rem 0.6rem 0.4rem; border-top: 0; }
+/* 束の中の行は**1枚の格子**へ載せる。行ごとにflexで並べていた頃は、gift名の長さが
+   行ごとに違うぶんだけ後ろの欄がまるごと横へずれ、🪙も尺も列として読めなかった
+   (利用者の指摘)。列の幅は親が決め、行はsubgridでその幅をそのまま使う ―― 行ごとに
+   幅を決め直す作りでは、同じ列に見えても縦に揃わない。
+   列は 番号 / ▶(載らなかったgiftでは時刻) / gift / gifter / 🪙 / 尺 / 印 / 素材と位置(理由)。
+   gifterの列はふだん空で、束の持ち主と違う人が混ざった行にだけ名前が出る。 */
+.st-subitems {
+  display: grid;
+  grid-template-columns:
+    minmax(2ch, auto) auto minmax(0, 2fr) auto auto auto auto minmax(0, 3fr);
+  gap: 0.1rem 0.5rem; align-items: center;
+}
+/* 実際に付くfile名。表の列からは外してあるので、行を開いたここが全文の在り処になる
+   ―― 置き場を開いて現物を探すときに要る。折り返させる(1行に収める理由が無く、切ると
+   探せなくなる)。 */
+.st-subname {
+  grid-column: 1 / -1;
+  padding: 0.1rem 0.35rem 0.25rem;
+  overflow-wrap: anywhere;
+}
+.st-subitem {
+  position: relative;
+  display: grid; grid-column: 1 / -1; grid-template-columns: subgrid;
+  align-items: center;
+  font-size: 0.7rem; color: var(--ink);
+  /* 行の頭は**どの行でも同じ位置**にする。要確認・別人・連投の行だけ字下げを浅くして
+     いた頃は、印の付いた行だけ左へ飛び出して見えた ―― 印は左の罫で出す物で、字下げの
+     深さで出す物ではない。 */
+  padding-inline: 2.1rem 0.35rem;
+  /* giftのiconが載る行と載らない行で背が変わると、目が縦に流せない。 */
+  min-block-size: 1.7rem;
+}
+.st-subitem > .st-sub-no { grid-column: 1; }
+/* ▶と時刻は同じ列。格子の升へ引き伸ばさない(引き伸ばすと▶が列の幅いっぱいのbuttonに
+   なる)。 */
+.st-subitem > .st-playbtn,
+.st-subitem > .st-sub-when { grid-column: 2; justify-self: start; }
+.st-subitem > .st-gift { grid-column: 3; }
+.st-subitem > .st-sub-who { grid-column: 4; }
+.st-subitem > .st-sub-d { grid-column: 5; }
+.st-subitem > .st-sub-len { grid-column: 6; }
+.st-subitem > .st-sub-mark { grid-column: 7; }
+.st-subitem > .st-sub-from { grid-column: 8; }
+/* 見出し(「1本に載らなかったgift N件」)は1行の文言なので格子に載せない ―― 番号の列へ
+   入ると2ch幅で折り返す。 */
+.st-subitem.st-misshead { display: block; }
+.st-sub-no { text-align: end; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.st-sub-len { min-inline-size: 5ch; text-align: end; font-variant-numeric: tabular-nums; }
+/* 🪙は**絵文字を欄の左端・数を右端**へ置く。1つの文字列にすると、絵文字を先頭へ付けた
+   とたん額の桁の差がそのまま絵文字の位置の差になり、行ごとに🪙が踊る。 */
+.st-sub-d {
+  display: inline-flex; align-items: baseline; gap: 0.2rem;
+  font-variant-numeric: tabular-nums;
+}
+.st-sub-d .st-coin-num { min-inline-size: 5ch; text-align: end; }
+.st-sub-when { font-variant-numeric: tabular-nums; }
+/* 素材と位置(載らなかったgiftでは理由)。折り返すと行の背が行ごとに変わるので1行に
+   収め、全文はtooltipで読ませる。 */
+.st-sub-from {
+  min-inline-size: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* まとめ投げの単価×個数。合計の隣へ小さく添える(合計を読み替えさせない)。 */
+.st-sub-each { margin-inline-start: 0.3rem; font-size: 0.9em; }
+/* 1本に載らなかったgift。**出力の中身ではない**ので、載る行と同じ濃さで並べない ――
+   同じ見え方だと、開いた束のどこまでがfileの中身なのか読めなくなる。 */
+.st-misshead {
+  margin-block-start: 0.35rem; padding-block-start: 0.25rem;
+  border-block-start: 1px dashed var(--line);
+  color: var(--ink-muted);
+}
+.st-missitem { color: var(--ink-muted); }
+/* 一覧の件数へ添える「未収録N」。数そのものではないので、件数と同じ濃さにしない。 */
+.st-miss-n {
+  margin-inline-start: 0.35rem;
+  font-size: 0.86em; color: var(--ink-muted);
+}
+/* 対象の週。前後への移動とselectを1行に収める(棚の頭に置くので幅が狭い)。 */
+.st-weekbar { display: flex; align-items: center; gap: 0.2rem; min-inline-size: 0; }
+.st-weekbar > select { flex: 1 1 auto; min-inline-size: 0; }
+.st-weekbar > .btn { flex: 0 0 auto; padding-inline: 0.4rem; }
+/* 誰が対象かの規則。設定ではなくServerが適用する決まりなので、入力欄とは見た目を分ける
+   ―― 同じ画面に「gift 1件の下限」という**編集できる**下限が別に在り、並べると同じ物に
+   見える。こちらは枠と左罫で「読む物」であることを示す。 */
+.st-rule {
+  padding: 0.25rem 0.4rem;
+  border-inline-start: 0.2rem solid var(--accent-deep);
+  background: color-mix(in srgb, var(--accent) 10%, var(--sand-panel));
+  color: var(--ink-strong);
+}
+.st-rule:empty { display: none; }
+/* fileにならない人(素材のどこにも出てこない / 表示名がfile名に使えない等)は、**gifterの
+   表の行として並べる**。以前は表の下に段を作って1人ずつ文章で書いていたが、読む物は行で
+   あって説明ではない(利用者の指定)。fileにならないことは行の警告色と、gifterの脇の
+   短い印で名乗る —— なぜ出来ないのかはServerの文言で、cellのtooltipが持つ。 */
+.result-table tbody tr.st-nofile td {
+  background: color-mix(in srgb, var(--warn) 10%, var(--sand-panel));
+}
+.result-table tbody tr.st-nofile td:first-child {
+  box-shadow: inset 0.35rem 0 0 var(--warn);
+}
+.st-nofile-tag {
+  margin-inline-start: 0.4rem;
+  color: var(--warn-ink); font-weight: 600; font-size: 0.86em;
+  white-space: nowrap;
+}
+/* 検証(週×ハイライト)の俯瞰。**帯として横へ流す。** 以前は左の縦paneへ縦に積んで
+   常時出していたが、13行の数字が表と動画から幅を奪ったうえ、何を読む面なのかが
+   分からなくなっていた(利用者の指摘)。今は畳んであり、開いたときだけこの帯が出る ――
+   縦に積むと、開くたびに表が画面の外へ押し出される。
+   列は幅で決めない(auto-fill)。窓を狭めると段が増えるだけで、字は詰まらない。 */
+.st-stats {
+  flex: 0 0 auto;
+  /* gridで等分すると、窓が広いときに項目名と値の間が数cm開いて別々の物に見える。
+     中身の幅で流して折り返す —— 項目は「全体（うち…）」で1組に閉じているので、
+     どこへ折り返しても単独で読める。 */
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 0.15rem 1.6rem;
+  margin-block: 0.2rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  background: var(--sand-panel);
+  font-size: 0.66rem;
+}
+.st-stat {
+  flex: 0 0 auto; min-inline-size: 0;
+  display: flex; align-items: baseline; gap: 0.35rem;
+}
+.st-stat-l { flex: 0 0 auto; color: var(--ink-muted); }
+.st-stat-v { flex: 0 0 auto; color: var(--ink-strong); font-variant-numeric: tabular-nums; }
+.st-stat-n { flex: 0 0 auto; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+/* highlightに1本も出ていないgift。**取得できなかったのではなく結果**なので警告色は
+   当てない ―― 「出ていない」ことこそ、この面で読みたい物である。 */
+.st-cover-none { color: var(--ink-muted); }
+/* 2本以上に出ている印。数を足すだけで、色は増やさない。 */
+.st-cover-multi { margin-inline-start: 0.3rem; color: var(--accent-ink); font-weight: 600; }
+/* 演出が画面に出ないgift。highlightに採られなくても不思議ではない行なので、
+   「出ていない」の薄さとは別に、地の帯で「そういう種別」だと示す。 */
+.result-table tbody tr.st-noeffect td:first-child {
+  box-shadow: inset 0.2rem 0 0 color-mix(in srgb, var(--ink) 35%, transparent);
+}
+/* 週合計が下限に届かず、fileが作られない人のgift。行は残して薄くするだけ ―― 落とすと
+   「この面に出ていない理由」が2種類できて、人が切り分けられなくなる。 */
+/* 対象外・同席だけの行は当たっていても強調しない —— 出力に出ないことの方が、
+   照合が当たったことより先に読めなければならない。 */
+.result-table tbody tr.st-offtarget td { color: var(--ink-muted); font-weight: 400; }
+
+/* ===== 場面の絵 =====
+   **文字だけで照合の正しさを確かめさせないための列である。** gift名とgifter名の文字列
+   しか出していなかったために、鹿の全画面演出が「Goal Highlight」の名前で別人のfileへ
+   入り、出来上がったmp4を観るまで誰も気付けなかった。
+   highlightは縦動画(720x1280)なので、幅ではなく**高さ**で抑える ―― 幅で抑えると高さが
+   その1.78倍に伸び、行の高さが表ぜんたいを押し広げる。 */
+.st-frame {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 0.15rem;
+  min-inline-size: 0;
+}
+/* highlightと録画の2枚。**間に罫を1本引く** ―― 隙間だけだと、縦長の絵が2枚並んだ物なのか
+   1枚の絵なのかが判らない。左右の区別は読み方とtooltipが持つ(色は増やさない)。 */
+.st-frame-two { padding-inline: 0.15rem; }
+.st-frame-two > img + img { border-inline-start-width: 2px; }
+/* giftの秒がgift演出の窓の外で、窓の中へ丸めた絵。**その絵は「giftの瞬間」ではない**ので、
+   絵の側からも判るようにする(理由はtooltipが名乗る)。 */
+.st-frame-clamped > img { border-block-end: 2px dashed var(--warn); }
+/* 高さは「何の演出か判る」下限で決める。実測で40px高(幅22px)では鹿とスタジアムの
+   見分けが付かず、この列を置く意味が無かった。64px高(幅36px)なら全画面演出の色と形が
+   読める。窓が低いときは vh に従って縮む。 */
+.st-frame img {
+  display: block;
+  block-size: clamp(2rem, 6vh, 4rem);
+  inline-size: auto;
+  border: 1px solid var(--line);
+  background: var(--sand-bg);
+}
+/* 束を開いた行は縦に余裕がある。ここは中身を確かめる場所なので大きく出す。 */
+.st-frame-big img { block-size: clamp(2.6rem, 9vh, 6rem); }
+/* 位置の判らないgift演出。絵を出せないことを「—」で名乗る ―― 頭の0秒で代用すると、
+   そのgift演出とは関係の無い場面を中身として見せることになる。 */
+.st-frame-none { color: var(--ink-muted); }
+
+/* ===== 要注意の名乗り =====
+   色は1つの意味しか持たせない。--warn は既にこの画面で「人が確かめるべき所」を指して
+   いる(fileにならなかった人の一覧)ので、照合を言い切れていないgift演出にも同じ色を使う。 */
+.st-warn {
+  flex: 0 0 auto;
+  color: var(--warn-ink); font-weight: 600;
+  white-space: nowrap;
+}
+.st-warn:empty { display: none; }
+.st-risk-text { color: var(--warn-ink); }
+/* 点(スコア)。桁を揃えないと、100点の行と9点の行で数字の位置が動いて列として読めない。 */
+.st-score { font-variant-numeric: tabular-nums; }
+/* 警告の列。**色は増やさない** —— --warn は既にこの画面で「人が確かめるべき所」を指して
+   いる。印の列と見分けるのは太さだけにする(1色=1意味)。 */
+.st-warn-text { color: var(--warn-ink); font-weight: 600; }
+/* 「その瞬間だ」と言い切れていないgift演出。行の頭に帯を立てるだけで、面は塗らない ――
+   面を塗ると、その上に載るgift名と場面の絵が読みにくくなる(確かめさせたい物である)。 */
+.result-table tbody tr.st-risk td:first-child {
+  box-shadow: inset 0.2rem 0 0 var(--warn);
+}
+/* 出力の束を開いた中の1件。未確認・要確認はここでも同じ印で出す。 */
+.st-subitem.st-risk { box-shadow: inset 0.2rem 0 0 var(--warn); }
+.st-subitem.st-unchecked:not(.st-risk) {
+  box-shadow: inset 0.2rem 0 0 color-mix(in srgb, var(--warn) 45%, transparent);
+  /* 字下げは全行そろえる(印は罫だけで出す)。 */
+}
+.st-sub-mark { font-size: 0.62rem; }
+
+/* **書き出す前の警告boxは置かない。** 表の上に常設の帯として在ったが、そこで読んでも
+   打つ手は変わらず(外すのは検証tabのNG)、表と操作の間に挟まった読み飛ばされる帯に
+   なっていた(利用者の指定で外した)。同じ数え(exportRisks)は書き出しの確認dialogが
+   出す —— 名乗りは**進む/やめるを選べる場所**にだけ置く。 */
+/* ===== 連投(combo) =====
+   **1行へ潰さない。** 同じ人が同じgiftを6回投げれば6件の別event(message_idが全部違う)で、
+   重複ではない —— 畳むと「6件で1,194🪙」が「199🪙」に見える。ただし6行が同じ姿で並ぶと
+   人は表のbugだと思うので、塊を左の罫でつなぎ、先頭に件数を添える。
+   罫は1本の縦線で、色は増やさない(--lineの濃さだけで塊を示す)。 */
+.result-table tbody tr.st-combo td:first-child,
+.st-subitem.st-combo { box-shadow: inset 0.12rem 0 0 var(--line); }
+/* 塊の頭と尻だけ罫を短くして、どこで始まりどこで終わるかを出す。 */
+.result-table tbody tr.st-combo-head td { border-top: 1px solid var(--line); }
+.result-table tbody tr.st-combo:not(.st-combo-tail) td { border-bottom: 0; }
+/* 罫だけで塊を示す。字下げを変えると、塊の中だけ行が左へ飛び出す。 */
+.st-combo-n {
+  margin-inline-start: 0.3rem;
+  color: var(--ink-strong); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* 束を開いた中の行では、印を**左の余白へ浮かせる**。列の1つとして入れると、印の付いた
+   行だけ番号が左へずれて、行の頭が揃わなくなる。 */
+.st-subitem .st-combo-n {
+  position: absolute; inset-inline-start: 0.45rem;
+  inset-block-start: 50%; transform: translateY(-50%);
+  margin-inline-start: 0; font-size: 0.62rem;
+}
+/* 束の持ち主と違うgifterのgift演出。**これが今回の事故そのもの**なので、行ごと名乗る。 */
+.st-subitem.st-foreign { box-shadow: inset 0.2rem 0 0 var(--warn); }
+.st-sub-who { min-inline-size: 0; max-inline-size: 14ch; }
+
+/* ===== ハイライトの投入(drag & drop) =====
+   受け皿はハイライト一覧tabだけ。dragの間だけ面を覆い、**どこへ入るのか**(配信者と
+   投入先のpath)を落とす前に読ませる —— 置き場は配信者folderの下なので、投入先を知らない
+   まま落とすと、別人の置き場に入ったハイライトが「照合で当たらないだけ」の形で静かに
+   増える。
+   覆いは pointer-events を持たない。dragの当たり判定を奪うと、覆いが出た瞬間に受け皿から
+   dragが離れたことになり、縁取りが点滅する。 */
+#view-list { position: relative; }
+.st-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--sand-bg-deep) 80%, transparent);
+}
+/* 固定幅は置かない。投入先のpathは配信者名ぶんだけ伸びるので、面の幅に追従させる。 */
+.st-drop-body {
+  max-inline-size: min(100%, 48rem);
+  padding: 0.9rem 1.4rem;
+  border: 2px dashed var(--accent-deep);
+  background: var(--sand-panel);
+  text-align: center;
+}
+.st-drop-title {
+  color: var(--ink-strong); font-weight: 600; letter-spacing: 0.06em;
+}
+.st-drop-where {
+  margin-block-start: 0.35rem;
+  font-size: 0.7rem; color: var(--ink-muted);
+  /* pathは折り返せる所を持たない1続きの文字列。溢れさせると面の外へ出る。 */
+  overflow-wrap: anywhere;
+}
+/* 受けられないとき(配信者が「全て」)。**押せる色では出さない** —— 落とせば入ると読める。 */
+.st-drop-blocked .st-drop-body { border-color: var(--warn); }
+.st-drop-blocked .st-drop-title,
+.st-drop-blocked .st-drop-where { color: var(--warn-ink); }
+/* 受け皿そのものの縁取り。覆いが半透明なので、面の輪郭が見えていないと
+   「画面全体が受ける」と読める。 */
+.vd-view.st-drop-on { outline: 2px solid var(--accent-deep); outline-offset: -2px; }
+/* folderの行を狙っている間は面を覆わない。**覆ったままでは狙う相手が隠れる** ――
+   どの週のfolderへ入れるのかは行を見て決めるものなので、地を外して行を見せ、名乗りは
+   面の頭へ寄せる(中央のままだと、名乗りの箱が狙っている行の上に重なる)。 */
+.st-drop.st-drop-row { background: none; align-items: flex-start; }
+/* 落とす先のfolderの行。地の色だけでは棚(.st-folder)の地と見分けが付かないので、
+   押せる色の枠で囲む。 */
+.result-table tbody tr.st-folder.st-folder-drop > td {
+  background: var(--sand-panel);
+  box-shadow: inset 0 0 0 1px var(--accent-deep);
+}
+
+/* ── 押下の演出 ────────────────────────────────────────────────────
+   色は1つも足さない。役は既にあるtokenのまま(押せる=--accent-deep / 危ない=--warn /
+   登録済み=--gold-ink)で、増やすのは動きだけにする。演出で新しい色を作ると、
+   その色が画面のどこかで別の意味と衝突する。 */
+
+/* ① 受付を即返す。枠が1回だけ外へ抜けて消える。地も文字も動かさないので、押した物の
+   見た目そのものは変わらない(押すたびに色が変わると、状態が変わったように読める)。 */
+.fx-ack { position: relative; }
+.fx-ack::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--accent-deep);
+  pointer-events: none;
+  animation: fx-ack 0.34s ease-out;
+}
+
+@keyframes fx-ack {
+  0% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.12); }
+}
+
+/* ② 押下点から着地点へ飛ぶ線。位置と長さはcommon.jsのflyToが打つ。 */
+.fx-fly {
+  position: fixed;
+  z-index: 90;
+  block-size: 0.14rem;
+  background: var(--accent-deep);
+  transform-origin: 0 50%;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+
+/* ③ 効かなかった事を返す。押した物そのものを揺らし、危ないの色(--warn)を一時的に借りて
+   「これは通っていない」を押下点で言う。 */
+.fx-deny,
+.fx-deny:hover:not(:disabled) {
+  animation: fx-deny 0.26s ease-in-out;
+  border-color: var(--warn);
+  color: var(--warn-ink);
+}
+
+@keyframes fx-deny {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-0.22rem); }
+  75% { transform: translateX(0.22rem); }
+}
+
+/* ── paneのdrag分割 ────────────────────────────────────────────────
+   掴む所は細いが、狙う所は上下いっぱいに取る。棒そのものを太くすると、隣のpaneの
+   使える幅がその分だけ常に削られる。 */
+.split-bar {
+  cursor: col-resize;
+  background: var(--line);
+  opacity: 0.45;
+  touch-action: none;
+  align-self: stretch;
+  min-inline-size: 0.3rem;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.split-bar:hover,
+.split-bar:focus-visible,
+.split-bar.is-drag {
+  opacity: 1;
+  background: var(--accent-deep);
+}
+
+/* ── Pod ───────────────────────────────────────────────────────────
+   job中だけ降りてくる。画面の隅に固定するが、常には居ない(is-inが付いている間だけ
+   降りている)。押せる物ではないので、pointerは全て素通しにする。 */
+.pod {
+  position: fixed;
+  /* 右下はtoastの居場所(.toast-layer)なので、Podは左下へ置く。同じ隅に重ねると、
+     失敗toastが出ている間はPodがその後ろに隠れて、報告が2つとも読めなくなる。
+     下端は画面下の帯(.a-footer)を避けた高さ。 */
+  inset-block-end: 2.2rem;
+  inset-inline-start: 1.2rem;
+  z-index: 70;
+  display: flex;
+  /* 中身は[台詞, 機体]の順に置いてあるので、左下では並びを反転して機体を外側にする。 */
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 0.5rem;
+  pointer-events: none;
+  transform: translateY(6rem);
+  opacity: 0;
+  transition: transform 0.5s cubic-bezier(0.2, 1.2, 0.4, 1), opacity 0.3s;
+}
+
+.pod.is-in {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.pod-say {
+  border: 1px solid var(--line);
+  background: var(--sand-panel);
+  color: var(--ink-strong);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.66rem;
+  max-inline-size: 20rem;
+}
+
+.pod.pod-warn .pod-say {
+  border-color: var(--warn);
+  color: var(--warn-ink);
+}
+
+.pod-body { display: block; animation: pod-bob 2.6s ease-in-out infinite; }
+
+/* 失敗を報告している間は目を危ないの色へ。台詞の枠色だけだと、視界の隅では気付けない。 */
+.pod.pod-warn .pod-eye { fill: var(--warn-bright); }
+
+@keyframes pod-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(0.22rem); }
+}
+
+/* ── 走査線 ────────────────────────────────────────────────────────
+   均一な砂の平面へ、端末の面の手触りを1層だけ足す。色は増やさず黒の極薄で、
+   どのtokenの上に載っても同じだけ暗くなるようにする。 */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(0deg,
+    rgba(0, 0, 0, 0.04) 0 1px, transparent 1px 3px);
+}
+
+body.no-scanlines::after { content: none; }
+
+/* ── 演出を減らす ──────────────────────────────────────────────────
+   動きを減らす設定では、演出はすべて「結果だけ」を残して止める。飛ぶ線はcommon.jsが
+   そもそも作らないので、ここには出て来ない。 */
+@media (prefers-reduced-motion: reduce) {
+  .fx-ack::after,
+  .fx-deny,
+  .job-chain li.s-current::before,
+  .pod-body { animation: none; }
+  .pod { transition: none; }
+}
+
+/* ── 録画folderの内訳: chip盤 ────────────────────────────────────────
+   1升=一定容量の盤。3つの情報を色・肌理・枠へ1つずつ載せる(capacity.jsの説明と対)。
+     色  : 容量の順位。--ramp-5〜1 の濃い順で、濃さがそのまま大きさの順になる。
+     肌理: 種別の区別。色と重ねて二重に言う(色の差だけに頼らない)。
+     枠  : 破線 = 作り直せる。 */
+.cap-board {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem 1.4rem;
+  margin-block: 0.6rem 0.9rem;
+}
+
+.cap-board-cells {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(1.6rem, 1fr));
+  gap: 0.16rem;
+  /* 升は正方形なので、伸ばし放題にすると横1列に近い帯になって面積が読めなくなる。
+     上限だけ置き、下限は置かない(狭い窓では列が減って縦に伸びる)。 */
+  flex: 1 1 22rem;
+  min-inline-size: 0;
+  max-inline-size: 36rem;
+  align-content: start;
+}
+
+.cap-board-legend {
+  flex: 1 1 16rem;
+  min-inline-size: 0;
+  align-self: start;
+}
+
+.cap-cell {
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  /* 段の色は変数で持つ。「消してよい」升は同じ色を薄めて塗るので、色そのものを
+     2箇所に書かず1本にしておく。 */
+  background-color: var(--cell-tone, var(--chart-surface));
+  background-repeat: repeat;
+  /* 肌理の線の色。濃い塗りの上では白、薄い塗りの上では黒 ―― 黒で通すと、上位の
+     濃い段では線が塗りに沈んで肌理そのものが消える(実際そうなっていた)。 */
+  --cell-line: rgba(255, 255, 255, 0.45);
+}
+
+/* 容量の順位。--ramp は「量の段」のtokenで、1色相の薄→濃に順序そのものが入っている。 */
+.cap-cell.bt-tone-5 { --cell-tone: var(--ramp-5); }
+.cap-cell.bt-tone-4 { --cell-tone: var(--ramp-4); }
+.cap-cell.bt-tone-3 { --cell-tone: var(--ramp-3); }
+.cap-cell.bt-tone-2 { --cell-tone: var(--ramp-2); }
+.cap-cell.bt-tone-1 { --cell-tone: var(--ramp-1); }
+/* 畳んだ残りは順位を持たないので、段の色を当てない。 */
+.cap-cell.bt-tone-rest {
+  --cell-tone: var(--sand-panel-muted);
+  --cell-line: rgba(0, 0, 0, 0.3);
+}
+
+/* 作り直せる = 消してよい。塗りを薄めて中を抜き、実線でも囲わない。「まだ実体として
+   数えなくてよい物」が盤の上でひとまとまりの淡い区画として見えるので、消せる分が
+   どれだけ在るかを、legendを引かずに面積で読める。 */
+.cap-cell.is-regen {
+  background-color: color-mix(in srgb, var(--cell-tone) 24%, var(--chart-surface));
+  border-style: dashed;
+  border-color: var(--ink-strong);
+  --cell-line: rgba(0, 0, 0, 0.32);
+}
+
+/* 肌理。種別の区別で、量ではない。線は細く間隔を空け、塗りの濃さを動かさない。 */
+.cap-cell.bt-1 { background-image: none; }
+.cap-cell.bt-2 {
+  background-image: repeating-linear-gradient(45deg,
+    var(--cell-line) 0 1px, transparent 1px 4px);
+}
+.cap-cell.bt-3 {
+  background-image: repeating-linear-gradient(-45deg,
+    var(--cell-line) 0 1px, transparent 1px 4px);
+}
+.cap-cell.bt-4 {
+  background-image: radial-gradient(var(--cell-line) 32%, transparent 34%);
+  background-size: 0.3rem 0.3rem;
+}
+.cap-cell.bt-5 {
+  background-image: repeating-linear-gradient(90deg,
+    var(--cell-line) 0 1px, transparent 1px 4px);
+}
+.cap-cell.bt-rest {
+  background-image: repeating-linear-gradient(0deg,
+    var(--cell-line) 0 1px, transparent 1px 4px);
+}
+
+.cap-leg {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+  padding-block: 0.18rem;
+}
+
+.cap-leg .cap-cell {
+  inline-size: 1.1rem;
+  block-size: 1.1rem;
+  flex: none;
+}
+
+.cap-leg .n { min-inline-size: 0; overflow-wrap: anywhere; }
+.cap-leg .g {
+  margin-inline-start: auto;
+  color: var(--ink-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cap-leg-note {
+  margin-block-start: 0.4rem;
+  font-size: 0.64rem;
+  color: var(--ink-muted);
+  line-height: 1.6;
+}
+
+/* ---- バックアップ(/backup) ----
+   状態は色・線・棒で出す。色の役は他画面と同じ —— 良い=--ok / 進行中=--accent /
+   危ない=--warn / 止まっている=--ink-muted。「遅延」と「失敗」は同じ危ない色で、両者は
+   線が切れているかどうかで分ける。 */
+
+.bk-alarm[hidden] { display: none; }
+
+.bk-alarm {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-block-end: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border: 2px solid var(--warn-ink);
+  border-radius: 0.2rem;
+  background: color-mix(in srgb, var(--warn) 14%, var(--sand-panel));
+  box-shadow: 0 0.2rem 0.6rem var(--shadow);
+  animation: bk-alarm-in 0.4s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+.bk-alarm[data-level="warn"] { background: color-mix(in srgb, var(--warn) 9%, var(--sand-panel)); }
+.bk-alarm[data-level="off"] {
+  border-color: var(--ink-muted);
+  background: var(--sand-panel-muted);
+}
+
+@keyframes bk-alarm-in {
+  from { opacity: 0; transform: translateY(-0.4rem); }
+  to { opacity: 1; transform: none; }
+}
+
+.bk-alarm-banner { display: flex; align-items: center; gap: 0.5rem; }
+
+.bk-alarm-ic {
+  inline-size: 1.1rem;
+  block-size: 1.1rem;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: var(--warn-ink);
+  stroke-width: 1.4;
+  animation: bk-blink 1.4s ease-in-out infinite;
+}
+
+.bk-alarm[data-level="off"] .bk-alarm-ic { stroke: var(--ink-muted); animation: none; }
+
+.bk-alarm-big {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--warn-ink);
+}
+
+.bk-alarm[data-level="off"] .bk-alarm-big { color: var(--ink-muted); }
+
+.bk-alarm-count {
+  margin-inline-start: auto;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+.bk-alarm-list { display: flex; flex-direction: column; gap: 0.25rem; }
+
+/* 1経路1行。中身は数値・path・serverのerror文だけで、chipにして横へ流す。 */
+.bk-alarm-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  padding: 0.25rem 0.4rem;
+  border-inline-start: 0.2rem solid var(--warn-ink);
+  background: color-mix(in srgb, var(--sand-panel) 70%, transparent);
+}
+
+.bk-alarm-item[data-level="warn"] { border-inline-start-color: var(--warn); }
+.bk-alarm-item[data-level="off"] { border-inline-start-color: var(--ink-muted); }
+
+.bk-alarm-lane { font-size: 0.72rem; color: var(--ink-strong); }
+
+.bk-alarm-word {
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.12rem;
+  background: var(--warn-ink);
+  color: var(--invert-fg);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.bk-alarm-item[data-level="warn"] .bk-alarm-word { background: var(--warn); }
+.bk-alarm-item[data-level="off"] .bk-alarm-word { background: var(--ink-muted); }
+
+/* ---- 盾と図 ---- */
+
+.bk-hero {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.bk-shield {
+  flex: 0 0 auto;
+  inline-size: clamp(5rem, 9vw, 7.5rem);
+  filter: drop-shadow(0 0.15rem 0.35rem var(--shadow));
+}
+
+.bk-shield-svg { inline-size: 100%; block-size: auto; }
+
+/* 帯は経路1本。上から図と同じ順に並ぶ。 */
+.bk-band {
+  fill: var(--ok);
+  transform-origin: 50% 50%;
+  animation: bk-band-in 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  animation-delay: calc(var(--i) * 60ms);
+}
+
+.bk-band[data-state="ok"] { fill: var(--ok); }
+.bk-band[data-state="working"] { fill: var(--accent); }
+.bk-band[data-state="late"],
+.bk-band[data-state="degraded"] { fill: var(--warn); }
+.bk-band[data-state="failing"],
+.bk-band[data-state="unreachable"] {
+  fill: var(--warn-ink);
+  animation: bk-band-in 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) both,
+             bk-blink 1.8s ease-in-out infinite;
+}
+.bk-band[data-state="off"] { fill: var(--ink-muted); }
+
+@keyframes bk-band-in {
+  from { opacity: 0; transform: scaleX(0.2); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes bk-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.bk-seam { stroke: var(--sand-panel); stroke-width: 1.4; fill: none; }
+.bk-shield-edge { fill: none; stroke: var(--ink-strong); stroke-width: 2.6; }
+
+.bk-shield-num {
+  text-anchor: middle;
+  dominant-baseline: middle;
+  font-size: 30px;
+  font-weight: 700;
+  fill: var(--invert-fg);
+  stroke: var(--ink-strong);
+  stroke-width: 5;
+  paint-order: stroke;
+}
+
+/* 3列の木。列は 元 / 経路 / 保存先 で固定、行は保存先の数だけ取る(JSがgrid-rowを振る)。
+   列の間隔がそのまま線の曲がる余地なので、節の幅より優先して確保する。 */
+.bk-flow {
+  --bk-grid: minmax(6.5rem, 0.8fr) minmax(8.5rem, 1fr) minmax(10rem, 1.3fr);
+  --bk-colgap: 3.4rem;
+  flex: 1 1 24rem;
+  min-inline-size: 0;
+  max-inline-size: 76rem;
+}
+
+.bk-heads {
+  display: grid;
+  grid-template-columns: var(--bk-grid);
+  column-gap: var(--bk-colgap);
+  padding-inline-end: 1.2rem;
+  margin-block-end: 0.25rem;
+  font-size: 0.56rem;
+  letter-spacing: 0.14em;
+  color: var(--ink-muted);
+}
+
+.bk-heads span:last-child { text-align: start; }
+
+.bk-tree {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--bk-grid);
+  grid-auto-rows: minmax(2.2rem, auto);
+  gap: 0.35rem var(--bk-colgap);
+  align-items: center;
+  padding-inline-end: 1.2rem;
+}
+
+/* 線の層。節より下に敷く。 */
+.bk-wires {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.bk-wire-line {
+  fill: none;
+  stroke: color-mix(in srgb, var(--bk-c) 45%, transparent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.bk-wire-spark {
+  fill: none;
+  stroke: var(--bk-c);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-dasharray: 5 36;
+  animation: bk-spark var(--bk-flow-ms) linear infinite;
+}
+
+@keyframes bk-spark { to { stroke-dashoffset: -41; } }
+
+.bk-wire-break {
+  stroke: var(--warn-ink);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  animation: bk-blink 1.6s ease-in-out infinite;
+}
+
+.bk-wire { --bk-c: var(--ok-ink); --bk-flow-ms: 2.6s; }
+.bk-wire[data-state="working"] { --bk-c: var(--accent-deep); --bk-flow-ms: 1.1s; }
+.bk-wire[data-state="late"],
+.bk-wire[data-state="degraded"] { --bk-c: var(--warn); }
+.bk-wire[data-state="failing"],
+.bk-wire[data-state="unreachable"] { --bk-c: var(--warn-ink); }
+.bk-wire[data-state="off"] { --bk-c: var(--ink-muted); }
+.bk-wire[data-state="off"] .bk-wire-line { stroke-dasharray: 3 5; }
+
+.bk-wire-mirror .bk-wire-line { stroke-width: 1.6; stroke-dasharray: 5 4; }
+
+/* ---- 節 ---- */
+
+.bk-node {
+  --bk-c: var(--ok-ink);
+  --bk-notch: 0.45rem;
+  position: relative;
+  z-index: 1;
+  min-inline-size: 0;
+  padding: 1.5px;
+  background: color-mix(in srgb, var(--bk-c) 55%, var(--line));
+  clip-path: polygon(
+    var(--bk-notch) 0, 100% 0, 100% calc(100% - var(--bk-notch)),
+    calc(100% - var(--bk-notch)) 100%, 0 100%, 0 var(--bk-notch));
+  animation: bk-node-in 0.32s ease-out both;
+}
+
+@keyframes bk-node-in {
+  from { opacity: 0; transform: translateX(-0.3rem); }
+  to { opacity: 1; transform: none; }
+}
+
+.bk-node-in {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.3rem 0.45rem;
+  background: var(--sand-panel);
+  clip-path: polygon(
+    var(--bk-notch) 0, 100% 0, 100% calc(100% - var(--bk-notch)),
+    calc(100% - var(--bk-notch)) 100%, 0 100%, 0 var(--bk-notch));
+}
+
+.bk-node-head { display: flex; align-items: center; gap: 0.35rem; min-inline-size: 0; }
+
+.bk-src { --bk-c: var(--ink-muted); }
+.bk-src .bk-node-in { background: var(--sand-panel-muted); }
+
+.bk-node-body { display: flex; flex-direction: column; min-inline-size: 0; flex: 1 1 auto; }
+
+.bk-node-name {
+  font-size: 0.68rem;
+  color: var(--ink-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bk-node-meta {
+  font-size: 0.58rem;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bk-ic {
+  inline-size: 0.85rem;
+  block-size: 0.85rem;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: var(--bk-c);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.bk-dst-gone .bk-node-in { background: var(--sand-panel-muted); }
+.bk-dst-gone .bk-node-name { text-decoration: line-through; }
+.bk-dst-none { opacity: 0.6; }
+
+.bk-vol {
+  flex: 0 0 auto;
+  padding: 0 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: 0.1rem;
+  font-size: 0.54rem;
+  color: var(--ink-muted);
+}
+
+.bk-vol-same { color: var(--warn-ink); border-color: var(--warn-ink); font-weight: 700; }
+
+/* ---- 経路の節 ---- */
+
+.bk-lane {
+  --bk-c: var(--ok-ink);
+  --bk-notch: 0.6rem;
+  position: relative;
+  z-index: 1;
+  min-inline-size: 0;
+  padding: 2px;
+  background: var(--bk-c);
+  clip-path: polygon(
+    var(--bk-notch) 0, calc(100% - var(--bk-notch)) 0, 100% var(--bk-notch),
+    100% calc(100% - var(--bk-notch)), calc(100% - var(--bk-notch)) 100%,
+    var(--bk-notch) 100%, 0 calc(100% - var(--bk-notch)), 0 var(--bk-notch));
+  animation: bk-node-in 0.32s ease-out both;
+}
+
+.bk-lane > .bk-node-in {
+  gap: 0.25rem;
+  padding: 0.35rem 0.55rem;
+  background: var(--sand-panel);
+  clip-path: polygon(
+    var(--bk-notch) 0, calc(100% - var(--bk-notch)) 0, 100% var(--bk-notch),
+    100% calc(100% - var(--bk-notch)), calc(100% - var(--bk-notch)) 100%,
+    var(--bk-notch) 100%, 0 calc(100% - var(--bk-notch)), 0 var(--bk-notch));
+}
+
+.bk-lane[data-state="working"] { --bk-c: var(--accent-deep); }
+.bk-lane[data-state="late"],
+.bk-lane[data-state="degraded"] { --bk-c: var(--warn); }
+.bk-lane[data-state="failing"],
+.bk-lane[data-state="unreachable"] { --bk-c: var(--warn-ink); }
+.bk-lane[data-state="off"] { --bk-c: var(--ink-muted); }
+.bk-lane[data-state="off"] > .bk-node-in { background: var(--sand-panel-muted); }
+
+.bk-lane-head { display: flex; align-items: center; gap: 0.3rem; min-inline-size: 0; }
+
+.bk-lane-label {
+  font-size: 0.72rem;
+  color: var(--ink-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bk-lane-word {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  padding: 0.02rem 0.26rem;
+  border-radius: 0.12rem;
+  background: var(--bk-c);
+  color: var(--invert-fg);
+  font-size: 0.55rem;
+  font-weight: 700;
+}
+
+.bk-lane-foot { display: flex; align-items: center; gap: 0.22rem; flex-wrap: wrap; }
+
+/* ---- chip ---- */
+
+.bk-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.02rem 0.28rem;
+  border: 1px solid var(--line);
+  border-radius: 0.12rem;
+  font-size: 0.56rem;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  max-inline-size: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bk-tag .bk-ic { inline-size: 0.7rem; block-size: 0.7rem; stroke: currentColor; }
+.bk-tag-run { color: var(--accent-ink); border-color: var(--accent-deep); }
+.bk-tag-new { color: var(--accent-ink); border-color: var(--accent-deep); }
+.bk-tag-warn { color: var(--warn-ink); border-color: var(--warn-ink); font-weight: 700; }
+.bk-tag-path { color: var(--ink-muted); border-style: dashed; }
+
+.bk-lane[data-state="failing"] .bk-tag-warn,
+.bk-lane[data-state="unreachable"] .bk-tag-warn {
+  animation: bk-blink 1.6s ease-in-out infinite;
+}
+
+/* ---- 棒 ----
+   数を読ませずに大小だけを渡す。track(地)と fill(量)の2層で、色が量の役だけを持つ。 */
+
+.bk-meter {
+  display: block;
+  inline-size: 100%;
+  block-size: 0.25rem;
+  border-radius: 0.12rem;
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+  overflow: hidden;
+}
+
+.bk-meter-fill {
+  display: block;
+  block-size: 100%;
+  background: var(--ramp-2);
+}
+
+.bk-meter-gap .bk-meter-fill { background: var(--warn); }
+
+/* 保存先の空き。棒(使用量)と数字(空き)を1行に並べる。 */
+.bk-free { display: flex; align-items: center; gap: 0.3rem; }
+.bk-free .bk-meter { flex: 1 1 auto; }
+.bk-free-val {
+  flex: 0 0 auto;
+  font-size: 0.54rem;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 内訳の帯。区画の色は「既存/新しく写した/失敗/未処理」で1色ずつ。 */
+.bk-stack {
+  display: flex;
+  inline-size: 100%;
+  block-size: 0.32rem;
+  border-radius: 0.12rem;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+.bk-seg { display: block; block-size: 100%; min-inline-size: 2px; }
+.bk-seg-keep { background: var(--ok); }
+.bk-seg-new { background: var(--accent); }
+.bk-seg-fail { background: var(--warn-ink); }
+.bk-seg-todo {
+  background-image: repeating-linear-gradient(-45deg,
+    var(--warn) 0 2px, transparent 2px 5px);
+}
+
+/* ---- 下段の3枚 ---- */
+
+.bk-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  gap: 0.6rem;
+  align-items: start;
+}
+
+.bk-note { font-size: 0.6rem; color: var(--ink-muted); }
+
+/* ---- DB世代 ---- */
+
+.bk-gen { display: flex; flex-direction: column; gap: 0.45rem; }
+
+.bk-gen-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+.bk-gen-cap {
+  flex: 0 0 auto;
+  inline-size: 2.4rem;
+  font-size: 0.62rem;
+  color: var(--ink-muted);
+}
+
+.bk-gen-cells {
+  display: flex;
+  gap: 0.15rem;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}
+
+.bk-gen-cell {
+  inline-size: 0.85rem;
+  block-size: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 0.1rem;
+  background: var(--sand-panel-muted);
+  animation: bk-cell-in 0.34s ease-out both;
+  animation-delay: calc(var(--i) * 18ms);
+}
+
+.bk-gen-cell.is-on { background: var(--ramp-3); border-color: var(--ramp-5); }
+.bk-gen-cell.is-now { box-shadow: inset 0 0 0 0.12rem var(--ink-strong); }
+
+@keyframes bk-cell-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: none; }
+}
+
+.bk-gen-tot { flex: 0 0 auto; font-size: 0.62rem; color: var(--ink-muted); }
+.bk-gen-foot { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+
+.bk-genlist {
+  margin-block-start: 0.5rem;
+  max-block-size: 13rem;
+  overflow-y: auto;
+  border-block-start: 1px solid var(--line);
+}
+
+.bk-genitem {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.2rem 0.35rem;
+  border-block-end: 1px solid var(--line);
+  font-size: 0.62rem;
+}
+
+.bk-genitem-at { color: var(--ink-strong); }
+
+.bk-genitem-size {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.bk-genitem-layer {
+  padding: 0 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 0.1rem;
+  font-size: 0.54rem;
+  color: var(--ink-muted);
+}
+
+.bk-genitem[data-layer="expiring"] .bk-genitem-layer {
+  color: var(--warn-ink);
+  border-color: var(--warn-ink);
+}
+
+/* ---- ミラー ---- */
+
+.bk-mirror { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.bk-mirror-head {
+  padding: 0.3rem 0.5rem;
+  border-inline-start: 0.2rem solid var(--ok);
+  background: var(--sand-panel-muted);
+}
+
+.bk-mirror-head[data-level="warn"] {
+  border-inline-start-color: var(--warn-ink);
+  background: color-mix(in srgb, var(--warn) 9%, var(--sand-panel));
+}
+
+.bk-mirror-head[data-level="off"] { border-inline-start-color: var(--ink-muted); }
+.bk-mirror-word { font-size: 0.78rem; color: var(--ink-strong); }
+
+.bk-sides { display: flex; flex-direction: column; gap: 0.3rem; }
+
+.bk-side {
+  --bk-c: var(--ok);
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.62rem;
+}
+
+.bk-side[data-level="warn"] { --bk-c: var(--warn); }
+.bk-side[data-level="unknown"] { --bk-c: var(--ink-muted); }
+
+.bk-side-dot {
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  border-radius: 50%;
+  background: var(--bk-c);
+}
+
+.bk-side-name {
+  color: var(--ink-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-inline-size: 9rem;
+}
+
+.bk-side-val {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bk-side[data-level="warn"] .bk-side-val { color: var(--warn-ink); font-weight: 700; }
+
+.bk-mirror-foot { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+
+/* ---- DB保護 ---- */
+
+.bk-guards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.35rem;
+}
+
+.bk-guard {
+  --bk-c: var(--ok-ink);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.15rem;
+  background: var(--sand-panel);
+}
+
+.bk-guard[data-state="failing"] { --bk-c: var(--warn-ink); border-color: var(--warn-ink); }
+.bk-guard[data-state="off"] { --bk-c: var(--ink-muted); border-style: dashed; }
+
+.bk-guard-body { flex: 1 1 auto; display: flex; flex-direction: column; min-inline-size: 0; }
+.bk-guard-name { font-size: 0.66rem; font-weight: 500; }
+.bk-guard-val { font-size: 0.58rem; color: var(--ink-muted); }
+
+.bk-guard-dot {
+  flex: 0 0 auto;
+  inline-size: 0.45rem;
+  block-size: 0.45rem;
+  border-radius: 50%;
+  background: var(--bk-c);
+}
+
+.bk-guard[data-state="failing"] .bk-guard-dot { animation: bk-blink 1.6s ease-in-out infinite; }
+
+/* 動きは意味を運ぶが、意味は色と形にも二重に載せてある。減らして構わない。 */
+@media (prefers-reduced-motion: reduce) {
+  .bk-wire-spark, .bk-wire-break, .bk-band, .bk-gen-cell, .bk-tag-warn,
+  .bk-guard-dot, .bk-alarm, .bk-alarm-ic, .bk-node, .bk-lane { animation: none; }
+}

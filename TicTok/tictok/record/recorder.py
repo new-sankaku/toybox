@@ -1192,6 +1192,11 @@ class Recorder:
     # 再生playlistの描き直し)はその行からRecorderを組むので、intに狭めると実態と食い違う。
     # なおNoneのままfile名を作ることはできない(session_prefixがintを要求する)。それらの
     # 経路はbaseを自分で入れ直すので通らない — 通ってしまったら落ちるのが正しい。
+    # 確定中だけ持つ採用segmentの写し(_playlist_segments参照)。classの既定をNoneにして
+    # あるのは、試験が ``__new__`` で組む最小のRecorder(hls_dirとplaylistだけを持つ)からも
+    # _playlist_segments を呼べるようにするため。
+    _finalize_kept: Optional[list] = None
+
     def __init__(self, unique_id: str, record_dir: str, session_id: Optional[int],
                  final_dir: Optional[str] = None, storage=None,
                  normalize_audio: Optional[dict] = None) -> None:
@@ -1237,6 +1242,8 @@ class Recorder:
         # Free space per volume as measured at launch, carried so a later failure can
         # be compared against the state before any cleanup ran.
         self._disk_report: dict = {}
+        # 確定中だけ持つ採用segmentの写し(_playlist_segments参照)。確定の外ではNone。
+        self._finalize_kept: Optional[list] = None
         self._launch_attempts = 0
         self._capture_args: list = []
         # concatと並行して走らせたkeyframe走査の結果(set|None)。Noneは「取れなかった」。
@@ -1381,7 +1388,8 @@ class Recorder:
         # Preflight the disk before anything is written. Measuring only after a failure
         # is useless here: the failure paths remove the HLS tree or a partial encode and
         # free the very space whose exhaustion caused the failure.
-        self._disk_report = log_disk_preflight(
+        self._disk_report = await asyncio.to_thread(
+            log_disk_preflight,
             "recording.disk_checked", self._volume_paths(), stage="launch",
         )
         url, quality = extract_stream_url(room_info)
@@ -1614,13 +1622,15 @@ class Recorder:
                 "probe_stderr_tail": tail}
 
     async def _await_healthy(self, proc: asyncio.subprocess.Process) -> bool:
+        # segment数の確認はdirのglob。1秒ごとにloop上で行うと、diskが応答しない間は
+        # loopごと止まる(確定側と同じ理由でthreadへ)。
         for _ in range(HEALTHY_WAIT_SECONDS):
             await asyncio.sleep(1)
             if proc.returncode is not None:
-                return self._has_segments()
-            if self._has_segments():
+                return await asyncio.to_thread(self._has_segments)
+            if await asyncio.to_thread(self._has_segments):
                 return True
-        return self._has_segments()
+        return await asyncio.to_thread(self._has_segments)
 
     def _has_segments(self) -> bool:
         return self._segment_count() >= MIN_SEGMENTS
@@ -1745,8 +1755,12 @@ class Recorder:
         # Sample free space now, while every artifact of this recording is still on
         # disk. The failure branches below remove the HLS tree, so a sample taken from
         # an except block would show a volume that the cleanup has just freed.
-        self._disk_report = disk_free_by_volume(self._volume_paths())
-        segments = self._segment_count()
+        # diskを触る下ごしらえ(空き容量・segment数・採用segmentの走査)は全部threadで済ませ、
+        # 以降の確定はその写しを使う。loop上で行うと、diskが応答しない間(Windows Updateの
+        # 復元ポイント作成で実測17〜19秒)loopごと止まってlive接続が切れ、再接続 -> 別fileで
+        # 録画再開 -> その確定でまた止まる、という連鎖になっていた(2026-09-03の監査)。
+        self._disk_report = await asyncio.to_thread(disk_free_by_volume, self._volume_paths())
+        segments = await asyncio.to_thread(self._segment_count)
         duration_seconds = (
             round(self.ended_at - self.started_at, 3) if self.started_at else None
         )
@@ -1755,33 +1769,37 @@ class Recorder:
         if self.state != STATE_FAILED:
             self.state = STATE_FINALIZING
         await self._notify()
-        if self._has_segments():
-            # 録画の実体は .ts である。以前はここでmp4へ結合していたが、それを要求して
-            # いたのは焼き込みだけで、その焼き込みが .ts を直接読むようになった(再生は
-            # HLS、文字起こし・切抜き・thumbnail・波形・Up出力はhls_source経由)。結合
-            # passは配信全長を1本書き直す最も重いI/Oで、誰も読まないfileのために毎回
-            # 払っていた。mp4が要る場合は「mp4化」operationで作る。
-            #
-            # ``_mp4_path`` はfileではなく**録画の身元**として残す。sidecar(timing map・
-            # 焼き込み出力・thumbnail)の在処も、hls_sourceが .ts を引く鍵も、この名前から
-            # 決まる。実在しないpathを指すのは意図的である。
-            mp4_path = self._mp4_path
-            self.output_path = mp4_path
-            # 「mp4化」operationからだけ結合を走らせる。ここで作ったmp4は、以降この録画の
-            # 入力ではなく**書き出し**として扱われる(焼き込みも下流も原本の .ts を読む)。
-            if build_mp4 and not await self._concat_to_mp4(mp4_path, progress=progress):
-                if self.state != STATE_FAILED:
-                    self.state = STATE_FAILED
-                    self.error = self.error or "mp4への変換に失敗しました（素材は残っています）。"
-                self._ops(
-                    "recording.concat_failed",
-                    f"mp4を組み立てられませんでした（@{self.unique_id}）。segmentは残します",
-                    severity="error",
-                    detail={"stem": self.base, "segments": segments,
-                            "path": str(self.hls_dir), "volumes": self._disk_report},
-                )
-            else:
-                await self._finalize_from_segments(mp4_path, segments, build_mp4, progress)
+        if segments >= MIN_SEGMENTS:
+            self._finalize_kept = await asyncio.to_thread(self._playlist_segments)
+            try:
+                # 録画の実体は .ts である。以前はここでmp4へ結合していたが、それを要求して
+                # いたのは焼き込みだけで、その焼き込みが .ts を直接読むようになった(再生は
+                # HLS、文字起こし・切抜き・thumbnail・波形・Up出力はhls_source経由)。結合
+                # passは配信全長を1本書き直す最も重いI/Oで、誰も読まないfileのために毎回
+                # 払っていた。mp4が要る場合は「mp4化」operationで作る。
+                #
+                # ``_mp4_path`` はfileではなく**録画の身元**として残す。sidecar(timing map・
+                # 焼き込み出力・thumbnail)の在処も、hls_sourceが .ts を引く鍵も、この名前から
+                # 決まる。実在しないpathを指すのは意図的である。
+                mp4_path = self._mp4_path
+                self.output_path = mp4_path
+                # 「mp4化」operationからだけ結合を走らせる。ここで作ったmp4は、以降この録画の
+                # 入力ではなく**書き出し**として扱われる(焼き込みも下流も原本の .ts を読む)。
+                if build_mp4 and not await self._concat_to_mp4(mp4_path, progress=progress):
+                    if self.state != STATE_FAILED:
+                        self.state = STATE_FAILED
+                        self.error = self.error or "mp4への変換に失敗しました（素材は残っています）。"
+                    self._ops(
+                        "recording.concat_failed",
+                        f"mp4を組み立てられませんでした（@{self.unique_id}）。segmentは残します",
+                        severity="error",
+                        detail={"stem": self.base, "segments": segments,
+                                "path": str(self.hls_dir), "volumes": self._disk_report},
+                    )
+                else:
+                    await self._finalize_from_segments(mp4_path, segments, build_mp4, progress)
+            finally:
+                self._finalize_kept = None
         else:
             if self.state != STATE_FAILED:
                 self.state = STATE_FAILED
@@ -1801,7 +1819,7 @@ class Recorder:
                         "path": str(self.hls_dir), "volumes": self._disk_report,
                         **ffmpeg_ctx(self._capture_args, stderr_log=self._hls_log_path())},
             )
-            shutil.rmtree(self.hls_dir, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, self.hls_dir, ignore_errors=True)
         if self._on_finalize is not None:
             try:
                 await self._on_finalize(self)
@@ -1811,10 +1829,7 @@ class Recorder:
                     extra={"event": "recording.finalize_callback_failed",
                            "ctx": {"state": self.state, "stem": self.base}},
                 )
-        size_bytes = (
-            self.output_path.stat().st_size
-            if self.output_path is not None and self.output_path.is_file() else 0
-        )
+        size_bytes = await asyncio.to_thread(self._output_size_bytes)
         self._ops(
             "recording.finalized",
             f"@{self.unique_id} の録画を確定しました（状態 {self.state}）",
@@ -1828,6 +1843,16 @@ class Recorder:
                     "capture_seconds": duration_seconds,
                     "media_seconds": self.duration_seconds, "error": self.error},
         )
+
+    def _output_size_bytes(self) -> int:
+        if self.output_path is None or not self.output_path.is_file():
+            return 0
+        return self.output_path.stat().st_size
+
+    @staticmethod
+    def _write_sidecar_text(out: Path, text: str) -> None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
 
     @staticmethod
     def _move_session_dir(src: Path, dst: Path) -> int:
@@ -2164,7 +2189,14 @@ class Recorder:
         jump instead of muxing the jump as elapsed time.
 
         The concat and the timing map both build on this, so the two cannot disagree
-        about which segments the finalized mp4 contains."""
+        about which segments the finalized mp4 contains.
+
+        確定の間は ``_finalize_body`` がthreadで1度だけ走査した結果(``_finalize_kept``)を
+        返す。timing map・尺・検証・結合の4箇所がそれぞれ呼ぶが、ffmpegは既に終わっていて
+        segmentは増えないので答えは同じであり、segmentごとのstat(未packで最大2,800本)を
+        loop上で4回繰り返す理由が無い(2026-09-03の監査でstall stack 26件中5件がここ)。"""
+        if self._finalize_kept is not None:
+            return self._finalize_kept
         if self.hls_dir is None:
             return []
         facts = self._segment_facts()
@@ -2550,8 +2582,7 @@ class Recorder:
             return
         serialized = json.dumps(payload)
         try:
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(serialized, encoding="utf-8")
+            await asyncio.to_thread(self._write_sidecar_text, out, serialized)
         except OSError as exc:
             # A distinct failure point from the build above: this is a disk write, and
             # its usual cause is a full volume. Sharing one warning with the probe path
@@ -2709,11 +2740,15 @@ class Recorder:
             return False
         probe = session / (".validate-" + uuid.uuid4().hex[:8] + ".m3u8")
         try:
-            if write_curated_playlist(session, probe, self.unique_id) is None:
+            # write_curated_playlistは別のRecorderを組んで採用集合を走査し直す(確定中の写し
+            # _finalize_keptは見ない)ので、そのstatと書き込みはthreadで行う。
+            written = await asyncio.to_thread(
+                write_curated_playlist, session, probe, self.unique_id)
+            if written is None:
                 return False
             return await self._validate_mp4(probe, tuple(HLS_INPUT_ARGS))
         finally:
-            probe.unlink(missing_ok=True)
+            await asyncio.to_thread(probe.unlink, missing_ok=True)
 
     async def _validate_mp4(self, path: Path, input_args: tuple = ()) -> bool:
         """Confirm the input has a decodable video stream before treating it as complete."""

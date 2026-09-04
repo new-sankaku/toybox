@@ -88,16 +88,13 @@ class _FakeProc:
         return self._stdout, b""
 
 
-def _patch_async_exec(monkeypatch, proc):
-    async def fake_exec(*args, **kwargs):
-        return proc
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-
-
 def _patch_popen(monkeypatch, proc):
     proc.communicate = proc.communicate_sync
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: proc)
+
+
+# async版 ``run`` は ``run_sync`` をthreadで走らせるだけなので、差し替える先は同じPopen。
+_patch_async_exec = _patch_popen
 
 
 async def test_a_cancel_reaches_a_probe_that_is_already_running(monkeypatch):
@@ -138,11 +135,11 @@ async def test_a_finished_probe_is_no_longer_a_cancel_target(monkeypatch):
 async def test_a_probe_does_not_start_after_the_cancel_fired(monkeypatch):
     launched = []
 
-    async def fake_exec(*args, **kwargs):
+    def fake_popen(*args, **kwargs):
         launched.append(args)
         return _FakeProc()
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     token = cancel.CancelToken("job-1")
     token.cancel()
 

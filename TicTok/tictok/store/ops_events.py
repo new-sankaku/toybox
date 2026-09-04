@@ -304,6 +304,36 @@ class OpsEventsMixin:
             ).fetchall()
         return [{"kind": row["kind"], "count": row["n"]} for row in rows]
 
+    def latest_ops_events_by_kind(self, kinds) -> dict:
+        """kindごとの最新1件(``{kind: 行}``)。記録の無いkindはkeyごと落とす。
+
+        「この種類の最後の1件はいつ・成功だったか」だけを何種類も知りたい側(backupの状況)の
+        ためのquery。kindごとに一覧を引くとrequestが種類の数だけ増え、しかも各回が上限件数
+        まで行を運ぶ —— 使うのは各1行なのに。順位は ``ts`` ではなく ``id`` で決める:
+        同じ秒に成功と失敗が並んだとき、``ts`` では最後に書かれた方を選べない。"""
+        names = sorted({str(kind) for kind in kinds if kind})
+        if not names:
+            return {}
+        holes = ",".join("?" * len(names))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT o.kind AS kind, o.ts AS ts, o.severity AS severity,"
+                " o.message AS message, o.detail AS detail, o.duration_ms AS duration_ms"
+                " FROM ops_events o JOIN ("
+                f"SELECT kind, MAX(id) AS id FROM ops_events WHERE kind IN ({holes})"
+                " GROUP BY kind) newest ON newest.id = o.id",
+                tuple(names),
+            ).fetchall()
+        latest = {}
+        for row in rows:
+            item = dict(row)
+            try:
+                item["detail"] = json.loads(item.get("detail") or "{}")
+            except ValueError:
+                item["detail"] = {"unparsed": item.get("detail")}
+            latest[item["kind"]] = item
+        return latest
+
     def ops_event_unique_ids(self, *, since: Optional[float] = None) -> list:
         """記録に出てくる配信者の一覧(件数付き)。配信者filterの候補に使う。
 

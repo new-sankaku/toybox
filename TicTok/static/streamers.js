@@ -80,7 +80,6 @@ function renderList() {
       + `<span class="l">ライバー/コイン</span>`
       + `<span class="v">${fmtPercent(s.liver_gifter_share)}</span>`
       + `<span class="l">ライバー/人数</span>`;
-    meta.title = liverTitle(s);
     item.appendChild(meta);
     item.addEventListener("click", () => selectStreamer(s.unique_id));
     list.appendChild(item);
@@ -116,6 +115,10 @@ async function selectStreamer(uid, light = false) {
   }
   if (selectedUid !== uid) return;
   renderProfile(profile);
+  // 週のメンションはliveの更新でも引き直す。収集中の配信ではその週の顔ぶれが増えるので、
+  // 止めると「今の週」と名乗ったまま古い一覧を貼ることになる(Battle窓の解決を含まない
+  // ぶん軽い ― 実測 0.14s / rankingの0.41s)。
+  loadMentions(uid);
   if (!light) {
     resetAiReview();
     loadCohort(uid);
@@ -157,8 +160,7 @@ function renderAiMeta(payload) {
     meta.textContent = "";
     return;
   }
-  meta.textContent = `分析日時: ${fmtDateTime(payload.computed_at)}`
-    + ` / model: ${payload.model || "-"} / prompt版: ${payload.prompt_version}`;
+  meta.textContent = `${fmtDateTime(payload.computed_at)} / ${payload.model || "-"} / v${payload.prompt_version}`;
 }
 
 function resetAiReview() {
@@ -213,7 +215,7 @@ async function runAiReview(refresh) {
   const status = document.getElementById("sm-ai-status");
   btn.disabled = true;
   rerun.disabled = true;
-  status.textContent = "ローカルAIで講評を生成しています（modelにより数十秒かかることがあります）…";
+  status.textContent = "生成中…";
   try {
     const payload = await apiSend(
       "POST",
@@ -222,9 +224,7 @@ async function runAiReview(refresh) {
     if (selectedUid !== uid) return;
     renderAiReview(payload.review || {});
     renderAiMeta(payload);
-    status.textContent = payload.cached
-      ? "前回と同じ集約data・同じmodelのため、保存済みの講評を表示しました。"
-      : "";
+    status.textContent = payload.cached ? "保存済み" : "";
     btn.classList.add("hidden");
     rerun.classList.remove("hidden");
   } catch (err) {
@@ -339,7 +339,6 @@ function cohortReturned(d) {
 
 function renderCohort(data) {
   const days = data.days || [];
-  document.getElementById("sm-cohort-empty").classList.toggle("hidden", days.length > 0);
   document.getElementById("sm-cohort-note").textContent = days.length ? `${days.length}日` : "";
   cohortChart.update(days);
 }
@@ -380,9 +379,7 @@ async function openVideo(recordingId, offset, label, recovering = false) {
   const message = document.getElementById("sm-video-message");
   document.getElementById("sm-video-title").textContent = label;
   if (!recovering) playbackGate.reset();
-  message.textContent = recovering
-    ? "素材の置き場所が変わりました。再生listを取り直しています…"
-    : "";
+  message.textContent = "";
   playingRecordingId = recordingId;
   detachHls();
   box.classList.remove("hidden");
@@ -523,15 +520,15 @@ const TREND_MA_WINDOW = 5;
 // そのまま当てると長期線が1点も引けないためである。
 const TREND_UNITS = {
   session: {
-    days: 180, rollup: "", maWindow: TREND_MA_WINDOW, maText: `${TREND_MA_WINDOW}配信`, partial: "",
+    days: 180, maWindow: TREND_MA_WINDOW, partial: "",
     coinUnit: "日", coinMa: [7, 14, 25], coinMaText: "日",
   },
   week: {
-    days: 365, rollup: "を週合計", maWindow: 4, maText: "4週", partial: "右端の週は集計途中",
+    days: 365, maWindow: 4, partial: "右端の週は集計途中",
     coinUnit: "週", coinMa: [4, 8, 13], coinMaText: "週",
   },
   month: {
-    days: 0, rollup: "を月合計", maWindow: 3, maText: "3か月", partial: "右端の月は集計途中",
+    days: 0, maWindow: 3, partial: "右端の月は集計途中",
     coinUnit: "月", coinMa: [3, 6, 12], coinMaText: "か月",
   },
 };
@@ -574,14 +571,10 @@ function renderTrend(sessions, viewerLevel, daily) {
   // 宝箱窓を除いた同接は、宝箱の収集が始まった日より前へは引けない。どこから引けるのかを
   // 名乗らないと、線の途切れが「その頃は宝箱を落としていなかった」と読める。
   const since = viewerLevel && viewerLevel.envelope_since;
-  const envelope = since
-    ? `・宝箱窓を除く線は${fmtDate(since)}以降（それ以前は宝箱の記録が無い）`
-    : "・宝箱の記録がまだ無いため、宝箱窓を除く線は出ません";
+  const envelope = since ? `・宝箱窓は${fmtDate(since)}〜` : "";
   document.getElementById("sm-trend-note").textContent = rows.length
-    ? `${scope}・${rows.length}配信（${fmtDate(rows[0].started_at)}〜）${u.rollup}`
-      + `・コインは${u.coinUnit}ごと（移動平均 ${u.coinMa.join("/")}${u.coinMaText}）`
-      + `・点線=直近${u.maText}の移動平均${partial}${envelope}`
-    : `${scope}・配信なし`;
+    ? `${scope}・${rows.length}配信（${fmtDate(rows[0].started_at)}〜）${partial}${envelope}`
+    : `${scope}・0配信`;
   trendChart.update(rows, {
     unit,
     movingAvgWindow: u.maWindow,
@@ -660,11 +653,8 @@ function renderHeatmap() {
 function renderHeatmapLegend(metric, max) {
   const legend = document.getElementById("sm-hm-legend");
   const m = HM_METRICS[metric];
-  if (!max) {
-    legend.textContent = "この配信者の時間帯データはまだありません（Session終了後に集計されます）。";
-    return;
-  }
   legend.innerHTML = "";
+  if (!max) return;
   const lab = document.createElement("span");
   lab.className = "hm-leg-l";
   lab.textContent = `${m.label} 少`;
@@ -697,21 +687,6 @@ function fmtPercent(value) {
   return typeof value === "number" ? `${value.toFixed(1)}%` : "—";
 }
 
-// 分母はどちらも全体。未判定の人はライバーに数えられないため、この比率は下限である。
-// 「判定済み」を必ず併記して、どこまで確認できた上での値かを読めるようにする。
-function liverTitle(c) {
-  const coin =
-    `コイン: ${fmtNum(c.liver_diamonds || 0)} / ${fmtNum(c.liver_gift_diamonds || 0)}`;
-  const head =
-    `人数: ${fmtNum(c.liver_gifters || 0)} / ${fmtNum(c.liver_total_gifters || 0)} 人`;
-  return (
-    `ギフトに占めるライバー（自分でも配信している人）の割合です。\n${coin}\n${head}\n`
-    + `分母は全体です。リーグ未判定の人はライバーに数えないため、この値は下限です`
-    + `（判定済み コイン ${fmtPercent(c.liver_coin_coverage)} / `
-    + `人数 ${fmtPercent(c.liver_gifter_coverage)}）。`
-  );
-}
-
 function renderConcentration(c) {
   chipBar("sm-conc", [
     ["Gifter数", fmtNum(c.total_gifters)],
@@ -721,18 +696,14 @@ function renderConcentration(c) {
     ["Top5 比率", `${c.top5.toFixed(1)}%`],
     ["Top10 比率", `${c.top10.toFixed(1)}%`],
     // 分母を名前に持たせて独立させる。「ライバー比率」だけでは、コインに対してなのか
-    // 人数に対してなのかが読めない。
+    // 人数に対してなのかが読めない。tooltipは分子/分母だけにする ―― この数は画面のどこにも
+    // 出ていないが、「未判定が居るので下限である」ことは隣の判定済み2つが数で出している。
     ["ライバー / コイン全体", fmtPercent(c.liver_coin_share), "",
-      `${fmtNum(c.liver_diamonds || 0)} / ${fmtNum(c.liver_gift_diamonds || 0)} コイン。`
-      + `${liverTitle(c)}`],
+      `${fmtNum(c.liver_diamonds || 0)} / ${fmtNum(c.liver_gift_diamonds || 0)} コイン`],
     ["ライバー / ギフト人数", fmtPercent(c.liver_gifter_share), "",
-      `${fmtNum(c.liver_gifters || 0)} / ${fmtNum(c.liver_total_gifters || 0)} 人。`
-      + `${liverTitle(c)}`],
-    ["リーグ判定済み(コイン)", fmtPercent(c.liver_coin_coverage), "",
-      "リーグを確認できたギフターのコインが、コイン全体に占める割合です。"
-      + "上の2つはこの範囲で確定した分だけを数えた下限値です。"],
-    ["リーグ判定済み(人数)", fmtPercent(c.liver_gifter_coverage), "",
-      "リーグを確認できたギフターが、ギフト人数全体に占める割合です。"],
+      `${fmtNum(c.liver_gifters || 0)} / ${fmtNum(c.liver_total_gifters || 0)} 人`],
+    ["リーグ判定済み(コイン)", fmtPercent(c.liver_coin_coverage)],
+    ["リーグ判定済み(人数)", fmtPercent(c.liver_gifter_coverage)],
   ]);
 }
 
@@ -747,7 +718,6 @@ function renderGifterRows(rows, hasPrev) {
       userCell(g, {
         stackId: true,
         href: g.identity_key ? `/fans?fan=${encodeURIComponent(g.identity_key)}` : "",
-        linkTitle: "この視聴者のFan台帳（全配信者横断の実績）を開きます。",
       }),
       fmtNum(g.diamonds),
       fmtNum(g.gifts),
@@ -756,6 +726,979 @@ function renderGifterRows(rows, hasPrev) {
     ],
     [0, 2, 3, 4, 5],
   );
+}
+
+// ---- 週のメンション（土曜7時〜次の土曜7時） ----
+// ショート動画の説明文へ貼る@IDを作る口。週の境目は投稿の周期に合わせて土曜の朝7時始まりで、
+// 下のランキングの「週」(月曜0時始まり)とは別物である。見出しと選択肢に時刻まで出すのは、
+// 同じ画面に境界の違う「週」が並ぶうえ、日の境目も0時ではないためで、土曜の朝(0〜7時)は
+// key(土曜の日付)だけではどちらの週とも読める。
+//
+// コイン額の区分は1つの表の中で帯に分けるのではなく、区分ごとに別の枠へ分ける。
+// 区分ごとに別の投稿を作るための一覧なので、copyも枠ごとに持たせる — 1本の文字列から
+// 区分の境目を目で探して切り出す作業が要らなくなる。
+//
+// 外した人だけを覚える(excluded)。「載せる人」を覚えないのは、収集中の配信では週の中身が
+// 増えるためで、後から投げた人が黙って漏れる。
+//
+// 行を開くと、その人がその週に投げたgiftを1件ずつ出す(何が飛んだのかは合計コインからは
+// 読めない)。giftは開いた人のぶんだけ引く — 1週に数百人が居るので、一覧へ畳み込むと
+// 開かない人のぶんまで毎回運ぶことになる。cacheのkeyに週を入れるのは、同じ人でも週が
+// 変われば中身が別物だからである。
+// 表の列数(印・#・Gifter・コイン)。gift一覧の行はこの数だけcolspanする。
+const MENTION_COLUMNS = 4;
+// 区分の下限。ここに届かない人は一覧に出ないので、その断りに使う。値の出所はServerの
+// MENTION_TIERS で、応答の一番下の区分のminと必ず一致する。
+const MENTION_FLOOR = 100;
+const mention = {
+  uid: "", week: "", data: null, excluded: new Set(),
+  open: new Set(), gifts: new Map(), seq: 0,
+};
+
+function mentionGiftKey(identityKey) {
+  return `${mention.week}|${identityKey}`;
+}
+
+// 選択肢は窓の開始だけで名乗る。どの週も同じ形(土7時→次の土7時)なので、終端まで並べると
+// 選択肢が長くなるだけで区別の助けにならない。範囲そのものは見出しがserverの名乗りで出す。
+function mentionWeekLabel(key, weeks) {
+  const found = (weeks || []).find((w) => w.key === key);
+  return (found && found.label) || key;
+}
+
+function mentionRows(tier) {
+  const rows = (mention.data && mention.data.gifters) || [];
+  return tier === undefined ? rows : rows.filter((g) => g.tier === tier);
+}
+
+function mentionTiers() {
+  return (mention.data && mention.data.tiers) || [];
+}
+
+function mentionIncluded(g) {
+  // @IDが取れていない人はそもそも貼れない。行の印より先に効く。
+  return Boolean(g.unique_id) && !mention.excluded.has(g.identity_key);
+}
+
+function mentionPicked(tier) {
+  return mentionRows(tier).filter(mentionIncluded);
+}
+
+// 貼るものは区分の名前と表示名の2つ。@IDの一覧は出さない ―― 投稿へ貼るのは表示名で、
+// @IDは一覧の行に出ている物を目で確かめられれば足りる。表示名は1人1行で並べる。
+const MENTION_FIELDS = [
+  { key: "name", label: "user name" },
+];
+
+// 区分の境目の短縮表記。fmtCompactは小文字k(1.2k)だが、区分の名前はServerが大文字K
+// (「5K以上」)で作る。混ぜると同じ枠の中で単位の見た目が2つになるのでKへ揃える。
+function mentionCoin(value) {
+  return fmtCompact(value).replace("k", "K");
+}
+
+function mentionText(tier, field) {
+  if (field === "tier") return (mentionTiers()[tier] || {}).label || "";
+  // 出すのは印の付いた人の表示名。@IDの取れていない人は印を付けられないのでここにも
+  // 出ない ―― メンションできない人の名前を貼ると、投稿の中で誰も呼べない行になる。
+  return mentionPicked(tier).map((g) => g.nickname).join("\n");
+}
+
+// 投稿へそのまま貼る1本の文字列。週の名乗り→区分の名前→その区分の表示名、の順で積む。
+// 載せる区分の下限はserverのpost_minに従う ―― 画面側で額を書くと、区分の切り方を変えた
+// ときにまとめcopyだけ古い境目のまま残る。
+function mentionPostText() {
+  const data = mention.data;
+  if (!data) return "";
+  const blocks = [];
+  mentionTiers().forEach((tier, index) => {
+    if (tier.min < data.post_min) return;
+    const names = mentionPicked(index).map((g) => g.nickname);
+    // 誰も居ない区分は見出しごと落とす。名前の無い見出しだけが残ると、貼った先で
+    // 「この区分は0人だった」ではなく「名前を貼り忘れた」に読める。
+    if (!names.length) return;
+    blocks.push([tier.label, ...names].join("\n"));
+  });
+  if (!blocks.length) return "";
+  return [data.post_label, ...blocks].join("\n\n");
+}
+
+function mentionPostCount() {
+  const data = mention.data;
+  if (!data) return 0;
+  return mentionTiers().reduce(
+    (sum, tier, i) => (tier.min < data.post_min ? sum : sum + mentionPicked(i).length), 0);
+}
+
+// copy button。どの区分のどれを写すかは、置かれた枠の位置が名乗る。
+function mentionCopyButton(index, field) {
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "btn btn-small sm-mn-tier-copy";
+  copy.dataset.field = field;
+  copy.textContent = "コピー";
+  copy.addEventListener("click", () => copyMentions(index, field));
+  return copy;
+}
+
+function mentionPickBox(label) {
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.setAttribute("aria-label", label);
+  return box;
+}
+
+// 週ぜんたいの名乗り。区分ごとの人数は各枠の見出しが持つので、ここは週の規模と
+// 「貼れない人が居る」ことだけを出す。
+function renderMentionNote() {
+  const data = mention.data;
+  const note = document.getElementById("sm-mn-note");
+  if (!data) {
+    note.textContent = "";
+    return;
+  }
+  const parts = [
+    `Gifter ${fmtNum(data.gifter_count)} 人`,
+    `コイン ${fmtNum(data.diamonds)}`,
+  ];
+  // 一覧に出るのは区分に入った人だけ。出ていない人が居ることを名乗らないと、
+  // 週の人数と枠の人数の合計が合わない理由が画面から読めない。
+  if (data.below_count) {
+    parts.push(`区分外（${fmtNum(MENTION_FLOOR)}未満）${fmtNum(data.below_count)} 人`
+      + `・${fmtNum(data.below_diamonds)} コイン`);
+  }
+  // @IDが取れていない人は一覧に残すが、メンションには載せられない。人数が合わない
+  // 理由をここで名乗る(黙ると「選択が反映されていない」と読める)。
+  // 引くのは一覧に出ている人数。gifter_countはその週に投げた全員で、
+  // mentionable_countは一覧に出ている人のうち貼れる人だから、引くと母集団の違う
+  // 2つを引くことになる(区分外の人数が混ざる)。
+  const noId = mentionRows().length - data.mentionable_count;
+  if (noId > 0) parts.push(`@ID未取得 ${fmtNum(noId)} 人`);
+  if (data.dropped_weeks) parts.push(`古い ${fmtNum(data.dropped_weeks)} 週は省略`);
+  note.textContent = parts.join("・");
+}
+
+function mentionTierHead(tier, index, rows) {
+  const head = document.createElement("div");
+  head.className = "sm-mn-tier-head";
+  const usable = rows.filter((g) => g.unique_id);
+  const on = usable.filter(mentionIncluded).length;
+  const box = mentionPickBox("区分の全員");
+  box.checked = usable.length > 0 && on === usable.length;
+  // 一部だけ載っている状態は、入・切のどちらでもない第3の見た目で出す。
+  box.indeterminate = on > 0 && on < usable.length;
+  box.disabled = usable.length === 0;
+  box.addEventListener("change", () => {
+    rows.forEach((g) => {
+      if (box.checked) mention.excluded.delete(g.identity_key);
+      else mention.excluded.add(g.identity_key);
+    });
+    renderMentionTiers();
+  });
+  const name = document.createElement("b");
+  name.className = "sm-mn-tier-name";
+  name.textContent = tier.label;
+  // 区分は排他なので、上限も一緒に出す(「5K以上」が5K〜10Kであることを読めるようにする)。
+  // 桁を畳むのは見出しを1行に収めるため。区分の名前と同じ丸め方なので読み替えは要らない。
+  const range = document.createElement("span");
+  range.className = "sm-mn-tier-range";
+  range.textContent = tier.max
+    ? `${mentionCoin(tier.min)}〜${mentionCoin(tier.max)}` : `${mentionCoin(tier.min)}〜`;
+  const count = document.createElement("span");
+  count.className = "sm-mn-tier-count";
+  count.textContent = `${fmtNum(tier.count)} 人・${fmtNum(tier.diamonds)} コイン`;
+  head.append(box, name, range, count,
+    mentionCopyButton(index, "tier"));
+  return head;
+}
+
+// @ID・表示名の1段。名乗り＋人数＋copyの帯と、貼る文字列そのものを対にして出す。
+// 文字列を見せるのは、押す前に中身を確かめられるようにするためと、clipboardが
+// 拒否されたときに手で選べるようにするためである。
+function mentionCopyBlock(tier, index, field) {
+  const def = MENTION_FIELDS.find((f) => f.key === field);
+  const bar = document.createElement("div");
+  bar.className = "sm-mn-copy-bar";
+  bar.dataset.field = field;
+  const name = document.createElement("span");
+  name.className = "sm-mn-copy-name";
+  name.textContent = def.label;
+  const count = document.createElement("span");
+  count.className = "sm-mn-copy-count";
+  count.textContent = `${fmtNum(mentionPicked(index).length)} 人`;
+  bar.append(name, count, mentionCopyButton(index, field));
+
+  const text = document.createElement("textarea");
+  text.className = "sm-mn-text";
+  text.dataset.field = field;
+  text.rows = 2;
+  text.readOnly = true;
+  text.value = mentionText(index, field);
+  text.setAttribute("aria-label", `${tier.label}の${def.label}`);
+  return [bar, text];
+}
+
+// 開いた人のgiftを引く。応答が前後しても、開いたままの人だけが描かれるようにする。
+async function loadMentionGifts(g) {
+  const key = mentionGiftKey(g.identity_key);
+  if (mention.gifts.has(key)) return;
+  mention.gifts.set(key, { state: "loading" });
+  const uid = mention.uid;
+  const params = new URLSearchParams({
+    week: mention.week, identity_key: g.identity_key,
+  });
+  try {
+    const data = await apiSend(
+      "GET", `/api/streamers/${encodeURIComponent(uid)}/mentions/gifts?${params}`);
+    mention.gifts.set(key, { state: "ok", ...data });
+  } catch (err) {
+    // 取れなかったことを0件として描かない(「この人はgiftを投げていない」に化ける)。
+    mention.gifts.set(key, { state: "failed", err });
+  }
+  if (mention.uid !== uid) return;
+  renderMentionTiers();
+}
+
+function mentionGiftsRow(g, columns) {
+  const tr = document.createElement("tr");
+  tr.className = "sm-mn-gifts";
+  const cell = document.createElement("td");
+  cell.colSpan = columns;
+  const entry = mention.gifts.get(mentionGiftKey(g.identity_key));
+  if (!entry || entry.state === "loading") {
+    cell.className = "sm-mn-gifts-note";
+    cell.textContent = "読み込み中…";
+  } else if (entry.state === "failed") {
+    cell.className = "sm-mn-gifts-note sm-mn-gifts-failed";
+    cell.textContent = `giftの一覧を取得できませんでした（0件という意味ではありません）。${errorDetailText(entry.err)}`;
+  } else if (!entry.items.length) {
+    cell.className = "sm-mn-gifts-note";
+  } else {
+    const list = document.createElement("div");
+    list.className = "sm-mn-gift-list";
+    entry.items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "sm-mn-gift";
+      const when = document.createElement("span");
+      when.className = "sm-mn-gift-when";
+      when.textContent = item.label;
+      row.appendChild(when);
+      // iconを出せるgiftだけ絵を添える。出せないgiftに別の絵を当てると、実際には
+      // 飛んでいないgiftが飛んだように読める(再生画面のgift欄と同じ約束)。
+      const url = (entry.icons || {})[String(item.gift_id)];
+      if (url) {
+        const icon = document.createElement("img");
+        icon.className = "sm-mn-gift-icon";
+        icon.src = url;
+        icon.alt = "";
+        icon.loading = "lazy";
+        row.appendChild(icon);
+      }
+      const name = document.createElement("span");
+      name.className = "sm-mn-gift-name";
+      // 記録にgift名が無いことがある。空欄のままだと日時とコインだけの行になって
+      // 壊れて見えるので、名前が無いことを名乗る(別のgift名は当てない)。
+      if (!item.name) name.classList.add("sm-mn-gift-noname");
+      const label = item.name || "gift名なし";
+      name.textContent = item.count > 1
+        ? `${label}×${fmtNum(item.count)}` : label;
+      const coins = document.createElement("span");
+      coins.className = "sm-mn-gift-coins";
+      coins.textContent = fmtNum(item.diamonds);
+      row.append(name, coins);
+      list.appendChild(row);
+    });
+    cell.appendChild(list);
+    if (entry.truncated) {
+      // 黙って切ると「この人はこれだけしか投げていない」と読める。
+      const more = document.createElement("div");
+      more.className = "sm-mn-gifts-note";
+      more.textContent = `＋${fmtNum(entry.truncated)}`;
+      cell.appendChild(more);
+    }
+  }
+  tr.appendChild(cell);
+  return tr;
+}
+
+function mentionGifterRow(g) {
+  const tr = document.createElement("tr");
+  if (!g.unique_id) tr.classList.add("sm-mn-noid");
+  const open = mention.open.has(g.identity_key);
+  if (open) tr.classList.add("sm-mn-row-open");
+  const box = mentionPickBox("メンション");
+  if (g.unique_id) {
+    box.checked = mentionIncluded(g);
+    box.addEventListener("change", () => {
+      if (box.checked) mention.excluded.delete(g.identity_key);
+      else mention.excluded.add(g.identity_key);
+      renderMentionTiers();
+    });
+  } else {
+    box.disabled = true;
+    box.setAttribute("aria-label", "@ID未取得");
+  }
+  // 名前はFan台帳へのlink。開閉は行clickなので、名前を押したときは開かずに飛ばす。
+  const who = document.createElement("span");
+  who.className = "sm-mn-who";
+  const caret = document.createElement("span");
+  caret.className = "sm-mn-caret";
+  caret.textContent = open ? "▾" : "▸";
+  who.append(caret, userCell(g, {
+    stackId: true,
+    // GLv/MLvのchipは落とす。区分ごとの枠は横が狭く、chipを入れるとコイン列が
+    // 枠の外へ押し出されて横にscrollする。誰をメンションするかの判断にはLvは要らず、
+    // 必要なときは下のGifterランキングが同じ人をchip付きで出している。
+    hideBadges: true,
+    href: g.identity_key ? `/fans?fan=${encodeURIComponent(g.identity_key)}` : "",
+  }));
+  const cells = [box, String(g.rank || ""), who, fmtNum(g.diamonds)];
+  cells.forEach((cell, col) => {
+    const td = document.createElement("td");
+    if (col === 1 || col === 3) td.className = "num";
+    if (cell instanceof Node) td.appendChild(cell);
+    else td.textContent = cell;
+    tr.appendChild(td);
+  });
+  tr.addEventListener("click", (e) => {
+    // 印のcheckboxと名前のlinkは、それぞれの仕事をする。行の開閉に巻き込まない。
+    if (e.target.closest("input, a")) return;
+    toggleMentionGifts(g);
+  });
+  return tr;
+}
+
+function toggleMentionGifts(g) {
+  if (mention.open.has(g.identity_key)) {
+    mention.open.delete(g.identity_key);
+    renderMentionTiers();
+    return;
+  }
+  mention.open.add(g.identity_key);
+  renderMentionTiers();
+  // cacheに在れば描画済み。無いときだけ引く(loadMentionGiftsが二重取得を止める)。
+  loadMentionGifts(g);
+}
+
+// 区分1つぶんの枠。見出し(=区分の名前)・user id・user name・その区分の人、の順で
+// ひと揃いにする。copyを枠から離すと、どのcopyがどの区分のものか位置で読めなくなる。
+function mentionTierPanel(tier, index) {
+  const rows = mentionRows(index);
+  const panel = document.createElement("section");
+  panel.className = "sm-mn-tier";
+  panel.dataset.tier = String(index);
+  panel.appendChild(mentionTierHead(tier, index, rows));
+
+  if (!rows.length) {
+    // 0人の区分も枠は残す。抜くと「この区分には誰も居なかった」が「この区分は無い」に
+    // 化けるうえ、区分の並びが週ごとに変わって位置で読めなくなる。人数は見出しが出して
+    // いるので、枠の中には何も足さない。
+    return panel;
+  }
+
+  // 貼る場所はひと箱にまとめる。下の一覧と地続きに置くと、帯と欄が表の見出し・行と
+  // 同じ色の並びになり、どこからが一覧なのか読めない。
+  const box = document.createElement("div");
+  box.className = "sm-mn-copybox";
+  MENTION_FIELDS.forEach((def) => {
+    box.append(...mentionCopyBlock(tier, index, def.key));
+  });
+  panel.appendChild(box);
+
+  const wrap = document.createElement("div");
+  wrap.className = "table-wrap sm-mn-wrap";
+  const table = document.createElement("table");
+  table.className = "result-table";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  ["✓", "#", "Gifter", "コイン"].forEach((label, col) => {
+    const th = document.createElement("th");
+    th.textContent = label;
+    if (col === 0) th.className = "sm-mn-pick";
+    if (col === 1 || col === 3) th.className = "num";
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  const tbody = document.createElement("tbody");
+  rows.forEach((g) => {
+    tbody.appendChild(mentionGifterRow(g));
+    if (mention.open.has(g.identity_key)) {
+      tbody.appendChild(mentionGiftsRow(g, MENTION_COLUMNS));
+    }
+  });
+  table.append(thead, tbody);
+  wrap.appendChild(table);
+  panel.appendChild(wrap);
+  return panel;
+}
+
+function renderMentionTiers() {
+  const host = document.getElementById("sm-mn-tiers");
+  host.innerHTML = "";
+  const tiers = mentionTiers();
+  document.getElementById("sm-mn-empty").classList.toggle("hidden", tiers.length > 0);
+  const fragment = document.createDocumentFragment();
+  tiers.forEach((tier, index) => fragment.appendChild(mentionTierPanel(tier, index)));
+  host.appendChild(fragment);
+  renderMentionNote();
+  renderMentionPostButton();
+}
+
+// まとめcopyのButton。週が読めるまでは押せない。
+function renderMentionPostButton() {
+  const btn = document.getElementById("sm-mn-copy-all");
+  const data = mention.data;
+  btn.disabled = !data;
+}
+
+function fillMentionWeeks(data) {
+  const select = document.getElementById("sm-mn-week");
+  select.innerHTML = "";
+  data.weeks.forEach((w) => {
+    const opt = document.createElement("option");
+    opt.value = w.key;
+    opt.textContent = `${mentionWeekLabel(w.key, data.weeks)}　${fmtCompact(w.diamonds)}`;
+    select.appendChild(opt);
+  });
+  select.value = data.week;
+  document.getElementById("sm-mn-prev").disabled = !data.prev_week;
+  document.getElementById("sm-mn-next").disabled = !data.next_week;
+}
+
+// 週の一覧と日の一覧は同じ応答から描くので、失敗も空も同じ知らせ方にする。片方だけ
+// 「0件」と出すと、取れなかったのか本当に居なかったのかが画面から読めない。
+function mentionEmptyState(err) {
+  ["sm-mn-empty", "sm-md-empty"].forEach((id) => {
+    const empty = document.getElementById(id);
+    if (err) {
+      setListState(empty, "failed", err);
+      return;
+    }
+    listStateReset(empty);
+    if (empty.dataset.emptyText !== undefined) empty.textContent = empty.dataset.emptyText;
+  });
+}
+
+async function loadMentions(uid) {
+  // 配信者が変われば印も週も別人のもの。持ち越すと前の人の選択が新しい人の行へ当たる。
+  if (uid !== mention.uid) {
+    mention.uid = uid;
+    mention.week = "";
+    mention.excluded = new Set();
+    mention.open = new Set();
+    mention.gifts = new Map();
+  }
+  const seq = ++mention.seq;
+  const range = document.getElementById("sm-mn-range");
+  const params = new URLSearchParams();
+  if (mention.week) params.set("week", mention.week);
+  let data;
+  try {
+    const query = params.toString();
+    data = await apiSend(
+      "GET",
+      `/api/streamers/${encodeURIComponent(uid)}/mentions${query ? `?${query}` : ""}`,
+    );
+  } catch (err) {
+    if (selectedUid !== uid || mention.seq !== seq) return;
+    // 前の週の行を残すと、その@IDが今選んだ週のものとして貼られる。畳んでから名乗る。
+    mention.data = null;
+    renderMentionTiers();
+    renderMentionDays();
+    renderMentionAliases();
+    renderMentionMerges();
+    mentionEmptyState(err);
+    range.textContent = "";
+    return;
+  }
+  if (selectedUid !== uid || mention.seq !== seq) return;
+  mention.data = data;
+  mention.week = data.week;
+  mentionEmptyState(null);
+  // 名乗りはserverが組んだ文字列をそのまま出す。画面側で日付から組み直すと、時刻の
+  // 落ちた名乗り(土曜の朝がどちらの週とも読める形)が混ざる。
+  range.textContent = data.start_label
+    ? `（${data.start_label} 〜 ${data.end_label}）` : "";
+  fillMentionWeeks(data);
+  renderMentionTiers();
+  renderMentionDays();
+  renderMentionAliases();
+  renderMentionMerges();
+}
+
+function stepMentionWeek(step) {
+  const data = mention.data;
+  if (!data) return;
+  const next = step < 0 ? data.prev_week : data.next_week;
+  if (!next || !selectedUid) return;
+  mention.week = next;
+  // 週が変われば顔ぶれも変わる。前の週で外した人の指定も、開いていた行も持ち越さない。
+  mention.excluded = new Set();
+  mention.open = new Set();
+  loadMentions(selectedUid);
+}
+
+async function copyMentions(tier, field) {
+  const label = (mentionTiers()[tier] || {}).label || "";
+  const def = MENTION_FIELDS.find((f) => f.key === field);
+  const what = def ? def.label : "区分";
+  const text = mentionText(tier, field);
+  if (!text) {
+    showToast(`${label}にメンションできる人がいません。`, "error");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    // 何をcopyしたのか、いくつcopyしたのかまで名乗る。区分の名前は1つしか無いので
+    // 人数は付けない(「1 人」と読める)。
+    showToast(def
+      ? `${label} の${what} ${fmtNum(mentionPicked(tier).length)} 人をコピーしました。`
+      : `${label} をコピーしました。`);
+  } catch (err) {
+    // clipboard APIはhttp originなどで拒否される。文字列は枠の欄に出たままなので、
+    // 手でも選べることを名乗る(黙ると押しても何も起きていないように見える)。
+    showError(err, `clipboardへのコピー（${label}の${what}の欄を選んで手でコピーできます）`);
+  }
+}
+
+// 週ぶんをまとめて1本で写す。投稿の文面がこの形(範囲→区分→名前)なので、区分ごとのcopyを
+// 継ぐ手間をここで畳む。
+async function copyMentionPost() {
+  const text = mentionPostText();
+  if (!text) {
+    showToast("この週にメンションできる人がいません。", "error");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast(`${mention.data.post_label} の ${fmtNum(mentionPostCount())} 人をコピーしました。`);
+  } catch (err) {
+    // まとめcopyには欄が無いので、手で拾える場所(区分ごとの欄)を名乗る。
+    showError(err, "clipboardへのコピー（区分ごとの user name の欄からは手でコピーできます）");
+  }
+}
+
+// ---- 日のGifter ----
+// 上で選んだ週を、週と同じ時刻(朝7時)で1日ずつに割った貢献。窓の切り方も貼る文面も
+// Serverが持つ(応答のdays) —— 画面が組み立てるのは見た目だけである。日ごとに行の取捨は
+// 無いので、週のメンション一覧のような印(checkbox)は置かない。
+
+// 日ぶんのcopyの口。文面はServerが組むので、画面側はどの文面をどう名乗るかだけを持つ。
+const MENTION_DAY_COPIES = [
+  { kind: "post", what: "貢献", label: () => "コピー" },
+  {
+    kind: "roster", what: "顔ぶれ",
+    label: (day) => `Top${(day.roster || []).length}`,
+  },
+];
+
+// 押した口へ対する文面。応答に無ければ空で、口そのものを出さない。
+function mentionDayText(day, kind) {
+  return (kind === "roster" ? day.roster_text : day.post_text) || "";
+}
+
+// 1日ぶんの札。名乗り→貼る欄→顔ぶれ、の順に積む。貼る欄を見せるのは、押す前に中身を
+// 確かめられるようにするためと、clipboardが拒否されたときに手で選べるようにするためで、
+// 週の区分ごとのcopyと同じ作りにしてある。
+function mentionDayCard(day) {
+  const card = document.createElement("section");
+  card.className = "sm-md-day";
+  card.dataset.day = day.key;
+
+  const head = document.createElement("div");
+  head.className = "sm-md-head";
+  const title = document.createElement("b");
+  title.className = "sm-md-title";
+  title.textContent = day.title;
+  // 窓の端は時刻付きで出す。日付だけだと未明(0〜7時)がどちらの日とも読める。
+  const range = document.createElement("span");
+  range.className = "sm-md-range";
+  range.textContent = `${day.start_label} 〜 ${day.end_label}`;
+  // 幅が足りないと詰めるので、丸ごとは指した先で読めるようにしておく。
+  range.title = range.textContent;
+  const count = document.createElement("span");
+  count.className = "sm-md-count";
+  // 文面の「1k⬆️◯名」がどこから来た数なのか、画面でも同じ数を出して確かめられるようにする。
+  const floor = mentionCoin((mention.data && mention.data.post_min) || 0);
+  count.textContent = `${fmtNum(day.gifter_count)} 人・${fmtNum(day.diamonds)} コイン`
+    + `・${floor}以上 ${fmtNum(day.post_count)} 人`;
+  head.append(title, range, count);
+
+  // copyは2つ。上位3人だけの文面と、顔ぶれを番号で並べた文面 ―― 貼る先で要る形が
+  // 違うので押し分けられるようにする。題の人数は実際に写る行数から作る(決め打つと、顔ぶれが
+  // 10人に満たない日だけ題と中身の件数が食い違う)。
+  MENTION_DAY_COPIES.forEach(({ kind, label }) => {
+    const text = mentionDayText(day, kind);
+    if (!text) return;
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "btn btn-small sm-md-copy";
+    copy.dataset.kind = kind;
+    copy.textContent = label(day);
+    copy.addEventListener("click", () => copyMentionDay(day.key, kind));
+    head.appendChild(copy);
+  });
+  card.appendChild(head);
+
+  if (!day.gifter_count) {
+    // Giftの無かった日も札は残す。抜くと「誰も投げなかった日」が「配信の無かった日」に
+    // 化けるうえ、日の並びが週ごとに変わって位置で読めなくなる。0人は見出しが出す。
+    return card;
+  }
+
+  // 文面は丸ごと出す。行数を決め打つと、名前が折り返した日だけ最後の行(「1k⬆️◯名」)が
+  // 隠れ、押す前に貼る物を確かめられなくなる。
+  const text = document.createElement("div");
+  text.className = "sm-md-text";
+  text.textContent = day.post_text;
+  text.setAttribute("aria-label", `${day.title}の貢献`);
+  card.appendChild(text);
+
+  card.appendChild(mentionDayRoster(day));
+  return card;
+}
+
+// 顔ぶれ。順位の根拠(コイン額)まで出して、文面の🥇🥈🥉がなぜその並びなのかを確かめられる
+// ようにする。メダルの付く3人はServerが印を持っているので、画面側で数えない。
+function mentionDayRoster(day) {
+  const wrap = document.createElement("div");
+  wrap.className = "table-wrap sm-md-wrap";
+  const table = document.createElement("table");
+  table.className = "result-table";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  ["#", "Gifter", "コイン"].forEach((label, col) => {
+    const th = document.createElement("th");
+    th.textContent = label;
+    if (col === 0 || col === 2) th.className = "num";
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  const tbody = document.createElement("tbody");
+  (day.roster || []).forEach((g) => {
+    const tr = document.createElement("tr");
+    if (g.medal) tr.classList.add("sm-md-medal-row");
+    if (!g.unique_id) tr.classList.add("sm-mn-noid");
+    const name = userCell(g, {
+      stackId: true,
+      hideBadges: true,
+      href: g.identity_key ? `/fans?fan=${encodeURIComponent(g.identity_key)}` : "",
+    });
+    // 省略形が付いている人は、貼る文面に出るその名前を表示名の隣へ添える。表示名を
+    // 置き換えないのは、この表が順位の根拠だからである ―― 省略形だけにすると、
+    // 上の文面の🥇が誰なのかをここで確かめられなくなる。
+    if (g.alias) {
+      const alias = document.createElement("span");
+      alias.className = "sm-md-alias";
+      alias.textContent = `→ ${g.alias}`;
+      name.appendChild(alias);
+    }
+    // サブアカウントを畳んだ行。畳んだ数を出さないと、この順位が何アカウントぶんの
+    // 合計なのかが読めない(1位が入れ替わった理由が画面から辿れなくなる)。
+    if ((g.accounts || 1) > 1) {
+      const merged = document.createElement("span");
+      merged.className = "sm-md-merged";
+      merged.dataset.accounts = String(g.accounts);
+      merged.textContent = `統合 ${fmtNum(g.accounts)}`;
+      name.appendChild(merged);
+    }
+    const rank = document.createElement("span");
+    rank.className = "sm-md-rank";
+    // メダルの在る人はメダルだけ。番号と両方出すと同じことを2回読ませることになる。
+    rank.textContent = g.medal || String(g.rank || "");
+    const cells = [rank, name, fmtNum(g.diamonds)];
+    cells.forEach((cell, col) => {
+      const td = document.createElement("td");
+      if (col === 0 || col === 2) td.className = "num";
+      if (cell instanceof Node) td.appendChild(cell);
+      else td.textContent = cell;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.append(thead, tbody);
+  wrap.appendChild(table);
+  if (day.roster_truncated) {
+    // 切った件数を名乗る。黙ると一覧の長さがその日の人数だと読める。
+    const more = document.createElement("div");
+    more.className = "sm-md-more";
+    more.textContent = `＋${fmtNum(day.roster_truncated)}`;
+    wrap.appendChild(more);
+  }
+  return wrap;
+}
+
+// ---- 名前の省略形 ----
+// 貼る文面(トップ3貢献・顔ぶれ)で表示名の代わりに出す短い名前。人ごとに1つで、配信者にも
+// 週にも紐付かない —— 同じ人はどの週のどの日でも同じ名乗りになる。文面そのものはServerが
+// 組むので、ここは「誰に何を付けるか」だけを扱い、保存したら/mentionsを引き直す。
+
+// 枠に並べる人。この週の日ぶんの顔ぶれに出た人だけを対象にする —— 文面へ載り得るのは
+// この人たちで、週の一覧まで広げると数百人の欄が並び、付けたい相手を探す作業になる。
+// 並びはトップ3に出た日数の多い順、次に1日の最高コイン順。省略形が要るのは繰り返し
+// 上位に出る人なので、その順で上から埋められるようにする。
+function mentionAliasPeople() {
+  const days = (mention.data && mention.data.days) || [];
+  const seen = new Map();
+  days.forEach((day) => {
+    (day.roster || []).forEach((g) => {
+      if (!g.identity_key) return;
+      const cur = seen.get(g.identity_key)
+        || { user: g, medals: 0, best: 0 };
+      if (g.medal) cur.medals += 1;
+      if ((g.diamonds || 0) > cur.best) {
+        cur.best = g.diamonds || 0;
+        // 名乗りは最も大きい日の行から採る。日によって badge や league が違っても、
+        // 枠の中で同じ人が2つの見え方で出ることはない。
+        cur.user = g;
+      }
+      seen.set(g.identity_key, cur);
+    });
+  });
+  return [...seen.values()].sort(
+    (a, b) => b.medals - a.medals || b.best - a.best);
+}
+
+// 1人ぶんの行。欄を空にして確定すると省略形が外れる(表示名へ戻る)。
+// 掴めるのは名前だけで、行そのものは受け皿である(サブアカウントの統合)。行を掴み手に
+// すると、同じ行の省略形の欄で文字を選べなくなる —— 欄の中のdragが行のdragに化ける。
+function mentionAliasRow(item) {
+  const tr = document.createElement("tr");
+  const g = item.user;
+  const name = document.createElement("td");
+  const who = userCell(g, { hideBadges: true });
+  bindMergeDrag(who, g);
+  bindMergeDrop(tr, g.identity_key);
+  name.appendChild(who);
+  const medals = document.createElement("td");
+  medals.className = "num";
+  // トップ3に出た日数。0日の人にも欄は出す(この先出るかもしれない)が、数は伏せずに
+  // 出す —— 付ける相手を選ぶ材料がこれしかない。
+  medals.textContent = item.medals ? `${fmtNum(item.medals)} 日` : "";
+  const cell = document.createElement("td");
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "sm-al-input";
+  input.value = g.alias || "";
+  // 上限はServerが返した値をそのまま使う。画面に数字を書くと、上限を動かした日に
+  // 「入力はできたのに保存で弾かれる欄」ができる。
+  const max = (mention.data && mention.data.alias_max) || 0;
+  if (max) input.maxLength = max;
+  input.placeholder = "（表示名のまま）";
+  input.setAttribute("aria-label", `${g.nickname} の省略形`);
+  input.addEventListener("keydown", (e) => {
+    // Enterで確定。押した先がformでない以上、blurさせないと何も起きない。
+    if (e.key === "Enter") input.blur();
+  });
+  input.addEventListener("change", () => {
+    saveUserAlias(g, input);
+  });
+  cell.appendChild(input);
+  tr.append(name, medals, cell);
+  return tr;
+}
+
+function renderMentionAliases() {
+  const host = document.getElementById("sm-al-rows");
+  const note = document.getElementById("sm-al-note");
+  host.innerHTML = "";
+  const people = mentionAliasPeople();
+  const named = people.filter((p) => p.user.alias).length;
+  // 何人ぶん並んでいて、そのうち何人へ付いているか。付いた数を名乗らないと、
+  // 「付けたつもりで付いていない」ことがこの枠から読めない。
+  note.textContent = people.length
+    ? `${fmtNum(people.length)} 人中 ${fmtNum(named)} 人に設定` : "";
+  const fragment = document.createDocumentFragment();
+  people.forEach((item) => fragment.appendChild(mentionAliasRow(item)));
+  host.appendChild(fragment);
+}
+
+// 省略形を1人ぶん保存し、文面を引き直す。画面側で名前だけ差し替えないのは、文面を
+// 組むのがServerだからである —— 2か所で組むと名乗りの形が割れる。
+async function saveUserAlias(user, input) {
+  const alias = input.value.trim();
+  if (alias === (user.alias || "")) return;
+  input.disabled = true;
+  try {
+    await apiSend("PUT", "/api/user-aliases",
+      { identity_key: user.identity_key, alias });
+  } catch (err) {
+    // 元の値へ戻す。弾かれた値を欄に残すと、保存されたものとして読める。
+    input.value = user.alias || "";
+    showError(err, `${user.nickname} の省略形の保存`);
+    return;
+  } finally {
+    input.disabled = false;
+  }
+  showToast(alias
+    ? `${user.nickname} を「${alias}」で貼るようにしました。`
+    : `${user.nickname} の省略形を外しました。`);
+  if (selectedUid) await loadMentions(selectedUid);
+}
+
+// ---- サブアカウントの統合 ----
+// 同じ人が別アカウントで投げている場合に、日のGifterの集計を1人へ畳む。畳むのは集計の
+// 束ね方だけで、eventもusers表も動かない —— 観測した事実は残したまま、「この2つは同じ人だ」
+// という人の判断を別の層(user_merges)に置く。省略形と同じく人に付くので、配信者にも週にも
+// 紐付かない。畳んだ結果を組むのはServerで、画面は束ねたら/mentionsを引き直す。
+
+// 掴んでいる行。dataTransferはdragover中に中身を読めないので、行き先の可否判定に使う
+// 情報はここへ持つ(videos.jsの行→棚と同じ作り)。
+let mergeDrag = null;
+
+// 掴み手。省略形の行と、束ねの中のサブの行の両方がここを通る —— どちらから掴んでも
+// 同じ物(1人のアカウント)を運ぶので、経路で挙動が変わらないようにする。
+function bindMergeDrag(el, user) {
+  if (!user || !user.identity_key) return;
+  el.draggable = true;
+  el.dataset.mergeKey = user.identity_key;
+  el.addEventListener("dragstart", (event) => {
+    mergeDrag = { key: user.identity_key, nickname: user.nickname || "" };
+    el.classList.add("sm-mg-dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", user.identity_key);
+    }
+  });
+  el.addEventListener("dragend", () => {
+    mergeDrag = null;
+    el.classList.remove("sm-mg-dragging");
+  });
+}
+
+// 受け皿。重ねた先のアカウントを主として束ねる。自分自身へは落とさない(束ねる相手が
+// 居ないので、受け取ると何も起きないまま印だけ光る)。
+function bindMergeDrop(el, primaryKey) {
+  if (!primaryKey) return;
+  el.addEventListener("dragover", (event) => {
+    if (!mergeDrag || mergeDrag.key === primaryKey) return;
+    // preventDefaultを呼んだ場所だけがdropを受け取れる。
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    el.classList.add("sm-mg-over");
+  });
+  el.addEventListener("dragleave", () => el.classList.remove("sm-mg-over"));
+  el.addEventListener("drop", (event) => {
+    el.classList.remove("sm-mg-over");
+    const drag = mergeDrag;
+    if (!drag || drag.key === primaryKey) return;
+    event.preventDefault();
+    mergeUsers(drag, primaryKey);
+  });
+}
+
+// 束ねの一覧。1件が主1人ぶんで、Serverが名乗りまで組んで返す —— 束ねたサブは日の顔ぶれ
+// から消えるので、keyだけでは外す相手を選べない。
+function mentionMerges() {
+  return (mention.data && mention.data.merges) || [];
+}
+
+function mentionMergeGroup(group) {
+  const card = document.createElement("div");
+  card.className = "sm-mg-group";
+  card.dataset.mergeGroup = group.primary.identity_key;
+  const head = document.createElement("div");
+  head.className = "sm-mg-primary";
+  head.appendChild(userCell(group.primary, { hideBadges: true }));
+  card.appendChild(head);
+  (group.members || []).forEach((member) => {
+    const row = document.createElement("div");
+    row.className = "sm-mg-member";
+    // サブも掴める。別の主へ移すのに、いったん外してから掴み直す手間を要らなくする。
+    bindMergeDrag(row, member);
+    row.appendChild(userCell(member, { hideBadges: true }));
+    const off = document.createElement("button");
+    off.type = "button";
+    off.className = "btn btn-small sm-mg-off";
+    off.textContent = "外す";
+    off.title = `${member.nickname} の統合を外す`;
+    off.addEventListener("click", () => unmergeUser(member));
+    row.appendChild(off);
+    card.appendChild(row);
+  });
+  // 札そのものが受け皿。主の行だけを受け皿にすると、狙う先が札の中の1行になる。
+  bindMergeDrop(card, group.primary.identity_key);
+  return card;
+}
+
+function renderMentionMerges() {
+  const host = document.getElementById("sm-mg-groups");
+  if (!host) return;
+  host.innerHTML = "";
+  const groups = mentionMerges();
+  const note = document.getElementById("sm-mg-note");
+  const members = groups.reduce((sum, g) => sum + (g.members || []).length, 0);
+  // 何件の束ねに何人を入れてあるか。数を名乗らないと、束ねたつもりで束ねられていない
+  // ことがこの枠から読めない。
+  if (note) {
+    note.textContent = groups.length
+      ? `${fmtNum(groups.length)} 人へ ${fmtNum(members)} 件` : "";
+  }
+  const fragment = document.createDocumentFragment();
+  groups.forEach((group) => fragment.appendChild(mentionMergeGroup(group)));
+  host.appendChild(fragment);
+  const hint = document.getElementById("sm-mg-hint");
+  // 掴めること自体は見た目に出ないので、行き先の無いとき(=束ねが1件も無いとき)だけ
+  // 手順を出す。1件でもあれば、札が受け皿であることは重ねれば判る。
+  if (hint) hint.textContent = groups.length ? "" : "左の行を主アカウントの行へ重ねる";
+}
+
+// サブを主へ束ねる。畳んだ顔ぶれを組むのはServerなので、画面側で行を消さずに引き直す。
+async function mergeUsers(drag, primaryKey) {
+  try {
+    await apiSend("PUT", "/api/user-merges",
+      { member_key: drag.key, primary_key: primaryKey });
+  } catch (err) {
+    showError(err, `${drag.nickname} の統合`);
+    return;
+  }
+  showToast(`${drag.nickname} を同じ人として統合しました。`);
+  if (selectedUid) await loadMentions(selectedUid);
+}
+
+async function unmergeUser(member) {
+  try {
+    await apiSend("DELETE", "/api/user-merges", { member_key: member.identity_key });
+  } catch (err) {
+    showError(err, `${member.nickname} の統合の解除`);
+    return;
+  }
+  showToast(`${member.nickname} の統合を外しました。`);
+  if (selectedUid) await loadMentions(selectedUid);
+}
+
+function renderMentionDays() {
+  const host = document.getElementById("sm-md-days");
+  const note = document.getElementById("sm-md-note");
+  host.innerHTML = "";
+  const days = (mention.data && mention.data.days) || [];
+  document.getElementById("sm-md-empty").classList.toggle("hidden", days.length > 0);
+  const fragment = document.createDocumentFragment();
+  days.forEach((day) => fragment.appendChild(mentionDayCard(day)));
+  host.appendChild(fragment);
+  // 週の合計と一致することが読めるようにする。日ぶんは週と同じ窓を割っただけなので、
+  // ここが合わないときは境目の取り違えである。
+  const coins = days.reduce((sum, d) => sum + (d.diamonds || 0), 0);
+  note.textContent = days.length
+    ? `${fmtNum(days.length)} 日・コイン ${fmtNum(coins)}` : "";
+}
+
+async function copyMentionDay(key, kind = "post") {
+  const day = ((mention.data && mention.data.days) || []).find((d) => d.key === key);
+  const text = day ? mentionDayText(day, kind) : "";
+  if (!text) {
+    showToast("この日に貢献した人がいません。", "error");
+    return;
+  }
+  const copy = MENTION_DAY_COPIES.find((c) => c.kind === kind);
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast(`${day.title} の${copy.what}をコピーしました。`);
+  } catch (err) {
+    // 拒まれたときに手で拾える場所を名乗る。上位3人の文面は札の欄に、
+    // 顔ぶれは下の表に同じ数が出たままになっている。
+    const where = kind === "roster" ? "顔ぶれの表" : "欄";
+    showError(err, `clipboardへのコピー（${day.title}の${where}から手でコピーできます）`);
+  }
 }
 
 // ---- 期間別ランキング ----
@@ -816,7 +1759,6 @@ function rankDeltaCell(row, hasPrev) {
   if (row.prev_rank == null) {
     el.className = "rk-new";
     el.textContent = "new";
-    el.title = "1つ前の期間には居なかった人です。";
     return el;
   }
   if (!row.rank_delta) {
@@ -909,7 +1851,7 @@ async function applyRanking(tableId) {
   note.textContent = conf.note(data);
   if (data.dropped_periods) {
     // 黙って切ると「この配信者はこの期間しか配信していない」と読めてしまう。
-    note.textContent += `（古い ${fmtNum(data.dropped_periods)} 期間は一覧から省略）`;
+    note.textContent += `・古い ${fmtNum(data.dropped_periods)} 期間は省略`;
   }
   conf.render(data[conf.field] || [], Boolean(data.prev_period));
 }
@@ -1094,7 +2036,7 @@ function matrixRangeNote(st, data) {
     ? `${st.since || data.first_date} 〜 ${st.until || data.last_date} の ${fmtNum(count)} ${unit}`
     : `直近 ${fmtNum(count)} ${unit}`;
   return head + (data.older_periods
-    ? `（これより古い ${fmtNum(data.older_periods)} ${MATRIX_COUNT_UNIT[st.granularity]}は出していません）`
+    ? `・古い ${fmtNum(data.older_periods)} ${MATRIX_COUNT_UNIT[st.granularity]}は省略`
     : "");
 }
 
@@ -1154,8 +2096,7 @@ function renderMatrix(id) {
     const sub = document.createElement("i");
     sub.textContent = conf.colHead(p);
     th.append(date, sub);
-    th.title = `${conf.colTitle(p, st.granularity)}`
-      + `\nこの列の${conf.metric}順に並べ替え、下の${conf.label}表もこの期間にします。`;
+    th.title = conf.colTitle(p, st.granularity);
     if (p.key === st.sort) {
       th.classList.add("on");
       sub.append(" ", matrixSortMark(st.asc));
@@ -1163,9 +2104,9 @@ function renderMatrix(id) {
     th.addEventListener("click", () => sortMatrix(id, p.key));
     head.appendChild(th);
   });
-  matrixSortTh(head, id, st, "total", "通算", "出している列の合計です。");
-  matrixSortTh(head, id, st, "count", `${countUnit}数`, `投げた${countUnit}の数です。`);
-  matrixSortTh(head, id, st, "trend", "伸び", "窓の後半と前半の差（後半 − 前半）です。");
+  matrixSortTh(head, id, st, "total", "通算");
+  matrixSortTh(head, id, st, "count", `${countUnit}数`);
+  matrixSortTh(head, id, st, "trend", "伸び");
 
   // 今の並び順での順位を行頭に出す。昇順のときは付けない(1が最下位になり、順位の意味が
   // 反転する)。列で並べているときは未投稿を下へ落とし、0どうしには順位を振らない
@@ -1187,7 +2128,6 @@ function renderMatrix(id) {
     who.appendChild(userCell(row, {
       hideId: true,
       href: row.identity_key ? `/fans?fan=${encodeURIComponent(row.identity_key)}` : "",
-      linkTitle: "この視聴者のFan台帳（全配信者横断の実績）を開きます。",
     }));
     keys.forEach((key) => {
       const td = tr.insertCell();
@@ -1212,8 +2152,7 @@ function renderMatrix(id) {
 
   const shown = rows.length;
   const total = data[conf.countField] || shown;
-  note.textContent = `${conf.label} ${fmtNum(total)} 人`
-    + (total > shown ? `（上位 ${fmtNum(shown)} 人を表示）` : "")
+  note.textContent = `${conf.label} ${total > shown ? `${fmtNum(shown)} / ` : ""}${fmtNum(total)} 人`
     + ` · ${matrixRangeNote(st, data)}`;
   renderMatrixLegend(legend, conf.metric, min, max);
 }
@@ -1233,9 +2172,8 @@ function matrixSortMark(asc) {
   return el;
 }
 
-function matrixSortTh(head, id, st, key, text, title) {
+function matrixSortTh(head, id, st, key, text) {
   const th = matrixTh(text, "sm-mx-num");
-  th.title = `${title}\n押すとこの順に並べ替えます（もう一度押すと昇順）。`;
   if (st.sort === key) {
     th.classList.add("on");
     th.append(" ", matrixSortMark(st.asc));
@@ -1315,7 +2253,6 @@ function renderLivers(livers) {
       userCell(l, {
         stackId: true,
         href: l.identity_key ? `/fans?fan=${encodeURIComponent(l.identity_key)}` : "",
-        linkTitle: "この視聴者のFan台帳（全配信者横断の実績）を開きます。",
       }),
       fmtNum(l.diamonds),
       fmtNum(l.gifts),
@@ -1343,7 +2280,6 @@ function fmtMinutes(seconds) {
 }
 
 function renderCoop(c) {
-  const empty = document.getElementById("sm-coop-empty");
   const mix = document.getElementById("sm-coop-mix");
   const legend = document.getElementById("sm-coop-legend");
   mix.innerHTML = "";
@@ -1351,23 +2287,12 @@ function renderCoop(c) {
   // コラボ側が未計測(現行ruleの窓がまだ1件も無い)間は、0%ではなく「—」で名乗らない。
   // 0%と出すとその時間が全部ソロに見え、旧ruleとは逆向きの嘘になる。
   const ready = !!(c && c.collab_available);
-  const skipped = (c && c.unobserved_sessions) || 0;
-  document.getElementById("sm-coop-note").textContent = !ready
-    ? "（コラボは現行ruleで再計測中。コラボ・ソロ・共演計は未計測）"
-    : skipped
-      ? `（コラボ収集開始前の ${fmtNum(skipped)} 配信は集計対象外）`
-      : "";
   if (!c || !c.active_seconds) {
     chipBar("sm-coop", []);
-    empty.textContent = skipped
-      ? "コラボの収集を始める前の配信しかありません。"
-      : "配信時間の記録がありません。";
-    empty.classList.remove("hidden");
     // 配信者を選び直した時に前の人のグラフが残らないよう、空でも描き直す。
     renderCoopTrend([]);
     return;
   }
-  empty.classList.add("hidden");
   // 未計測のときに出せるのはBattle側だけ。Battle窓はbattles表由来でコラボ窓に依存しない。
   const pct = (v) => (ready ? `${v.toFixed(1)}%` : "—");
   chipBar("sm-coop", [
@@ -1424,15 +2349,12 @@ const COOP_COLLAB_COLOR = COOP_SEGMENTS.find((s) => s.key === "collab").color;
 let coopTrendChart = null;
 
 function renderCoopTrend(series) {
-  const empty = document.getElementById("sm-coop-trend-empty");
   const note = document.getElementById("sm-coop-trend-note");
   // コラボが1秒も無ければ、0%が並ぶだけの帯を出しても読めるものが無い。
   const hasCollab = series.some((s) => s.collab_seconds > 0);
   document.getElementById("sm-coop-trend").parentElement.classList.toggle("hidden", !hasCollab);
-  empty.classList.toggle("hidden", hasCollab);
-  empty.textContent = "コラボの記録がありません。";
   note.textContent = hasCollab
-    ? `直近${series.length}配信・点線=直近${COOP_TREND_WINDOW}配信の時間加重移動平均`
+    ? `直近${series.length}配信・点線=${COOP_TREND_WINDOW}配信平均`
     : "";
   if (!hasCollab) {
     coopTrendChart.update([]);
@@ -1529,7 +2451,7 @@ function renderBattle(b) {
     `貢献者${b.key_contrib_threshold}+ 自室/陣営`;
   // 不成立(全陣営が閾値以下)で外した戦数。出さないと対戦数が実際の枠数と食い違って見える。
   document.getElementById("sm-battle-note").textContent = b.no_contest
-    ? `（全陣営のScoreが${b.no_contest_score}以下の ${fmtNum(b.no_contest)} 戦は除外）`
+    ? `${b.no_contest_score}以下 ${fmtNum(b.no_contest)} 戦を除外`
     : "";
 }
 
@@ -1567,16 +2489,9 @@ function renderOpponentRows() {
     // 同値は対戦数の多い順を第2キーにする(率で並べた時に1戦だけの相手が上に来ないように)。
     .sort((a, b) => keyOf(b) - keyOf(a) || b.battles - a.battles);
   document.getElementById("sm-opp-note").textContent = opponentsAll.length
-    ? `（${fmtNum(opponentsAll.length)} 名中 ${fmtNum(rows.length)} 名）`
+    ? `${fmtNum(rows.length)} / ${fmtNum(opponentsAll.length)}`
     : "";
-  if (opponentsAll.length && !rows.length) {
-    setListMessage(
-      document.getElementById("sm-opponents-empty"),
-      "条件に合う対戦相手がいません。絞込を緩めてください。",
-    );
-  } else {
-    setListMessage(document.getElementById("sm-opponents-empty"), "Battleの記録がありません。");
-  }
+  setListMessage(document.getElementById("sm-opponents-empty"), "");
   renderTableRows(
     "sm-opponents",
     "sm-opponents-empty",
@@ -1600,7 +2515,6 @@ function renderOpponentRows() {
       tr.classList.add("row-clickable");
       tr.classList.toggle("sm-opp-picked", !!pickedOpponent && pickedOpponent.key === o.key);
       tr.tabIndex = 0;
-      tr.title = "clickでこの相手とのBattle履歴に絞込";
       tr.addEventListener("click", () => pickOpponent(o));
       tr.addEventListener("keydown", (e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
@@ -1648,7 +2562,6 @@ function renderBattleGifterRows(rows, hasPrev) {
       userCell(g, {
         stackId: true,
         href: g.identity_key ? `/fans?fan=${encodeURIComponent(g.identity_key)}` : "",
-        linkTitle: "この視聴者のFan台帳（全配信者横断の実績）を開きます。",
       }),
       fmtNum(g.diamonds),
       fmtNum(g.gifts),
@@ -1682,7 +2595,6 @@ function battleVideoCell(h) {
   btn.className = "btn btn-small";
   btn.textContent = "▶ 再生";
   const label = `Battle ${fmtDateTime(h.started_at)}（録画 #${sessionNo(h.session_id)}）`;
-  btn.title = `${label} の場面から再生します。`;
   btn.addEventListener("click", async (e) => {
     // 行clickはBattle結果modalを開く。buttonを押した時に両方走らせない。
     e.stopPropagation();
@@ -1731,15 +2643,7 @@ function renderBattleHistoryRows() {
     document.getElementById("sm-battle-history-filter-label").textContent =
       `${name} との対戦 ${fmtNum(rows.length)} 戦`;
   }
-  document.getElementById("sm-battle-history-note").textContent = battleHistoryAll.length
-    ? `（新しい順・${fmtNum(rows.length)} / ${fmtNum(battleHistoryAll.length)} 戦）`
-    : "（新しい順）";
-  setListMessage(
-    document.getElementById("sm-battle-history-empty"),
-    pickedOpponent
-      ? "この相手との対戦は履歴にありません。"
-      : "Battleの記録がありません。",
-  );
+  setListMessage(document.getElementById("sm-battle-history-empty"), "");
   renderTableRows(
     "sm-battle-history",
     "sm-battle-history-empty",
@@ -1771,7 +2675,6 @@ function renderBattleHistoryRows() {
     (tr, h) => {
       tr.classList.add("row-clickable");
       tr.tabIndex = 0;
-      tr.title = "clickでBattle結果を表示";
       tr.addEventListener("click", () => showBattleDetail(h));
       tr.addEventListener("keydown", (e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
@@ -1838,7 +2741,6 @@ function closeBattleDetail() {
 let battleTrendChart = null;
 function renderBattleTrend(history) {
   const ordered = history.slice().reverse(); // backendは新しい順 → 時系列(古い→新しい)へ
-  document.getElementById("sm-battle-trend-empty").classList.toggle("hidden", ordered.length > 0);
   document.getElementById("sm-battle-trend-note").textContent = ordered.length ? `${ordered.length} 戦` : "";
   battleTrendChart.update(ordered);
 }
@@ -2396,19 +3298,10 @@ function renderWhales(data) {
   const days = data.days || [];
   const tiers = data.tiers || [];
   const total = data.total;
-  if (tiers.length) {
-    document.querySelectorAll(".sm-whale-floor")
-      .forEach((el) => { el.textContent = tiers[0].min_label; });
-  }
-  if (total) {
-    document.querySelectorAll(".sm-whale-total-floor")
-      .forEach((el) => { el.textContent = total.min_label; });
-  }
   const people = days.reduce(
     (a, d) => a + (d.tiers || []).reduce((x, n) => x + n, 0), 0,
   );
-  document.getElementById("sm-whale-empty").classList.toggle("hidden", people > 0);
-  // 1人も居ないなら段を並べても0の平線が並ぶだけ。案内文だけを残してgraphは畳む。
+  // 1人も居ないなら段を並べても0の平線が並ぶだけなので、graphごと畳む。
   document.getElementById("sm-whale-panels").classList.toggle("hidden", people === 0);
   // 見出しの最大人数は合計段(大口の下限以上)のもの。全帯の和で数えた空判定とは母数が
   // 違うので、どの下限の数なのかを添える。
@@ -2616,11 +3509,10 @@ function discoverHead(labels) {
   });
 }
 
-function actionButton(label, title, onClick, danger) {
+function actionButton(label, onClick, danger) {
   const btn = document.createElement("button");
   btn.className = "btn btn-small" + (danger ? " btn-danger" : "");
   btn.textContent = label;
-  btn.title = title;
   btn.addEventListener("click", async () => {
     btn.disabled = true;
     try {
@@ -2639,7 +3531,6 @@ function actionButton(label, title, onClick, danger) {
 async function loadDiscover() {
   const isCandidates = discoverMode === "candidates";
   const title = document.getElementById("sm-discover-title");
-  const note = document.getElementById("sm-discover-note");
   const empty = document.getElementById("sm-discover-empty");
   document.getElementById("sm-discover-message").textContent = "";
   document.getElementById("sm-discover-tab-candidates").classList.toggle("btn-primary", isCandidates);
@@ -2655,7 +3546,6 @@ async function loadDiscover() {
   } catch (err) {
     // 取得失敗を0件として描くと「候補はいない」という誤った事実の提示になる。
     discoverHead([]);
-    note.textContent = "";
     setListState(empty, "failed", err);
     discoverBusy(false);
     return;
@@ -2668,15 +3558,8 @@ async function loadDiscover() {
 
 function renderCandidates(payload) {
   const rows = payload.candidates || [];
-  document.getElementById("sm-discover-note").textContent =
-    `対戦${payload.min_contacts}回以上の未監視の配信者 ${payload.eligible} 名のうち上位 ${rows.length} 名`
-    + `（対戦相手 ${payload.seen} 名を集計・半減期 ${payload.half_life_days} 日`
-    + `・却下 ${payload.dismissed} 名を除外）`;
   discoverHead(["#", "配信者", "対戦数", "直近の対戦", "スコア", "当たった監視配信者", "操作"]);
-  setListMessage(
-    document.getElementById("sm-discover-empty"),
-    "条件に合う候補がありません。設定の「候補に出す最小のBattle対戦数」を下げると増えます。",
-  );
+  setListMessage(document.getElementById("sm-discover-empty"), "");
   renderTableRows(
     "sm-discover-rows",
     "sm-discover-empty",
@@ -2687,7 +3570,7 @@ function renderCandidates(payload) {
       actions.appendChild(
         // 監視追加は非破壊で、いつでも外せる。同じ画面の「却下」に確認が無いのに
         // こちらだけ挟むのは重さが逆で、確認dialogそのものが読み飛ばされる。
-        actionButton("監視へ追加", `@${c.unique_id} の監視を開始します。（LIVE中なら接続し、設定に従って録画します。あとで監視対象から外せます）`, async () => {
+        actionButton("監視へ追加", async () => {
           await apiSend("POST", "/api/monitors", { unique_id: c.unique_id, record_video: true });
           showToast(`@${c.unique_id} の監視を開始しました。`);
           loadDiscover();
@@ -2695,7 +3578,7 @@ function renderCandidates(payload) {
         }),
       );
       actions.appendChild(
-        actionButton("却下", "この配信者を候補に出さないようにします（後から戻せます）。", async () => {
+        actionButton("却下", async () => {
           await apiSend("POST", `/api/discovery/${encodeURIComponent(c.unique_id)}/dismiss`);
           showToast(`@${c.unique_id} を候補から外しました。`);
           loadDiscover();
@@ -2716,8 +3599,6 @@ function renderCandidates(payload) {
 }
 
 function renderDismissed(rows) {
-  document.getElementById("sm-discover-note").textContent =
-    `候補に出さないようにした配信者 ${rows.length} 名`;
   discoverHead(["配信者", "却下した日時", "操作"]);
   setListMessage(
     document.getElementById("sm-discover-empty"),
@@ -2730,7 +3611,7 @@ function renderDismissed(rows) {
     (d) => [
       `@${d.unique_id}`,
       fmtDateTime(d.dismissed_at),
-      actionButton("候補へ戻す", "この配信者を再び候補に出します。", async () => {
+      actionButton("候補へ戻す", async () => {
         await apiSend("DELETE", `/api/discovery/${encodeURIComponent(d.unique_id)}/dismiss`);
         showToast(`@${d.unique_id} を候補に戻しました。`);
         loadDiscover();
@@ -2823,6 +3704,15 @@ Object.entries(MATRIX_TABLES).forEach(([id, conf]) => {
     document.getElementById(`${id}-until`).value = "";
     if (selectedUid) applyMatrix(id, selectedUid);
   });
+});
+document.getElementById("sm-mn-prev").addEventListener("click", () => stepMentionWeek(-1));
+document.getElementById("sm-mn-next").addEventListener("click", () => stepMentionWeek(1));
+document.getElementById("sm-mn-copy-all").addEventListener("click", copyMentionPost);
+document.getElementById("sm-mn-week").addEventListener("change", (e) => {
+  mention.week = e.target.value;
+  // 週が変われば顔ぶれも変わる。前の週で外した人の指定は持ち越さない。
+  mention.excluded = new Set();
+  if (selectedUid) loadMentions(selectedUid);
 });
 document.getElementById("sm-ai-btn").addEventListener("click", () => runAiReview(false));
 document.getElementById("sm-ai-rerun").addEventListener("click", () => runAiReview(true));

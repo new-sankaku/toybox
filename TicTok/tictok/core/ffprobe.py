@@ -85,32 +85,15 @@ async def run(args, *, timeout: float = DEFAULT_TIMEOUT_SECONDS, cwd=None) -> Pr
 
     取り消しはprocessの登録と、走らせる前後の ``check_cancelled`` の両方で見る。登録だけ
     だとprobeの列(segmentごとに1本)が最後まで走り切ってしまい、取り消しが次のphaseまで
-    届かない。"""
-    args = [str(a) for a in args]
-    cancel.check_cancelled()
-    extra = {"cwd": str(cwd)} if cwd is not None else {}
-    # awaitを跨ぐ区間なので ``phase`` ではなく ``timer``(perf側の使い分けを参照)。
-    with perf.timer("proc.ffprobe"):
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **extra,
-        )
-        cancel.register_process(proc)
-        try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout)
-        except asyncio.TimeoutError:
-            proc.kill()
-            # killした子のpipeは読み切らないと閉じない。``wait`` だけで済ませると、途中で
-            # 打ち切ったreadのtransportがGCまで残る(loopを跨ぐと閉じられずに例外を出す)。
-            await proc.communicate()
-            _log_timeout(args, timeout)
-            return ProbeResult(tuple(args), None, "", "")
-        finally:
-            cancel.forget_process(proc)
-    return ProbeResult(tuple(args), proc.returncode, _decode(out), _decode(err))
+    届かない。
+
+    実体は ``run_sync`` をworker threadで走らせる。以前は ``asyncio.create_subprocess_exec``
+    だったが、Windowsのそれはprocess生成(CreateProcess = diskからexeを読む)をevent loopの
+    threadで行う。Windows Updateが復元ポイントを作る間はC:のfile操作が十数秒返らず、
+    録画確定の検証probeでloopごと止まってlive接続が切れていた(2026-09-03の監査、stall
+    stack 26件中5件がここ)。threadなら止まるのはそのprobeだけで、loopはpingを送り続ける。
+    取り消しのtokenはcontextvarなので ``to_thread`` がそのまま持ち込む。"""
+    return await asyncio.to_thread(run_sync, args, timeout=timeout, cwd=cwd)
 
 
 def run_sync(args, *, timeout: float = DEFAULT_TIMEOUT_SECONDS, cwd=None) -> ProbeResult:

@@ -5,6 +5,8 @@ import re
 import secrets
 import time
 import types
+import zlib
+from datetime import datetime
 from pathlib import Path
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -64,7 +66,17 @@ def client(server):
 
 # stemの通し番号はmodule levelで持つ。fixtureの中に置くと関数scopeで毎testリセットされ、
 # record rootを跨いで同じstemが再利用される(前testの素材を次testが自分のものとして拾う)。
-_srv_stem_counter = itertools.count(1)
+#
+# 開始番号をmodule名でずらすのは、このfileが**2つのmodule instanceとして読み込まれる**ため
+# である: pytestが集めた ``test_server`` と、他のtest fileが ``from tests.test_server import``
+# で読む ``tests.test_server`` は別objectで、連番もそれぞれ1から始まる。record dirとDBは
+# 全testで共有される1つ(runtimeはimport時のsingleton)なので、同じ番号は**同じ録画path**を
+# 指す —— 片方が消したはずのmp4の隣に、もう片方が作った素材dir(ts/)が同じstemで残り、
+# 実体判定が実行順で嘘をつく(実測: 削除済みのmp4が file_exists=True と報告された)。
+# 番号帯をinstanceごとに分ければ衝突しない。crc32で決めるのは、実行ごとに変わる乱数だと
+# 落ちたときに再現できなくなるためである。
+_srv_stem_counter = itertools.count(
+    1 + 100000 * (zlib.crc32(__name__.encode("utf-8")) % 9))
 
 
 @pytest.fixture
@@ -2455,6 +2467,147 @@ def test_streamer_matrix_route_returns_days_and_rows(server, client):
     assert client.get("/api/streamers/matrixed/matrix?since=2026/01/01").status_code == 400
 
 
+def test_streamer_mentions_route(server, client):
+    """週のメンションの口。weekを省いたら最新の週が返り、日付の範囲と週の一覧も
+    一緒に名乗ること(画面はこの値でselectと見出しを組む)。"""
+    storage = server.runtime.storage
+    session_id = storage.create_session("mentioned", 60)
+    storage.add_event(session_id, {
+        "kind": "gift", "time": time.time(), "diamonds": 120, "gift_count": 1,
+        "user": {"user_id": "913", "unique_id": "fan", "nickname": "Fan", "avatar": "",
+                 "identity_key": "913", "fans_level": 0, "gifter_level": 0,
+                 "gifter_badge": "", "member_badge": ""},
+    })
+    storage.flush()
+
+    body = client.get("/api/streamers/mentioned/mentions").json()
+    assert body["week"]
+    # 週の代表は土曜の日付。窓は土曜7時から次の土曜7時で、名乗りには時刻が入る
+    # (日付だけだと土曜の朝がどちらの週とも読める)。
+    assert datetime.strptime(body["week"], "%Y-%m-%d").strftime("%A") == "Saturday"
+    start = datetime.strptime(body["start_label"], "%Y-%m-%d %H:%M")
+    end = datetime.strptime(body["end_label"], "%Y-%m-%d %H:%M")
+    assert start.strftime("%Y-%m-%d") == body["week"]
+    assert start.hour == 7 and end.hour == 7
+    assert (end - start).days == 7
+    assert body["weeks"][-1]["key"] == body["week"]
+    assert body["weeks"][-1]["label"] == body["start_label"]
+    assert [g["unique_id"] for g in body["gifters"]] == ["fan"]
+    assert body["gifter_count"] == 1
+    assert body["mentionable_count"] == 1
+    # コイン額の区分も同じ応答で返す。120コインなので「100コイン以上」の区分。
+    assert [t["label"] for t in body["tiers"]] == [
+        "10K以上", "5K以上", "1K以上", "100コイン以上"]
+    assert body["gifters"][0]["tier"] == 3
+    assert [t["count"] for t in body["tiers"]] == [0, 0, 0, 1]
+    assert body["below_count"] == 0
+    # 一覧に無い週は最新へ倒す(存在しない週の0人を、その週の名前で描かせない)。
+    assert client.get(
+        "/api/streamers/mentioned/mentions?week=1999-01-02").json()["week"] == body["week"]
+
+    # 行を開いたときのgift一覧。iconのURLはここで解決して渡す(画面は署名付きCDN URLを
+    # 直に引かない)。出せないgiftにはURLを付けない。
+    key = body["gifters"][0]["identity_key"]
+    gifts = client.get(
+        f"/api/streamers/mentioned/mentions/gifts?week={body['week']}"
+        f"&identity_key={key}").json()
+    assert gifts["diamonds"] == body["gifters"][0]["diamonds"] == 120
+    assert len(gifts["items"]) == 1
+    item = gifts["items"][0]
+    assert item["diamonds"] == 120
+    # CDN URLは画面へ渡さない(失効した署名URLを画面が直に引きに行くことになる)。
+    assert "image" not in item
+    assert set(gifts["icons"]) <= {str(item["gift_id"])}
+
+
+def test_user_alias_route(server, client):
+    """省略形の口。置くと貼る文面だけがその名前になり、空で外すと表示名へ戻ること。
+
+    識別子をbodyで受けるのは、identity_keyが表示名にもなり得るためである(表示名には
+    '/' も '?' も入るので、pathへ載せるとURLの区切りと区別が付かない)。
+    """
+    storage = server.runtime.storage
+    session_id = storage.create_session("aliased", 60)
+    storage.add_event(session_id, {
+        "kind": "gift", "time": time.time(), "diamonds": 5000, "gift_count": 1,
+        "user": {"user_id": "914", "unique_id": "fan", "nickname": "あきと🐢💤",
+                 "avatar": "", "identity_key": "914", "fans_level": 0,
+                 "gifter_level": 0, "gifter_badge": "", "member_badge": ""},
+    })
+    storage.flush()
+
+    assert client.put(
+        "/api/user-aliases",
+        json={"identity_key": "914", "alias": "あきと"}).json() == {
+            "identity_key": "914", "alias": "あきと"}
+    assert client.get("/api/user-aliases").json() == {"aliases": {"914": "あきと"}}
+
+    body = client.get("/api/streamers/aliased/mentions").json()
+    day = body["days"][0]
+    assert "🥇 あきと" in day["post_text"]
+    assert day["roster_text"].startswith("1. あきと　")
+    # 表の名前は変えない。順位の根拠なので、省略形だけにすると誰のことか確かめられない。
+    assert day["roster"][0]["nickname"] == "あきと🐢💤"
+    assert day["roster"][0]["alias"] == "あきと"
+
+    # 上限より長い省略形は受け取らない(貼る文面が1行に収まらなくなる)。
+    assert client.put(
+        "/api/user-aliases",
+        json={"identity_key": "914", "alias": "あ" * (body["alias_max"] + 1)},
+    ).status_code == 422
+
+    # 空で外すと行ごと消え、表示名へ戻る。
+    assert client.put(
+        "/api/user-aliases", json={"identity_key": "914", "alias": ""}).json()["alias"] == ""
+    assert client.get("/api/user-aliases").json() == {"aliases": {}}
+    again = client.get("/api/streamers/aliased/mentions").json()["days"][0]
+    assert "🥇 あきと🐢💤" in again["post_text"]
+
+
+def test_user_merge_route(server, client):
+    """サブアカウントの統合の口。束ねると日のGifterで1人になり、外すと戻ること。
+
+    週の一覧(＝@で呼ぶ相手)は畳まない。アカウントごとに別の@IDが要るので、束ねると
+    呼べない相手ができる。
+    """
+    storage = server.runtime.storage
+    session_id = storage.create_session("merged", 60)
+    for user_id, nickname, coins in (("914", "あきと", 3000), ("915", "あきと2", 2500)):
+        storage.add_event(session_id, {
+            "kind": "gift", "time": time.time(), "diamonds": coins, "gift_count": 1,
+            "user": {"user_id": user_id, "unique_id": f"fan{user_id}",
+                     "nickname": nickname, "avatar": "", "identity_key": user_id,
+                     "fans_level": 0, "gifter_level": 0, "gifter_badge": "",
+                     "member_badge": ""},
+        })
+    storage.flush()
+
+    merged = client.put(
+        "/api/user-merges", json={"member_key": "915", "primary_key": "914"}).json()
+    assert merged["primary"]["identity_key"] == "914"
+    assert [m["identity_key"] for m in merged["members"]] == ["915"]
+
+    body = client.get("/api/streamers/merged/mentions").json()
+    day = body["days"][0]
+    assert [(r["nickname"], r["diamonds"], r["accounts"]) for r in day["roster"]] == [
+        ("あきと", 5500, 2)]
+    # 週の一覧はアカウントごとのまま。外す相手は応答のmergesが名乗る。
+    assert [g["nickname"] for g in body["gifters"]] == ["あきと", "あきと2"]
+    assert [m["nickname"] for m in body["merges"][0]["members"]] == ["あきと2"]
+
+    # 1人を指さないkeyは受け取らない(別人のコインが1人に積まれる)。
+    assert client.put(
+        "/api/user-merges",
+        json={"member_key": "", "primary_key": "914"}).status_code == 422
+
+    assert client.request(
+        "DELETE", "/api/user-merges", json={"member_key": "915"}).json() == {
+            "member_key": "915"}
+    assert client.get("/api/user-merges").json() == {"merges": []}
+    again = client.get("/api/streamers/merged/mentions").json()["days"][0]
+    assert [r["diamonds"] for r in again["roster"]] == [3000, 2500]
+
+
 def test_streamer_ranking_route_refuses_an_unknown_granularity(client):
     """粒度は月・週・日だけ。黙って月へ倒すと、画面が別の切り方を出していても気づけない。"""
     response = client.get("/api/streamers/ranked/ranking?granularity=year")
@@ -4633,6 +4786,61 @@ async def test_the_sweep_keeps_the_signal_of_a_recording_still_inside_the_quiet_
     server.sweep_signal.note_recording_finished(ended)
     await server.startup._wait_next_sweep(1)  # 定期の1分で起きる。静穏待ちはまだ明けていない。
     assert server.sweep_signal.earliest() == ended, "静穏待ち中の合図が捨てられている"
+
+
+def test_a_cleanly_finished_recording_is_a_pack_candidate_at_once(server, monkeypatch):
+    """serverが捕捉ffmpegの終了を見届けた録画は、静穏待ちを飛ばしてts結合の候補になること。
+
+    静穏待ちは「まだ書いている者が居ないか」をfileの更新時刻から推定する代理でしかない。
+    確定直後に束ねれば、userが開く5〜15分より前にts結合とsidecarが揃う。合図の無い録画
+    (crash後の復旧・中断録画)は従来どおり直近の書き込みで外れること。"""
+    server.sweep_signal.clear()
+    clean, clean_dir = _sweep_recording(server, "00001_tester_20260101_120000", mtime_offset=-5)
+    other, _ = _sweep_recording(server, "00002_tester_20260101_120000", mtime_offset=-5)
+    clean["id"], other["id"] = 1, 2
+    monkeypatch.setattr(server.runtime.storage, "list_recordings",
+                        lambda limit=0: [clean, other])
+    server.sweep_signal.note_recording_finished(time.time(), clean_dir)
+
+    got = server.startup._sweep_candidates({"pack": 10})["pack"]
+
+    assert [r["id"] for r in got] == [1], "綺麗に終わった録画だけが直ちに候補になっていない"
+
+
+@pytest.mark.asyncio
+async def test_a_cleanly_finished_recording_wakes_the_sweep_at_once_without_spinning(
+    server, monkeypatch
+):
+    """綺麗に終わった録画の合図は静穏待ちを飛ばしてsweepを起こし、起こした後は同じ合図で
+    何度も起こさないこと(起こしても捨てないので、放っておくと空回りになる)。"""
+    import asyncio
+
+    values = {"sweep_interval_minutes": 30, "pack_sweep_quiet_minutes": 15}
+    real_get = server.runtime.settings.get
+    monkeypatch.setattr(server.runtime.settings, "get",
+                        lambda key, *a: values.get(key, real_get(key, *a)))
+    server.sweep_signal.clear()
+    clock = {"now": 10_000.0}
+    monkeypatch.setattr(server.startup.time, "time", lambda: clock["now"])
+
+    async def _fake_sleep(seconds):
+        clock["now"] += seconds
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+
+    server.sweep_signal.note_recording_finished(clock["now"], "C:/rec/tester/ts/00001")
+    started = clock["now"]
+    await server.startup._wait_next_sweep(30)
+    waited = clock["now"] - started
+    assert waited < 60, f"静穏待ちを飛ばして起きていない（{waited}秒待った）"
+    assert server.sweep_signal.is_clean("C:/rec/tester/ts/00001"), "候補判定に要る合図が捨てられている"
+
+    started = clock["now"]
+    await server.startup._wait_next_sweep(30)
+    waited = clock["now"] - started
+    assert waited >= 14 * 60, f"起こし済みの合図で空回りしている（{waited}秒で起きた）"
+    assert not server.sweep_signal.is_clean("C:/rec/tester/ts/00001"), (
+        "静穏待ちが明けた合図が残っている")
 
 
 # ===== reel(切り出しの連結) =====

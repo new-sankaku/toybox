@@ -307,16 +307,14 @@ describe("videos.js の時間軸と対応付け", () => {
   });
 
   describe("素材版の可否", () => {
-    it("持っていない版は選べなくし、理由をtooltipに出す", () => {
+    it("持っていない版は選べなくする", () => {
       state().variantKinds = ["source"];
       win.applyVariantAvailability();
       const items = Array.from(doc.querySelectorAll("#clip-variant .seg-item"));
       const source = items.find((b) => b.dataset.value === "source");
       const overlay = items.find((b) => b.dataset.value === "overlay");
       expect(source.disabled).toBe(false);
-      expect(source.title).toBe("");
       expect(overlay.disabled).toBe(true);
-      expect(overlay.title).toContain("ありません");
     });
 
     it("持っている版はすべて開ける", () => {
@@ -378,18 +376,18 @@ describe("videos.js の時間軸と対応付け", () => {
       expect(on).toEqual([false, true, false]);
     });
 
-    it("★の切り替えでaria-pressedとtooltipも一致する", () => {
+    it("★の切り替えでaria-pressedとaria-labelも一致する", () => {
       state().comments = [{ id: 10, t: 5, body: "x" }];
       state().bookmarks = [{ source_hit_id: 10 }];
       win.renderComments();
       const mark = doc.querySelector("#comments .vd-cmt-mark");
       expect(mark.getAttribute("aria-pressed")).toBe("true");
-      expect(mark.title).toBe("見どころから外す");
+      expect(mark.getAttribute("aria-label")).toBe("見どころから外す");
 
       state().bookmarks = [];
       win.syncCommentMarks();
       expect(mark.getAttribute("aria-pressed")).toBe("false");
-      expect(mark.title).toBe("この位置を見どころに記録");
+      expect(mark.getAttribute("aria-label")).toBe("見どころに記録");
     });
 
     it("行数よりコメントが少なくなっても落ちない", () => {
@@ -506,11 +504,11 @@ describe("videos.js の時間軸と対応付け", () => {
     // 幅の実測に使うcontext(stubは1文字6px)。名前を出すときの場所取りがこれで決まる。
     const ctx = () => doc.getElementById("heat").getContext("2d");
     const pick = (gifts, size = 10, rows = 1, withName = false) =>
-      win.pickGiftIcons(ctx(), gifts, asX, 200, size, rows, withName);
+      win.pickGifts(ctx(), gifts, asX, 200, size, rows, withName);
 
     it("重なる位置では高額なgiftだけを残す", () => {
       expect(pick([gift(10, 1), gift(14, 500), gift(60, 5)])
-        .map((p) => p.gift.diamonds)).toEqual([500, 5]);
+        .map((p) => p.data.diamonds)).toEqual([500, 5]);
     });
 
     it("iconの一辺ぶん離れていれば両方残す", () => {
@@ -532,7 +530,7 @@ describe("videos.js の時間軸と対応付け", () => {
       // 隣のgiftまで消える。
       state().giftIcons = { 22: "/api/gift-icon?gift_id=22" };
       const picked = win.giftIconsInWindow(ctx(), { start: 10, end: 100 }, asX, 200, 10, 1);
-      expect(picked.map((p) => p.gift.gift_id)).toEqual([22]);
+      expect(picked.map((p) => p.data.gift_id)).toEqual([22]);
     });
 
     // 送り主を添える版。名前のぶん1件が横に広がるので、場所取りがiconの幅のままだと
@@ -551,19 +549,19 @@ describe("videos.js の時間軸と対応付け", () => {
       it("名前のぶんまで場所を取る(iconの幅だけでは名前が重なる)", () => {
         // 3文字=18px。1件の幅は max(icon 10, 18+2)=20 なので、20px差では並べられない。
         const gifts = [named(50, 9, "あいうえお"), named(70, 5, "かきくけこ")];
-        expect(pick(gifts, 10, 1, true).map((p) => p.gift.diamonds)).toEqual([9]);
-        expect(pick(gifts, 10, 1, false).map((p) => p.gift.diamonds)).toEqual([9, 5]);
+        expect(pick(gifts, 10, 1, true).map((p) => p.data.diamonds)).toEqual([9]);
+        expect(pick(gifts, 10, 1, false).map((p) => p.data.diamonds)).toEqual([9, 5]);
       });
 
       it("同じ列に置けないものは下の段へ回す(段が在れば落とさない)", () => {
         const picked = pick([named(50, 9, "あいう"), named(70, 5, "かきく")], 10, 2, true);
-        expect(picked.map((p) => [p.gift.diamonds, p.row])).toEqual([[9, 0], [5, 1]]);
+        expect(picked.map((p) => [p.data.diamonds, p.row])).toEqual([[9, 0], [5, 1]]);
       });
 
       it("段が尽きたら落とす(高額なものから段を埋める)", () => {
         const picked = pick(
           [named(50, 1, "あいう"), named(55, 9, "かきく"), named(60, 5, "さしす")], 10, 2, true);
-        expect(picked.map((p) => [p.gift.diamonds, p.row])).toEqual([[9, 0], [5, 1]]);
+        expect(picked.map((p) => [p.data.diamonds, p.row])).toEqual([[9, 0], [5, 1]]);
       });
 
       it("段が空いていれば全て最上段へ載る(混んだ時だけ下へ伸びる)", () => {
@@ -593,7 +591,8 @@ describe("videos.js の時間軸と対応付け", () => {
       state().gifts = [{ t: 50, diamonds: 9, gift_id: 22 }];
       state().giftIcons = { 22: "/api/gift-icon?gift_id=22" };
       // 読み込み済みのicon画像。jsdomは画像を取りに行かないので、載る条件だけを与える。
-      page.run('giftIconImages.set("22", { complete: true, naturalWidth: 24 })');
+      page.run(
+        'iconImages.set("/api/gift-icon?gift_id=22", { complete: true, naturalWidth: 24 })');
       page.run("giftLayout = null");
       setDuration(100);
       setCurrentTime(0);
@@ -628,7 +627,8 @@ describe("videos.js の時間軸と対応付け", () => {
     });
 
     it("icon画像を取れなかったgiftは描かない(別の絵で代用しない)", () => {
-      page.run('giftIconImages.set("22", { complete: true, naturalWidth: 0 })');
+      page.run(
+        'iconImages.set("/api/gift-icon?gift_id=22", { complete: true, naturalWidth: 0 })');
       const canvas = sizeCanvas("heat", 200, 60);
       win.drawHeat();
       expect(drawnIcons(canvas)).toHaveLength(0);

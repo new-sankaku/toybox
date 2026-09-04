@@ -1,5 +1,6 @@
 import math
 import subprocess
+from tests.conftest import popen_via
 import types
 from fractions import Fraction
 
@@ -100,6 +101,7 @@ def _patch_reel_ffmpeg(monkeypatch, captured, streams=None, durations=None):
                                      kill=lambda: None)
 
     monkeypatch.setattr(concat_mod.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(subprocess, "Popen", popen_via(fake_exec))
 
     async def fake_duration(path):
         # 中間TSはkeyframe境界のぶん要求より長く出る。reel本体はその合計になる。

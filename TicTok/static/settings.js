@@ -126,14 +126,14 @@ function buildDefaultRow(item, control) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "btn btn-small";
-  button.textContent = "既定値へ戻す";
+  button.textContent = "戻す";
   button.title = `既定値: ${item.default}`;
   button.addEventListener("click", () => applyDefault(item, control));
   row.appendChild(button);
   if (item.default_source === "env") {
     const note = document.createElement("span");
     note.className = "s-envnote";
-    note.textContent = `環境変数 ${item.env} で上書き中（本来の既定値: ${item.builtin_default}）`;
+    note.textContent = `環境変数 ${item.env} で上書き中（既定値 ${item.builtin_default}）`;
     row.appendChild(note);
   }
   // 保存済みの値が現在の定義に適合しないkey。serverはこの値のまま動かし、理由をinvalidで
@@ -143,8 +143,7 @@ function buildDefaultRow(item, control) {
   if (item.invalid) {
     const note = document.createElement("span");
     note.className = "s-envnote";
-    note.textContent = `保存済みの値「${item.value}」は現在の定義に適合しません（${item.invalid}）。`
-      + "この値のまま動いています。選び直して保存してください。";
+    note.textContent = `保存済みの「${item.value}」は定義に適合しません（${item.invalid}）。この値のまま動作中。`;
     row.appendChild(note);
   }
   return row;
@@ -180,12 +179,29 @@ function buildField(item) {
   note.className = "s-cell s-note";
   note.textContent =
     isText || hasOptions ? item.note : `${item.note}（${item.min}〜${item.max}）`;
+  // 長い経緯(なぜその既定値なのか・実測値)はhoverへ逃がす。一覧の行に置くと1項目が
+  // 数行を占め、値と説明の対応が読めなくなる — 表として使えるのは1行1項目のときだけ。
+  if (item.detail) {
+    note.title = item.detail;
+    note.classList.add("s-note-more");
+  }
 
   [label, control, note].forEach((cell) => {
     cell.dataset.key = item.key;
     cell.dataset.category = item.category;
-    cell.dataset.search = `${item.key} ${item.label} ${item.note}`.toLowerCase();
+    cell.dataset.search =
+      `${item.key} ${item.label} ${item.note} ${item.detail || ""}`.toLowerCase();
   });
+  // 見本画像の一覧は、設定値の列の幅では2枚しか並ばず1項目で画面2つ分を占める。この行
+  // だけ設定値の列を右端まで伸ばし、説明はその中へ入れる(3 cellの並びを崩さないため、
+  // 説明cellをgridへ直接置かない)。
+  if (hasGallery) {
+    control.classList.add("s-control-wide");
+    note.classList.add("s-note-inline");
+    control.appendChild(note);
+    form.append(label, control);
+    return;
+  }
   form.append(label, control, note);
 }
 
@@ -283,8 +299,7 @@ function previewWindowText(result) {
   if (!result) return "";
   const from = fmtDuration(result.window_start_seconds);
   const to = fmtDuration(result.window_end_seconds);
-  const how = result.window_auto ? "自動選定" : "指定";
-  return `切り出し区間: ${from} 〜 ${to}（${how}）`;
+  return `${from} 〜 ${to}（${result.window_auto ? "自動選定" : "指定"}）`;
 }
 
 function fillPreviewRecordings(recordings) {
@@ -294,7 +309,7 @@ function fillPreviewRecordings(recordings) {
   );
   if (!usable.length) {
     const opt = document.createElement("option");
-    opt.textContent = "プレビューできる録画がありません";
+    opt.textContent = "録画なし";
     opt.value = "";
     previewSelect.appendChild(opt);
     previewStillBtn.disabled = true;
@@ -338,8 +353,8 @@ previewStillBtn.addEventListener("click", async () => {
     img.alt = "焼き込みプレビュー(静止画)";
     previewOutputEl.appendChild(img);
     previewMetaEl.textContent =
-      `表示time刻: ${fmtDuration(res.at_seconds)}（${res.window_auto ? "自動選定" : "指定"}）`
-      + (res.comments_drawn ? "" : " / この時刻に表示中のコメントはありません");
+      `${fmtDuration(res.at_seconds)}（${res.window_auto ? "自動選定" : "指定"}）`
+      + (res.comments_drawn ? "" : " / コメントなし");
     previewStatusEl.textContent = "生成しました。";
   } catch (err) {
     // 前回の画像を残したまま失敗文言だけ差し替えると、古い絵を新しい結果として読む。
@@ -362,9 +377,8 @@ previewClipBtn.addEventListener("click", async () => {
   try {
     const res = await apiSend("POST", `/api/recordings/${id}/preview/clip`);
     previewJobs.set(res.job_id, id);
-    previewStatusEl.textContent = "queueへ投入しました。順番が来ると焼き込みが始まります。";
-    showToast("プレビュー動画をqueueへ投入しました。順番が来ると焼き込みが始まります。",
-      null, { title: "焼き込みプレビュー" });
+    previewStatusEl.textContent = "queueへ投入しました。";
+    showToast("queueへ投入しました。", null, { title: "焼き込みプレビュー" });
   } catch (err) {
     previewStatusEl.textContent = err.message;
     showError(err, "プレビュー動画の生成");
@@ -519,11 +533,9 @@ function renderRetentionPlan(plan) {
   });
   const total = document.createElement("div");
   total.className = "chart-note";
-  total.textContent = `合計 ${fmtNum(plan.total_items)} 件 / ${fmtBytesGb(plan.total_bytes)} を削除できます。`
-    + (plan.protected_count ? ` 保護中の録画 ${fmtNum(plan.protected_count)} 件は対象外です。` : "")
-    + (plan.free_target_bytes
-      ? ` 空き容量が ${fmtGb(plan.free_target_bytes)} GB に達した時点で打ち切ります。`
-      : "");
+  total.textContent = `合計 ${fmtNum(plan.total_items)} 件 / ${fmtBytesGb(plan.total_bytes)}`
+    + (plan.protected_count ? ` / 保護中 ${fmtNum(plan.protected_count)} 件は対象外` : "")
+    + (plan.free_target_bytes ? ` / 空き ${fmtGb(plan.free_target_bytes)} GBで打ち切り` : "");
   retentionPlanEl.appendChild(total);
 }
 
@@ -535,9 +547,7 @@ retentionPreviewBtn.addEventListener("click", async () => {
     const res = await apiSend("POST", "/api/storage/retention", { apply: false });
     renderRetentionPlan(res.plan);
     retentionApplyBtn.disabled = res.plan.total_items === 0;
-    retentionStatusEl.textContent = res.plan.total_items
-      ? "削除内容を確認してください。まだ何も削除していません。"
-      : "削除対象はありません。";
+    retentionStatusEl.textContent = res.plan.total_items ? "未削除" : "対象なし";
   } catch (err) {
     // 前回のplanを残すと、それを今回の対象と読んだまま「削除する」へ進める動線になる。
     retentionPlanEl.innerHTML = "";
@@ -550,7 +560,7 @@ retentionPreviewBtn.addEventListener("click", async () => {
 
 retentionApplyBtn.addEventListener("click", async () => {
   const ok = await confirmDialog(
-    "確認した内容を削除します。生録画を含む場合、この操作は取り消せません。実行しますか？",
+    "生録画を含む場合、この削除は取り消せません",
     { title: "保持policyの適用", confirmLabel: "削除する" },
   );
   if (!ok) return;
@@ -562,7 +572,7 @@ retentionApplyBtn.addEventListener("click", async () => {
     renderRetentionPlan(res.plan);
     const text =
       `${fmtNum(res.result.removed_items)} 件・${fmtBytesGb(res.result.freed_bytes)} を削除しました。`
-      + (res.result.stopped_at ? "（空き容量が目標に達したため途中で打ち切りました）" : "");
+      + (res.result.stopped_at ? "（空き容量が目標に達し打ち切り）" : "");
     retentionStatusEl.textContent = text;
     showToast(text, null, { title: "保持policyの適用" });
     loadDiskBar();
@@ -582,7 +592,7 @@ retentionApplyBtn.addEventListener("click", async () => {
 const MAINTENANCE_REASONS = { manual: "手動", premigration: "migration前" };
 
 function maintenanceButtons() {
-  return ["mnt-backup", "mnt-integrity", "mnt-checkpoint", "mnt-vacuum"]
+  return ["mnt-backup", "mnt-integrity", "mnt-checkpoint", "mnt-vacuum", "mnt-unfreeze"]
     .map((id) => document.getElementById(id));
 }
 
@@ -593,19 +603,59 @@ function setMaintenanceBusy(busy, text) {
   el.textContent = text || "";
 }
 
+function renderMaintenanceGuard(data) {
+  // 行数の見張り。凍結は**放置してよい状態ではない**ので、summaryの一部ではなく独立した
+  // 行として出し、解除のbuttonもそこにだけ現れるようにする。
+  const guard = data.guard || {};
+  const el = document.getElementById("mnt-guard");
+  const btn = document.getElementById("mnt-unfreeze");
+  const frozen = Boolean(guard.frozen);
+  btn.hidden = !frozen;
+  if (!frozen) {
+    const watched = (guard.tables || []).length;
+    if (!watched) { el.hidden = true; return; }
+    el.hidden = false;
+    el.classList.remove("data-warning");
+    el.textContent = `行数の見張り: ${fmtNum(watched)}表 / 急減とみなす割合 `
+      + `${guard.ratio ? `${(guard.ratio * 100).toFixed(1)}%` : "検知しない"}`
+      + (guard.updated_at ? ` / 前回 ${fmtDateTime(guard.updated_at)}` : "");
+    return;
+  }
+  el.hidden = false;
+  el.classList.add("data-warning");
+  // key名は台帳(dbmaint.freeze_prune)が書く物に合わせる。since/drops を at/dropped で
+  // 読んでいたため、凍結中でも日時と表名が空のまま出ていた。
+  const frozenAt = guard.frozen.since ? fmtDateTime(guard.frozen.since) : "";
+  const dropped = (guard.frozen.drops || [])
+    .map((d) => `${d.table} ${fmtNum(d.before)}→${fmtNum(d.after)}`).join(" / ");
+  el.textContent = `行数の急減で古い退避の削除を停止中`
+    + `${frozenAt ? `（${frozenAt}）` : ""}。${dropped}`;
+}
+
 function renderMaintenance(data) {
   const db = data.db || {};
+  const scheduled = data.scheduled || {};
   const parts = [
     `DB ${fmtGb(db.bytes)}GB / WAL ${fmtGb(db.wal_bytes)}GB`,
     `空き ${fmtGb(db.free_bytes)}GB`,
     `退避先 ${data.backup_dir}`,
     `保持世代 ${data.keep === 0 ? "無制限" : `${fmtNum(data.keep)}世代`}（種別ごと）`,
+    `自動退避 日次${fmtNum(scheduled.keep_daily)}日 / 週次${fmtNum(scheduled.keep_weekly)}週`,
   ];
   if (!data.before_migration) {
     // 既定はONなので、OFFであることは表示しないと気付けない。
     parts.push("migration前の自動退避: 無効");
   }
   document.getElementById("mnt-summary").textContent = parts.join(" / ");
+
+  renderMaintenanceGuard(data);
+
+  // どの世代がどの層で残るか。名前で引けるようにしておき、行に添える。層が読めないと
+  // 「なぜこの世代だけ古いのに残っているのか」が画面から分からない。
+  const layers = new Map();
+  (scheduled.daily || []).forEach((name) => layers.set(name, "日次"));
+  (scheduled.weekly || []).forEach((name) => layers.set(name, "週次"));
+  (scheduled.expiring || []).forEach((name) => layers.set(name, "次回削除"));
 
   const tbody = document.getElementById("mnt-rows");
   tbody.replaceChildren();
@@ -614,7 +664,11 @@ function renderMaintenance(data) {
     [
       { value: item.name, cls: "ident" },
       { value: MAINTENANCE_REASONS[item.reason] || item.reason },
-      { value: fmtDateTime(item.created_at) },
+      // file名に焼き付いた取得時刻を出す。mtime(created_at)ではない —— 別driveへcopyし
+      // 直した退避はmtimeがcopy時刻になり、いつの姿かを取り違える。刈り取りの判断も
+      // 同じ値(taken_at)で行っている。
+      { value: fmtDateTime(item.taken_at ?? item.created_at) },
+      { value: layers.get(item.name) || "" },
       { value: `${fmtGb(item.bytes)}GB` },
     ].forEach(({ value, cls }) => {
       const td = document.createElement("td");
@@ -656,16 +710,27 @@ async function runMaintenance(path, body, running, done, label) {
 }
 
 document.getElementById("mnt-backup").addEventListener("click", () => runMaintenance(
-  "/api/maintenance/backup", undefined, "退避中…（DBの大きさに応じて時間がかかります）",
+  "/api/maintenance/backup", undefined, "退避中…",
   (data) => `退避しました: ${data.backup.name}（${fmtGb(data.backup.bytes)}GB）`,
   "DBの退避",
 ));
 
+// 凍結の解除は人にしかできない。確認を挟むのは、押した先で消えるのが「事故の前の姿」で
+// あり得るためで、取り消す手段が無い唯一の操作だからである。
+document.getElementById("mnt-unfreeze").addEventListener("click", () => {
+  if (!window.confirm("古い退避の削除を再開します。行が減った理由を確かめた場合だけ解除してください。")) return;
+  return runMaintenance(
+    "/api/maintenance/unfreeze", undefined, "解除中…",
+    () => "凍結を解除しました。",
+    "凍結の解除",
+  );
+});
+
 document.getElementById("mnt-integrity").addEventListener("click", () => runMaintenance(
   "/api/maintenance/integrity-check", undefined, "健全性checkを実行中…",
   (data) => data.ok
-    ? "健全性check: 問題は見つかりませんでした。"
-    : `健全性check: ${fmtNum(data.problems.length)}件の問題を検出しました。詳細は運用log画面で確認してください。`,
+    ? "健全性check: 問題なし"
+    : `健全性check: ${fmtNum(data.problems.length)}件の問題（詳細は運用log）`,
   "健全性check",
 ));
 
@@ -673,20 +738,19 @@ document.getElementById("mnt-checkpoint").addEventListener("click", () => runMai
   "/api/maintenance/checkpoint", undefined, "WAL checkpointを実行中…",
   (data) => data.busy === 0
     ? `WALを書き戻しました（WAL ${fmtGb(data.wal_bytes)}GB）`
-    : `WALの一部は書き戻せませんでした（読み取り中の処理があります。WAL ${fmtGb(data.wal_bytes)}GB）`,
+    : `WALの一部は書き戻せません（読み取り中。WAL ${fmtGb(data.wal_bytes)}GB）`,
   "WAL checkpoint",
 ));
 
 document.getElementById("mnt-vacuum").addEventListener("click", async () => {
   const ok = await confirmDialog(
-    "VACUUMはDB fileを作り直します。実行中は収集を含む全ての書き込みが待たされ、"
-    + "DBとほぼ同じ大きさの一時領域も必要です。配信の収集中は避けてください。",
+    "VACUUM中はDBへの書き込みが止まります",
     { title: "VACUUMを実行しますか？", confirmLabel: "VACUUMを実行" },
   );
   if (!ok) return;
   await runMaintenance(
-    "/api/maintenance/vacuum", { confirm: true }, "VACUUMを実行中…（書き込みは待たされます）",
-    (data) => `VACUUMが完了しました（${fmtGb(data.freed_bytes)}GB回収 / ${fmtGb(data.bytes_after)}GB）`,
+    "/api/maintenance/vacuum", { confirm: true }, "VACUUM中…",
+    (data) => `VACUUM完了（${fmtGb(data.freed_bytes)}GB回収 / ${fmtGb(data.bytes_after)}GB）`,
     "VACUUM",
   );
 });
@@ -741,7 +805,7 @@ function renderShortPreset(preset) {
   name.setAttribute("aria-label", "型の名前");
   const save = document.createElement("button");
   save.className = "btn btn-small btn-primary";
-  save.textContent = "この型を保存";
+  save.textContent = "保存";
   const remove = document.createElement("button");
   remove.className = "btn btn-small btn-danger";
   remove.textContent = "削除";
@@ -827,7 +891,7 @@ document.getElementById("short-preset-add").addEventListener("click", async () =
       values: { min_seconds: 15, target_seconds: 30, max_seconds: 60 },
     });
     input.value = "";
-    shortPresetStatus.textContent = "型を追加しました。下の欄で値を調整してください。";
+    shortPresetStatus.textContent = "型を追加しました。";
     await loadShortPresets();
   } catch (err) {
     shortPresetStatus.textContent = err.message;

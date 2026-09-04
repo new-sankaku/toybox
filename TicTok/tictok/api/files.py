@@ -425,11 +425,17 @@ def _finalized_playlist(recording: dict, hls_dir: Path) -> Optional[str]:
 
 def _resolved_recording_path(recording: dict) -> Path:
     """録画の現在のmp4 path。完了録画はfinal dirへ移動するので、DBのpathが実体を指さない
-    ことがある。両rootを探して実在する方を返す(見つからなければDBのpathをそのまま返す)。"""
+    ことがある。両rootを探して実在する方を返す(見つからなければDBのpathをそのまま返す)。
+
+    **録画の実体の在処を答えるのはこの関数だけにする。** 実行(job)がここを通り、判定(sweep)が
+    DBのpathをそのまま信じていた頃は、rootのずれた録画1本が永久にsweepへ乗り続けた
+    (``fsfacts._recording_src``)。"""
     path = _safe_recording_path(recording["path"])
     if path.is_file():
         return path
-    found = _existing_recording_mp4(Path(recording["filename"]).stem)
+    # filenameを持たない行は実体を探す手掛かりが無い。DBのpathをそのまま返す。
+    stem = Path(recording.get("filename") or "").stem
+    found = _existing_recording_mp4(stem) if stem else None
     return found if found is not None else path
 
 

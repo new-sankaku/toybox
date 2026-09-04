@@ -5,6 +5,11 @@ uvicorn[standard]>=0.30.0
 # Server-side avatar proxy fetches TikTok CDN images (also a TikTokLive transitive dep).
 httpx>=0.27.0
 
+# ハイライトのmp4を画面へdropして投入する口(POST /api/highlights/upload)がmultipartを
+# 受ける。**任意ではない** —— 未installだとFastAPIはroute定義の時点でRuntimeErrorを投げ、
+# server全体が起動しない。
+python-multipart>=0.0.9
+
 # 録画Downloadの動画化(burn-in)で、コメントを色付き絵文字つきでoverlay層に描画する
 # (libassは絵文字を白黒でしか描けないためPILで描画してffmpegに合成する)。実avatarの
 # 円形maskも同層で行う。同梱fontは assets/fonts/ (Noto Sans CJK JP + Noto Color Emoji

@@ -169,7 +169,7 @@ describe("videos.js のグループと見どころ", () => {
       // 書き出し・連結が効く範囲は、押す前にこの1行で読める。点は対象に入らないので、
       // 落ちる件数もここで名乗る(黙って落とすと表の件数と本数が食い違う)。
       expect(doc.getElementById("cuts-scope").textContent)
-        .toBe("対象: グループ「神回」の2件／点 1件は対象外");
+        .toBe("グループ「神回」 2 / 点1除外");
       // グループを選んでいる間の合計尺は、そのまま切り抜き1本の完成尺になる。
       expect(doc.getElementById("marks-summary").textContent)
         .toBe("3件（尺あり 2・点 1） / 完成尺 00:01:30");
@@ -184,7 +184,6 @@ describe("videos.js のグループと見どころ", () => {
       page.run("renderMarksHead()");
       expect(doc.getElementById("marks-list-title").textContent)
         .toBe("■ グループ#1 ／ 見どころ（書き出し順）");
-      expect(doc.getElementById("cuts-work").title).toContain("グループ#1");
     });
 
     it("並びはstartではなくposition(=書き出し順)", () => {
@@ -211,7 +210,7 @@ describe("videos.js のグループと見どころ", () => {
       // どのグループのメモでもない状態では欄を出さない(空欄に打てば消えたように見える)。
       expect(doc.getElementById("marks-group-memo").classList.contains("hidden")).toBe(true);
       expect(doc.getElementById("cuts-scope").textContent)
-        .toBe("対象: 見どころ全体の3件／点 1件は対象外");
+        .toBe("見どころ全体 3 / 点1除外");
       expect(markRows().map((tr) => cellsOf(tr)[COL.order])).toEqual(["—", "—", "—", "—"]);
       // 全行が「—」になる列(順)は畳む。
       expect(doc.getElementById("mark-table").classList.contains("vd-cutlist-flat"))
@@ -331,9 +330,8 @@ describe("videos.js のグループと見どころ", () => {
     });
 
     // 別のグループへ入っていても、書き出せば同じmp4がその件数ぶん出る。
-    it("グループを跨いだ重複も数え、どこに在るかを名乗る", () => {
-      expect(dupOf(markRows()[0]).title).toContain("2件");
-      expect(dupOf(markRows()[0]).title).toContain("神回・罵倒集");
+    it("グループを跨いだ重複も数える", () => {
+      expect(dupOf(markRows()[0]).textContent).toBe("重複2");
     });
 
     // 印を出しても、どちらを残すかは中身でしか決められない。確かめる手は1列目に在る。
@@ -491,8 +489,7 @@ describe("videos.js のグループと見どころ", () => {
       tabsOf("marks-groups")[3].click();
       expect(state().marksSelected.size).toBe(0);
       // 黙って落とすと、選択した分だけ書き出すつもりの操作が全件へ戻ったことに気付けない。
-      expect(doc.getElementById("marks-status").textContent).toContain("選択（1件）を解除");
-      expect(doc.getElementById("marks-status").textContent).toContain("表示中の全件");
+      expect(doc.getElementById("marks-status").textContent).toContain("選択 1件を解除");
     });
 
     it("絞り込みを変えても表示に残る行の選択は保つ", () => {
@@ -521,7 +518,7 @@ describe("videos.js のグループと見どころ", () => {
       await page.settle();
       // 3番目(点だけ=21)を先頭へ。掴んだ行を抜いてから落とした行の手前へ入れる。
       expect(orderCalls()[0].body).toEqual({ bookmark_ids: [21, 11, 10] });
-      expect(doc.getElementById("marks-status").textContent).toContain("並べ替えました");
+      expect(doc.getElementById("marks-status").textContent).toContain("1件を並べ替え");
     });
 
     it("選択ぶんは表示順のまま連れて行く(選択の相対順を崩さない)", async () => {
@@ -592,15 +589,15 @@ describe("videos.js のグループと見どころ", () => {
 
     it("対象の表示も選択に追従する(押す前に件数で読める)", () => {
       expect(doc.getElementById("cuts-scope").textContent)
-        .toBe("対象: 見どころ全体の3件／点 1件は対象外");
+        .toBe("見どころ全体 3 / 点1除外");
       // 選んだ行が尺のある1件だけなら、対象外の内訳は出ない(落ちる行が無いため)。
       picks()[1].click();
       expect(doc.getElementById("cuts-scope").textContent)
-        .toBe("対象: 選択中の1件（見どころ全体）");
+        .toBe("選択 1");
       // 点を混ぜて選ぶと、そのぶんが対象から落ちることを名乗る。
       picks()[0].click();
       expect(doc.getElementById("cuts-scope").textContent)
-        .toBe("対象: 選択中の1件（見どころ全体／点 1件は対象外）");
+        .toBe("選択 1 / 点1除外");
     });
 
     // 点を選んでも書き出しの対象にはならない。混ぜると件数だけが合わない結果になる。
@@ -623,7 +620,6 @@ describe("videos.js のグループと見どころ", () => {
     // 単位である。同じ帯の隣り合う2つで挙動が違うので、押す前に読めることが要る。
     it("作品はグループを選んでいないと押せない", () => {
       expect(doc.getElementById("cuts-work").disabled).toBe(true);
-      expect(doc.getElementById("cuts-work").title).toContain("グループを選んでください");
     });
 
     it("作品はグループ全体を1本にする(行の選択には従わない)", async () => {
@@ -632,7 +628,6 @@ describe("videos.js のグループと見どころ", () => {
       picks()[1].click();
       const button = doc.getElementById("cuts-work");
       expect(button.disabled).toBe(false);
-      expect(button.title).toContain("行の選択には従いません");
       button.click();
       await page.settle();
       const call = callsTo("/api/groups/1/work")[0];
@@ -675,7 +670,7 @@ describe("videos.js のグループと見どころ", () => {
       await open({ "/api/clip-presets": { presets: [], fields: {} } });
       tabsOf("marks-groups")[2].click();
       expect(doc.getElementById("cuts-work").disabled).toBe(true);
-      expect(doc.getElementById("cuts-preset").textContent).toContain("型がありません");
+      expect(doc.getElementById("cuts-preset").textContent).toContain("型なし");
     });
 
     // 表示中の全件削除は表示中の絞り込みに従う(全てを消すつもりの操作ではない)。
@@ -731,7 +726,7 @@ describe("videos.js のグループと見どころ", () => {
     it("グループを作る入口も同じ面に置く(選ぼうとして初めて無いことに気付くため)", () => {
       destButton().click();
       expect(Array.from(doc.querySelectorAll(".vd-pick-act")).map((b) => b.textContent))
-        .toEqual(["＋ 新規グループ", "＋ 検索語で作る"]);
+        .toEqual(["＋ 新規", "＋ 検索語"]);
     });
 
     it("選ぶと以後の追加がそのグループへ入り、listは閉じる", () => {
@@ -867,7 +862,7 @@ describe("videos.js のグループと見どころ", () => {
 
     it("行は1列目の「視聴」から始まる(この場で観るか、道具付きで観るか)", () => {
       expect(buttonsOf(markRows()[0]).map((b) => b.textContent))
-        .toEqual(["視聴", "シーン検索視聴", "削除"]);
+        .toEqual(["視聴", "シーン検索", "削除"]);
     });
 
     it("「視聴」は見どころtabのまま再生する(観るたびtabを往復させない)", async () => {
@@ -882,7 +877,7 @@ describe("videos.js のグループと見どころ", () => {
       const head = doc.getElementById("mark-play-head").textContent;
       expect(head.startsWith("alice / ")).toBe(true);
       expect(head).toContain(" / 00:01:40 - 00:02:40");
-      expect(head.endsWith(" / 素材: 元録画")).toBe(true);
+      expect(head.endsWith(" / 元録画")).toBe(true);
     });
 
     it("尺が分かった時点で見どころの位置へ入る", async () => {
@@ -957,37 +952,170 @@ describe("videos.js のグループと見どころ", () => {
       expect(doc.getElementById("mark-play").classList.contains("hidden")).toBe(true);
     });
 
-    // 端を今observeている位置で決める。時刻を打ち直すより、観ながら決める方が速くて
-    // 正しい(何秒かは覚えていないが、ここから、というのは見れば判る)。
-    describe("観ている位置から端を決める", () => {
-      const patches = () => posted.filter((p) => p.method === "PATCH");
+    // 時間軸は画面に1つしか無い。実装を2つ持つと、片方を直した日にもう片方が別の
+    // 操作感(波形の畳み方・handleの掴み幅・IN/OUTの吸着)のまま残る。
+    describe("時間軸は同じ物を面ごとに移して出す", () => {
+      const timeline = () => doc.getElementById("timeline");
 
-      it("「頭を今に」は尺を保ったまま窓ごと動かす", async () => {
+      it("見どころtabでは面の下端へ移り、シーン検索へ戻すと元の位置へ返る", () => {
+        expect(timeline().parentElement.id).toBe("view-marks");
+        expect(win.tlVideo().id).toBe("mark-video");
+        doc.getElementById("tab-search").click();
+        expect(timeline().parentElement.id).toBe("search-split");
+        expect(win.tlVideo().id).toBe("video");
+      });
+
+      // 時間軸が読む物(波形・盛り上がり・gift・見どころ)はstate側の1組しか無い。観る
+      // 対象がその録画のものになっていないと、前の録画の波形の上に別の録画の再生位置が乗る。
+      it("観る対象の録画を、時間軸が読む録画にもする", async () => {
+        expect(state().current).toBeNull();
         await watch(1);
-        setCurrentTime(120);
-        doc.getElementById("mark-play-setin").click();
+        expect(state().current.recording_id).toBe(1);
+        expect(state().current.unique_id).toBe("alice");
+      });
+    });
+
+    // 範囲は画面下部の時間軸(シーン検索と同じbar)で挟む。**挟む操作そのものが尺になる**
+    // ので、確定のbuttonは無い。事故はどれも「黙って書き換わる」形で出る —— 開いただけで
+    // PATCHが飛ぶ、シーン検索の切り出し範囲が見どころの尺として保存される、dragの途中の値が
+    // 全部DBを通る。どれも画面上は正常に見えるので、送った物そのものを見る。
+    describe("時間軸で挟んだ範囲が見どころの尺になる", () => {
+      const patches = () => posted.filter((p) => p.method === "PATCH");
+      const status = () => doc.getElementById("mark-play-status").textContent;
+      /** 予約のtimerを進める。実時間で待つとtestが遅くなるので、この間だけ時計を握る。 */
+      function settle(fn) {
+        vi.useFakeTimers();
+        try {
+          fn();
+          vi.advanceTimersByTime(500);
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+
+      // グループ未選択の一覧はstart順。0=id21(点80) 1=id10(100-160) 2=id11(300-330)。
+      it("観ている行の範囲が、そのまま時間軸のIN/OUTになる", async () => {
+        await watch(1);
+        expect([state().cutIn, state().cutOut]).toEqual([100, 160]);
+      });
+
+      // 開いた時にIN/OUTを埋めるのは画面の側。これを引き金にすると、1件開くたびに同じ値の
+      // PATCHが飛ぶ。
+      it("開いただけでは書き戻さない", async () => {
+        await watch(1);
+        expect(state().markRangePending).toBeNull();
+        await page.run("flushMarkRange()");
+        await page.settle();
+        expect(patches()).toHaveLength(0);
+      });
+
+      it("挟み直すと、手が止まってから1回だけ書き戻す", async () => {
+        await watch(1);
+        // handleのdragはpointerが動くたびsetCutを呼ぶ。その全部を送らせない。
+        settle(() => {
+          page.run("setCut(120, 170)");
+          page.run("setCut(120, 175)");
+          page.run("setCut(120, 180)");
+        });
         await page.settle();
         expect(patches().map((p) => [p.url, p.body]))
           .toEqual([["/api/bookmarks/10", { start: 120, end: 180 }]]);
+        expect(status()).toContain("（00:01:00）");
       });
 
-      it("「今までを尺に」は点を範囲に変える(mp4にできるようになる)", async () => {
+      // 結末は必ず名乗る。dragのたびではなく、送った1回ぶんだけ。
+      it("保存できたことをtoastでも名乗る", async () => {
+        await watch(1);
+        settle(() => page.run("setCut(120, 180)"));
+        await page.settle();
+        const toasts = Array.from(doc.querySelectorAll(".toast"));
+        expect(toasts.map((t) => t.textContent).join(" / ")).toContain("00:02:00.0 - 00:03:00.0");
+      });
+
+      it("保存できなかったことを名乗る(黙って捨てない)", async () => {
+        await page.close();
+        await open({ "PATCH /api/bookmarks/10": () => { throw new Error("down"); } });
+        doc.getElementById("tab-marks").click();
+        await watch(1);
+        settle(() => page.run("setCut(120, 180)"));
+        await page.settle();
+        expect(status()).not.toBe("");
+        expect(status()).not.toContain("にしました");
+        // 起動時のtoast(切り出しの既定)も出ているので、見出しで自分のものを探す。
+        const titles = Array.from(doc.querySelectorAll(".toast-error .toast-title"));
+        expect(titles.map((t) => t.textContent)).toContain("見どころの範囲");
+      });
+
+      it("点は範囲になる(mp4にできるようになる)", async () => {
         await watch(0);
-        setCurrentTime(140);
-        doc.getElementById("mark-play-setout").click();
+        // 点はINだけが置かれる。OUTを挟むまでは尺にならない。
+        expect([state().cutIn, state().cutOut]).toEqual([80, null]);
+        settle(() => page.run("setCut(80, 140)"));
         await page.settle();
         expect(patches().map((p) => [p.url, p.body]))
-          .toEqual([["/api/bookmarks/21", { end: 140 }]]);
-        expect(doc.getElementById("mark-play-status").textContent).toContain("mp4にできます");
+          .toEqual([["/api/bookmarks/21", { start: 80, end: 140 }]]);
       });
 
-      it("頭より前で「今までを尺に」を押しても送らない(逆順の範囲を作らない)", async () => {
-        await watch(0);
-        setCurrentTime(10);
-        doc.getElementById("mark-play-setout").click();
+      // **シーン検索のIN/OUTは切り出す範囲であって、見どころの尺ではない。**
+      it("シーン検索tabのIN/OUTは書き戻さない", async () => {
+        await watch(1);
+        doc.getElementById("tab-search").click();
+        await page.settle();
+        settle(() => page.run("setCut(200, 260)"));
         await page.settle();
         expect(patches()).toHaveLength(0);
-        expect(doc.getElementById("mark-play-status").textContent).toContain("頭より前");
+      });
+
+      it("揃っていない範囲・逆順の範囲は送らない", async () => {
+        await watch(1);
+        settle(() => {
+          page.run("setCut(120, null)");
+          page.run("setCut(160, 100)");
+          page.run("setCut(140, 140)");
+        });
+        await page.settle();
+        expect(patches()).toHaveLength(0);
+      });
+
+      // 配信中に押した見どころのstartは暫定値で、録画の確定でPTS軸へ載せ直される。
+      it("配信中に記録した見どころは保存せず理由を名乗る", async () => {
+        await page.close();
+        await open({ "/api/bookmarks": { items: [{ ...MARKS[2], pts_mapped: 0 }] } });
+        doc.getElementById("tab-marks").click();
+        await watch(0);
+        settle(() => page.run("setCut(80, 140)"));
+        await page.settle();
+        expect(patches()).toHaveLength(0);
+        expect(status()).toContain("録画の確定前");
+      });
+
+      // 尺が変わったのに古い終端で止まると、直したはずの範囲で再生が止まらない。
+      // 一方で観直しはしない —— 端を詰めるたびに頭から再生し直すと、詰めている最中に
+      // 画面が毎回巻き戻る。
+      it("保存後は一覧を引き直し、観ている行の名乗りを新しい値へ差し替える", async () => {
+        await page.close();
+        // 一覧はserverの値。PATCHした結果がそのまま次の一覧に出る形にする。
+        const rows = MARKS.map((mark) => ({ ...mark }));
+        await open({
+          "/api/bookmarks": () => ({ items: rows }),
+          "PATCH /api/bookmarks/10": (call) => {
+            record(call);
+            Object.assign(rows.find((mark) => mark.id === 10), JSON.parse(call.init.body));
+            return { affected: 1 };
+          },
+        });
+        doc.getElementById("tab-marks").click();
+        await page.settle();
+        await watch(1);
+        const before = playbacks.length;
+        const at = markVideo().currentTime;
+        settle(() => page.run("setCut(120, 180)"));
+        await page.settle();
+        expect(doc.getElementById("mark-play-head").textContent)
+          .toContain("00:02:00 - 00:03:00");
+        // 観直さない: 再生経路は取り直さず、観ている位置も動かさない。
+        expect(playbacks).toHaveLength(before);
+        expect(markVideo().currentTime).toBe(at);
       });
     });
 
@@ -1112,7 +1240,6 @@ describe("videos.js のグループと見どころ", () => {
         doc.getElementById("tab-marks").click();
         const input = fieldOf(0, COL.start);
         expect(input.disabled).toBe(true);
-        expect(input.title).toContain("録画の確定後");
       });
     });
 
@@ -1126,7 +1253,7 @@ describe("videos.js のグループと見どころ", () => {
     });
 
     it("「シーン検索視聴」は尺があればIN/OUTが入った状態で移る", async () => {
-      buttonOf(markRows()[1], "シーン検索視聴").click();
+      buttonOf(markRows()[1], "シーン検索").click();
       await page.settle();
       expect(doc.getElementById("view-search").classList.contains("hidden")).toBe(false);
       expect(doc.getElementById("tab-search").classList.contains("active")).toBe(true);
@@ -1142,7 +1269,7 @@ describe("videos.js のグループと見どころ", () => {
     beforeEach(async () => {
       doc.getElementById("tab-marks").click();
       Array.from(markRows()[1].querySelectorAll("button"))
-        .find((b) => b.textContent === "シーン検索視聴").click();
+        .find((b) => b.textContent === "シーン検索").click();
       await page.settle();
     });
 
@@ -1150,7 +1277,6 @@ describe("videos.js のグループと見どころ", () => {
       win.setCut(null, null);
       const button = doc.getElementById("add-mark");
       expect(button.textContent).toBe("見どころ記録（点）");
-      expect(button.title).toContain("mp4にはできません");
     });
 
     it("IN/OUTがあれば尺つきで記録すると名乗る", () => {
@@ -1175,7 +1301,6 @@ describe("videos.js のグループと見どころ", () => {
       const button = doc.getElementById("add-mark");
       expect(button.textContent).toBe("記録済");
       expect(button.disabled).toBe(true);
-      expect(button.title).toContain("神回");
     });
   });
 

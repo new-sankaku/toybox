@@ -18,8 +18,8 @@ from tictok.api import runtime
 from tictok.api import access_log
 from tictok.api import startup
 from tictok.api.routes import (
-    ai, analytics, assets, bulk, clips, media, monitors, pages, recordings, search,
-    sessions, storage, streamers, system, ws,
+    ai, analytics, assets, backup, bulk, clips, highlights, media, monitors, pages,
+    recordings, search, sessions, storage, streamers, system, ws,
 )
 from tictok.core.config import get_host, get_log_level, get_port
 from tictok.core.jsonio import JsSafeJSONResponse
@@ -38,6 +38,8 @@ app.include_router(monitors.router)
 app.include_router(sessions.router)
 app.include_router(recordings.router)
 app.include_router(storage.router)
+# 退避の状況は保守(system)と保存先(storage)の両方を跨いで読むので、その2つの後ろへ置く。
+app.include_router(backup.router)
 app.include_router(media.router)
 # 成果物を作る側(media)の直後。/api/clips のGET・DELETEはこちら、POST /api/clips/batch は
 # 投入口なのでmedia側に居る(pathは重なるがmethodが違うので一致判定には効かない)。
@@ -45,6 +47,9 @@ app.include_router(clips.router)
 # 素材(収集時に溜めた画像)は成果物ではなく、成果物の材料。読むだけの層なので、作る側の
 # 後ろへ置く。/api/assets は既存のどのpathとも重ならない。
 app.include_router(assets.router)
+# TikTok本体から来たhighlight。素材(assets)と同じく「録画の外から来た物」だが、こちらは
+# 録画へ突き合わせて成果物にする側なので、読むだけの層の後ろへ置く。
+app.include_router(highlights.router)
 app.include_router(bulk.router)
 app.include_router(search.router)
 app.include_router(ai.router)

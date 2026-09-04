@@ -37,6 +37,13 @@ function renderPlacement(placement) {
     enabled ? placement.final_dir : "未設定";
   document.getElementById("cap-final-total").textContent =
     enabled ? placeTotalText(locations.final) : "—";
+  // 2系統目は同じ枠の中へ続けて出す。別の行にすると「どちらかへ入る」に読めるが、実際は
+  // 両方へ同じ物が入る(振り分けではなく控え)。容量は合算せず1系統ぶんのまま出す ――
+  // 同じ録画が2箇所に在るので、足すと本数も容量も倍に見える。
+  const dirs = (placement && placement.final_dirs) || [];
+  const second = document.getElementById("cap-final-path2");
+  second.hidden = dirs.length < 2;
+  second.textContent = dirs.length >= 2 ? dirs[1] : "-";
 
   const move = document.getElementById("cap-move");
   const moveText = document.getElementById("cap-move-text");
@@ -46,16 +53,14 @@ function renderPlacement(placement) {
   if (!enabled) {
     // 移す先が無い状態。buttonごと消すと「機能が無い」に見えるので、出したまま理由を書く。
     move.classList.add("cap-move-off");
-    moveText.textContent = "最終保存先が未設定のため、録画は一時保存先に置かれたままになります。";
+    moveText.textContent = "最終保存先が未設定";
     planBtn.disabled = true;
     document.getElementById("reloc-apply").classList.add("hidden");
-    note.replaceChildren(
-      document.createTextNode("設定画面の「録画の最終保存先(HDD想定)」を入れると、完了した録画をそこへ移せます。"),
-    );
+    note.replaceChildren();
     const link = document.createElement("a");
     link.href = "/settings";
     link.textContent = "設定を開く";
-    note.append(" ", link);
+    note.append(link);
     return;
   }
 
@@ -64,29 +69,94 @@ function renderPlacement(placement) {
   const backlog = placement.items || 0;
   const clipBacklog = placement.clip_items || 0;
   moveText.textContent = backlog
-    ? `まだ移していない完了録画: ${fmtNum(backlog)} 本 / ${fmtBytesGb(placement.bytes)}`
-    : "まだ移していない完了録画はありません。";
+    ? `未移動 ${fmtNum(backlog)} 本 / ${fmtBytesGb(placement.bytes)}`
+    : "未移動 0 本";
 
   const notes = [];
   // 切り出しは常に一時保存先へ出て、録画に随伴して最終保存先へ移る。録画が0本でも成果物
   // だけが残るので(録画を移した後に切り出した分)、別の行として必ず出す。
   if (clipBacklog) {
-    notes.push(`一緒に移る切り出し ${fmtNum(clipBacklog)} 本`
-      + `（${fmtBytesGb(placement.clip_bytes)}）`);
+    notes.push(`切り出し ${fmtNum(clipBacklog)} 本 / ${fmtBytesGb(placement.clip_bytes)}`);
   }
   if (locations.outside && locations.outside.items) {
-    notes.push(`どちらの保存先にも無い記録 ${fmtNum(locations.outside.items)} 本`
-      + "（外部で動かされたか、保存先の設定を変えた録画です）");
+    notes.push(`保存先の外 ${fmtNum(locations.outside.items)} 本`);
   }
   if (placement.skipped_missing) {
-    notes.push(`一時保存先にpathだけ残っていて実体が無い記録 ${fmtNum(placement.skipped_missing)} 本`
-      + "（移動の対象外です）");
+    notes.push(`実体なし ${fmtNum(placement.skipped_missing)} 本`);
   }
   if (placement.skipped_existing_at_destination) {
-    notes.push(`最終保存先に同名のfileが既にある録画 ${fmtNum(placement.skipped_existing_at_destination)} 本`
-      + "（上書きしないため移動の対象外です）");
+    notes.push(`移動先に同名あり ${fmtNum(placement.skipped_existing_at_destination)} 本`);
   }
   note.textContent = notes.join(" / ");
+  renderMirrorBox(placement);
+}
+
+// ---- 最終保存先の2系統 ----
+// 2つは振り分け先ではなく相互の控えで、常に同じ内容でなければならない。移動は両方へ書けた
+// ときだけ成立するので通常は自然に揃うが、2系統目を後から足した場合と、片方のdriveが外れて
+// いた間に消した/足した分は揃わない。揃っているかを人が確かめる口をここに置く。
+
+let mirrorPlan = null;
+
+function renderMirrorBox(placement) {
+  const box = document.getElementById("mirror-box");
+  const dirs = (placement && placement.final_dirs) || [];
+  const unavailable = (placement && placement.unavailable_dirs) || [];
+  box.hidden = dirs.length < 2 && unavailable.length === 0;
+  if (box.hidden) return;
+
+  const summary = document.getElementById("mirror-summary");
+  const planBtn = document.getElementById("mirror-plan");
+  if (unavailable.length) {
+    // 見えないrootは空に見える。そのまま突き合わせると「向こうには何も無い」と読んで
+    // 最終保存先まるごとの複製計画になるので、確認そのものをさせない。
+    box.classList.add("data-warning");
+    planBtn.disabled = true;
+    document.getElementById("mirror-apply").classList.add("hidden");
+    summary.textContent = `最終保存先が見えません: ${unavailable.join(" / ")}`;
+    return;
+  }
+  box.classList.remove("data-warning");
+  planBtn.disabled = mirrorRunning;
+  summary.textContent = "最終保存先 2系統";
+}
+
+function renderMirrorPlan(plan) {
+  mirrorPlan = plan;
+  document.getElementById("mirror-detail").classList.remove("hidden");
+  const tbody = document.getElementById("mirror-rows");
+  tbody.replaceChildren();
+  (plan.items || []).forEach((group) => {
+    const tr = document.createElement("tr");
+    [group.rel || "(直下)", group.dst || "",
+      `${fmtNum(group.count)} 本`, fmtBytesGb(group.bytes)].forEach((value, i) => {
+      const td = document.createElement("td");
+      if (i >= 2) td.className = "num";
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  setListState(document.getElementById("mirror-empty"),
+    tbody.childElementCount === 0 ? "empty" : "ok");
+
+  const parts = [];
+  if (!plan.current) {
+    // 実行後に返るplanは実行前に採ったもの。「残り」として読ませない。
+    parts.push("↓ 実行前の一覧");
+  }
+  parts.push(`欠け ${fmtNum(plan.total_items)} 本 / ${fmtBytesGb(plan.total_bytes)}`);
+  if (plan.group_count > plan.listed_items) {
+    parts.push(`表示 ${fmtNum(plan.listed_items)} 件`);
+  }
+  if (plan.diverged_count) {
+    parts.push(`同名でsizeが違う ${fmtNum(plan.diverged_count)} 本（上書きせず）`);
+  }
+  document.getElementById("mirror-summary").textContent = parts.join(" / ");
+
+  const applyBtn = document.getElementById("mirror-apply");
+  applyBtn.classList.toggle("hidden", !plan.current || plan.total_items === 0);
+  applyBtn.disabled = mirrorRunning;
 }
 
 function renderRelocationPlan(plan) {
@@ -134,11 +204,11 @@ let relocateAwaitingHere = false;
 function relocStatusRunning() {
   const status = document.getElementById("reloc-status");
   status.classList.remove("is-error");
-  status.replaceChildren(document.createTextNode("移動中…（進捗は"));
+  status.replaceChildren(document.createTextNode("移動中… "));
   const link = document.createElement("a");
   link.href = "/jobs?kind=relocate";
   link.textContent = "Job画面";
-  status.append(link, document.createTextNode("で確認できます）"));
+  status.append(link);
 }
 
 function applyRelocateState(running) {
@@ -206,12 +276,11 @@ document.getElementById("reloc-apply").addEventListener("click", async () => {
   if (!relocationPlan.total_items && !planClips) return;
   const ok = await confirmDialog(
     `${fmtNum(relocationPlan.total_items)} 本（${fmtBytesGb(relocationPlan.total_bytes)}）を`
-    + `\n${relocationPlan.final_dir}\nへ移します。録画中のものは含みません。`
+    + `\n${relocationPlan.final_dir}\nへ移します。`
     + (planClips
-      ? `\n\nその録画から作った切り出し ${fmtNum(planClips)} 本`
+      ? `\n切り出し ${fmtNum(planClips)} 本`
         + `（${fmtBytesGb(relocationPlan.clip_total_bytes)}）も一緒に移します。`
-      : "")
-    + `\n\n容量が大きいため数分かかります。`,
+      : ""),
     { title: "最終保存先へ移動", confirmLabel: "移動する", danger: false },
   );
   if (!ok) return;
@@ -244,6 +313,63 @@ document.getElementById("reloc-apply").addEventListener("click", async () => {
     relocateAwaitingHere = false;
     // 実行中はWSの台帳が押せない状態を持つ。応答が返った時点で走っていなければ戻す。
     btn.disabled = relocateRunning;
+  }
+});
+
+// ---- 2系統の突き合わせと再同期 ----
+// 走査も複製も移動と同じlockを取り合う(同じrootの同じfileを触る)ので、実行中の表示は
+// 移動と同じ台帳から復元する。ここでは自分の実行だけを持てばよい。
+let mirrorRunning = false;
+
+document.getElementById("mirror-plan").addEventListener("click", async () => {
+  const btn = document.getElementById("mirror-plan");
+  const status = document.getElementById("mirror-status");
+  btn.disabled = true;
+  setFormMessage(status, "突き合わせ中…");
+  try {
+    renderMirrorPlan(await apiSend("GET", "/api/storage/mirror"));
+    setFormMessage(status, "");
+  } catch (err) {
+    setFormMessage(status, err.message, true);
+    showError(err, "最終保存先の確認");
+  } finally {
+    btn.disabled = mirrorRunning;
+  }
+});
+
+document.getElementById("mirror-apply").addEventListener("click", async () => {
+  if (!mirrorPlan || !mirrorPlan.total_items) return;
+  const ok = await confirmDialog(
+    `${fmtNum(mirrorPlan.total_items)} 本（${fmtBytesGb(mirrorPlan.total_bytes)}）を`
+    + `\n欠けている方の最終保存先へ複製します。`
+    + (mirrorPlan.diverged_count
+      ? `\n同名でsizeが違う ${fmtNum(mirrorPlan.diverged_count)} 本は除きます。`
+      : ""),
+    { title: "最終保存先の再同期", confirmLabel: "複製する", danger: false },
+  );
+  if (!ok) return;
+  const btn = document.getElementById("mirror-apply");
+  const status = document.getElementById("mirror-status");
+  mirrorRunning = true;
+  btn.disabled = true;
+  setFormMessage(status, "複製中…");
+  try {
+    const result = await apiSend("POST", "/api/storage/mirror/resync", { confirm: true });
+    const r = result.result || {};
+    const failed = (r.failures || []).length;
+    setFormMessage(
+      status,
+      `${fmtNum(r.copied || 0)} 本（${fmtBytesGb(r.copied_bytes || 0)}）を複製しました`
+      + (failed ? `。${fmtNum(failed)} 本は失敗しました。` : "。"),
+      failed > 0,
+    );
+    renderMirrorPlan(result.plan);
+  } catch (err) {
+    setFormMessage(status, err.message, true);
+    showError(err, "最終保存先の再同期");
+  } finally {
+    mirrorRunning = false;
+    btn.disabled = false;
   }
 });
 
@@ -344,8 +470,8 @@ function renderCapacity(data) {
 
   const samples = data.samples || [];
   document.getElementById("cap-summary").textContent = samples.length
-    ? `記録 ${fmtNum(samples.length)} 件（最新 ${fmtDateTime(data.sampled_at)}）`
-    : "記録はまだありません（最初の記録が入るまで予測は出ません）";
+    ? `${fmtNum(samples.length)}件 / 最新 ${fmtDateTime(data.sampled_at)}`
+    : "記録なし";
 
   renderPlacement(data.placement);
 
@@ -529,21 +655,15 @@ function renderUsageStreamerHead(columns) {
   head.replaceChildren();
   const cells = [
     { label: "配信者" },
-    { label: "容量", num: true, title: "この配信者のfileの合計です（右の内訳の和と一致します）。" },
+    { label: "容量", num: true },
   ];
   columns.shown.forEach((entry) => cells.push({ label: entry.label, num: true }));
   if (columns.other) {
-    cells.push({
-      label: "その他",
-      num: true,
-      title: `列にしていない種別（${columns.hidden.map((e) => e.label).join(" / ")}）の合計です。`
-        + "cellにカーソルを合わせると、その配信者ぶんの内訳が出ます。",
-    });
+    cells.push({ label: "その他", num: true });
   }
-  cells.forEach(({ label, num, title }) => {
+  cells.forEach(({ label, num }) => {
     const th = document.createElement("th");
     if (num) th.className = "num";
-    if (title) th.title = title;
     th.textContent = label;
     head.appendChild(th);
   });
@@ -571,11 +691,123 @@ function usageRegenerableCell(row, regenerable) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "btn btn-compact";
-  btn.textContent = "保持policyで確認する";
-  btn.title = "設定画面の保持policyへ移動します。この画面ではfileを消しません。";
+  btn.textContent = "保持policy";
   btn.addEventListener("click", () => { location.href = RETENTION_HREF; });
   wrap.appendChild(btn);
   return wrap;
+}
+
+// ---- 録画folderの内訳: chip盤 ----
+// 表は「どれが何GBか」を答えるが、「何が食っていて、どれを消してよいか」は数字を読み
+// 比べないと出て来ない。1升=一定容量の盤に置くと、その2つが面積と形で先に読める。
+//
+// 3つの情報を、色・肌理・枠の3経路に1つずつ載せる。同じ経路へ2つ載せると必ずどちらかが
+// 読めなくなる。
+//   色  : 容量の順位(--ramp-5〜1の濃い順)。rampは「量の段」のtokenなので、濃さがそのまま
+//         大きさの順になる。新しい色は作らない(1色=1意味を壊さないため)。
+//   肌理: 種別の区別。色と重ねて同じ事を二重に言わせる ―― 色の差だけに頼ると、
+//         色覚の条件によっては隣り合う段が同じに見える。
+//   枠  : 破線 = 作り直せる(消してよい)。実線 = 消せない。
+const BOARD_TEXTURES = ["bt-1", "bt-2", "bt-3", "bt-4", "bt-5"];
+// 盤に個別の升を持たせる種別の数。色の段(--ramp-5〜1)と同じ数にして、6番目以降は
+// 「その他」1色へ畳む。段より多くの種別を並べると、濃さの順が容量の順を指さなくなる。
+const BOARD_SLOTS = BOARD_TEXTURES.length;
+// 盤の升の目安数。1升あたりの容量は合計から決めるので、合計が増えても盤の大きさは
+// 変わらず、1升の意味だけが変わる(升が数千個に増えて描けなくなるのを防ぐ)。
+const BOARD_TARGET_CELLS = 120;
+// 1升の容量に使う刻み。半端な値(3.7GB/升)は読めないので、この中から選ぶ。
+const BOARD_STEPS_GB = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+const GB = 1024 ** 3;
+
+function boardCellGb(totalBytes) {
+  const want = totalBytes / GB / BOARD_TARGET_CELLS;
+  return BOARD_STEPS_GB.find((step) => step >= want) || BOARD_STEPS_GB[BOARD_STEPS_GB.length - 1];
+}
+
+// 盤に並べる種別。容量の大きい順に BOARD_SLOTS 件までを個別に持ち、残りは「その他」へ
+// 畳む。畳んだ側は差ではなく実際の和で出す(表の合計と突き合わせられるようにする)。
+function boardSlices(usage) {
+  const labels = usage.category_labels || [];
+  const totals = usage.categories || {};
+  const regenerable = new Set(usage.regenerable_categories || []);
+  const bytesOf = (key) => (totals[key] || {}).bytes || 0;
+  const ranked = [...labels]
+    .filter((entry) => bytesOf(entry.key) > 0)
+    .sort((a, b) => bytesOf(b.key) - bytesOf(a.key));
+  const shown = ranked.slice(0, BOARD_SLOTS);
+  const rest = ranked.slice(BOARD_SLOTS);
+  const slices = shown.map((entry, index) => ({
+    label: entry.label,
+    bytes: bytesOf(entry.key),
+    // 1位が一番濃い。--ramp-5が濃側なので、順位をそのまま裏返して当てる。
+    tone: `bt-tone-${BOARD_SLOTS - index}`,
+    texture: BOARD_TEXTURES[index],
+    regenerable: regenerable.has(entry.key),
+    note: regenerable.has(entry.key) ? "作り直せる（消してよい）" : "作り直せない",
+  }));
+  const restBytes = rest.reduce((sum, entry) => sum + bytesOf(entry.key), 0);
+  if (restBytes > 0) {
+    slices.push({
+      label: "その他",
+      bytes: restBytes,
+      tone: "bt-tone-rest",
+      texture: "bt-rest",
+      // 畳んだ中に消せる物と消せない物が混ざるので、枠では言い切らない。
+      regenerable: false,
+      note: rest.map((entry) => `${entry.label} ${fmtBytesGb(bytesOf(entry.key))}`).join("\n"),
+    });
+  }
+  return slices;
+}
+
+function renderUsageBoard(usage) {
+  const board = document.getElementById("usage-board");
+  const cells = document.getElementById("usage-board-cells");
+  const legend = document.getElementById("usage-board-legend");
+  cells.replaceChildren();
+  legend.replaceChildren();
+  const slices = boardSlices(usage);
+  const total = slices.reduce((sum, slice) => sum + slice.bytes, 0);
+  // scanしていない/中身が空の時は盤を出さない。0升の盤は「空の記録先」ではなく
+  // 「まだ数えていない」なので、盤の形で答えてはいけない。
+  board.hidden = !total;
+  if (!total) return;
+
+  const cellGb = boardCellGb(total);
+  const cellBytes = cellGb * GB;
+  cells.setAttribute("aria-label", "種別の内訳");
+  slices.forEach((slice) => {
+    // 1升に満たない種別も必ず1升は出す。0升にすると、盤の上から種別が消える。
+    const count = Math.max(1, Math.round(slice.bytes / cellBytes));
+    const title = `${slice.label} ${fmtBytesGb(slice.bytes)}（1升 ${fmtNum(cellGb)} GB）\n${slice.note}`;
+    for (let i = 0; i < count; i += 1) {
+      const cell = document.createElement("span");
+      cell.className = `cap-cell ${slice.tone} ${slice.texture}`
+        + (slice.regenerable ? " is-regen" : "");
+      cell.title = title;
+      cells.appendChild(cell);
+    }
+
+    const row = document.createElement("div");
+    row.className = "cap-leg";
+    const sw = document.createElement("span");
+    sw.className = `cap-cell ${slice.tone} ${slice.texture}`
+      + (slice.regenerable ? " is-regen" : "");
+    const name = document.createElement("span");
+    name.className = "n";
+    name.textContent = slice.label + (slice.regenerable ? "（消せる）" : "");
+    name.title = slice.note;
+    const size = document.createElement("span");
+    size.className = "g";
+    size.textContent = fmtBytesGb(slice.bytes);
+    row.append(sw, name, size);
+    legend.appendChild(row);
+  });
+
+  const scale = document.createElement("div");
+  scale.className = "cap-leg-note";
+  scale.textContent = `1升 ${fmtNum(cellGb)} GB ／ 破線＝作り直せる`;
+  legend.appendChild(scale);
 }
 
 function renderUsage(payload) {
@@ -587,17 +819,20 @@ function renderUsage(payload) {
     document.getElementById("usage-category-list").replaceChildren();
     document.getElementById("usage-streamer-list").replaceChildren();
     document.getElementById("usage-streamer-head").replaceChildren();
-    usageSummaryEl.textContent = `対象folder: ${(payload.roots || []).join(" / ") || "-"}`;
+    document.getElementById("usage-board").hidden = true;
+    usageSummaryEl.textContent = (payload.roots || []).join(" / ") || "-";
     return;
   }
   const usage = scan.usage;
   const regenerable = new Set(usage.regenerable_categories || []);
   const errors = (usage.errors || []).length;
   usageSummaryEl.textContent =
-    `最終scan: ${fmtDateTime(scan.scanned_at)}（${Math.round(scan.duration_ms / 1000)}秒）`
-    + ` / 合計 ${fmtBytesGb(usage.total_bytes)}・${fmtNum(usage.total_files)} file`
-    + ` / 対象folder: ${(usage.roots || []).join(" / ")}`
-    + (errors ? ` / 読めなかった場所 ${fmtNum(errors)} 件（合計に含みません）` : "");
+    `${fmtDateTime(scan.scanned_at)}（${Math.round(scan.duration_ms / 1000)}秒）`
+    + ` / ${fmtBytesGb(usage.total_bytes)}・${fmtNum(usage.total_files)} file`
+    + ` / ${(usage.roots || []).join(" / ")}`
+    + (errors ? ` / 読めなかった ${fmtNum(errors)} 件` : "");
+
+  renderUsageBoard(usage);
 
   const rows = (usage.category_labels || [])
     .map((entry) => ({ ...entry, ...(usage.categories[entry.key] || { bytes: 0, files: 0 }) }))
@@ -647,6 +882,7 @@ async function loadUsage() {
   } catch (err) {
     // 生のfetchでは失敗時にrenderUsageを呼べず、placeholderがhiddenのまま見出しだけの
     // 空欄になっていた。取得できなかったことを表の位置で名乗らせる。
+    document.getElementById("usage-board").hidden = true;
     document.getElementById("usage-category-list").replaceChildren();
     document.getElementById("usage-streamer-list").replaceChildren();
     document.getElementById("usage-streamer-head").replaceChildren();
@@ -659,7 +895,7 @@ async function loadUsage() {
 
 usageScanBtn.addEventListener("click", async () => {
   usageScanBtn.disabled = true;
-  setFormMessage(usageStatusEl, "走査中…（数TB規模では数分かかります）");
+  setFormMessage(usageStatusEl, "走査中…");
   try {
     renderUsage(await apiSend("POST", "/api/storage/scan"));
     setFormMessage(usageStatusEl, "走査しました。");

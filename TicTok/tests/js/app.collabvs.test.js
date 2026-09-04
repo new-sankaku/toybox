@@ -197,7 +197,7 @@ describe("監視画面のコラボ相手の対戦履歴", () => {
     const marks = [...line.querySelectorAll(".cvs-mark")];
     expect(marks.map((m) => m.textContent)).toEqual(["勝", "負", "勝"]);
     expect(marks.map((m) => m.className)).toEqual(["cvs-mark win", "cvs-mark lose", "cvs-mark win"]);
-    expect(line.textContent).toContain("直近3戦（古→新）");
+    expect(line.textContent).toContain("直近3戦");
     expect(line.textContent).toContain("平均 自陣 26.7K / 敵陣 20K");
   });
 
@@ -205,7 +205,7 @@ describe("監視画面のコラボ相手の対戦履歴", () => {
     page = await openPage(LIVE_COLLAB, { battles: 14 });
     const marks = [...page.document.querySelectorAll("#collab-vs .cvs-line .cvs-mark")];
     expect(marks.length).toBe(10);
-    expect(page.document.querySelector("#collab-vs .cvs-line").textContent).toContain("直近10戦（古→新）");
+    expect(page.document.querySelector("#collab-vs .cvs-line").textContent).toContain("直近10戦");
   });
 
   it("相手が1人なら開いた状態で出し、その相手の戦だけを表に並べる", async () => {

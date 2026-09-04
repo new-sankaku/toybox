@@ -134,9 +134,9 @@ describe("一覧placeholderの3状態", () => {
     expect(el.classList.contains("hidden")).toBe(true);
   });
 
-  it("failed は「0件という意味ではありません」を明示し、生文言はtooltipへ逃がす", () => {
+  it("failed は取得失敗を名乗り(0件と描かない)、生文言はtooltipへ逃がす", () => {
     win.setListState(el, "failed", { status: 500, detail: "boom" });
-    expect(el.textContent).toBe("運用logを取得できませんでした（0件という意味ではありません）。");
+    expect(el.textContent).toBe("運用logを取得できませんでした");
     expect(el.classList.contains("list-failed")).toBe(true);
     expect(el.title).toBe("HTTP 500 / boom");
     expect(warn).toHaveBeenCalled();
@@ -194,16 +194,18 @@ describe("空き容量バー", () => {
     expect(vols[1].querySelector(".v").textContent).toBe("25.0GB");
   });
 
-  it("volumeが空なら「不明」と名乗る(0GBと描かない)", () => {
+  it("volumeが空なら「—」と名乗る(0GBと描かない)", () => {
     const bar = page.document.getElementById("bar");
     page.win.renderDiskBar(bar, { volumes: {} });
-    expect(bar.textContent).toBe("空き容量: 不明");
+    expect(bar.textContent).toBe("—");
+    expect(bar.querySelector(".d-empty").getAttribute("aria-label")).toBe("空き容量 不明");
   });
 
-  it("取得失敗は不明と区別して「取得失敗」を出す", () => {
+  it("取得失敗は不明と区別して「?」を出す", () => {
     const bar = page.document.getElementById("bar");
     page.win.showDiskUnavailable(bar);
-    expect(bar.textContent).toBe("空き容量: 取得失敗");
+    expect(bar.textContent).toBe("?");
+    expect(bar.querySelector(".d-empty").getAttribute("aria-label")).toBe("空き容量 取得失敗");
   });
 });
 
@@ -494,7 +496,7 @@ describe("job badge", () => {
     // filterを積むと、失敗が履歴に残っている間ずっと「失敗・中断のみ」へ着地し、
     // 人が選んだ状態filterが押すたびに上書きされる。
     expect(jobLink().getAttribute("href")).toBe("/jobs");
-    expect(jobLink().title).toContain("失敗・中断が2件");
+    expect(jobLink().title).toContain("失敗 2");
     expect(win.jobBarFailedCount()).toBe(2);
   });
 

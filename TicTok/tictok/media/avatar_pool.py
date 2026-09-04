@@ -343,13 +343,15 @@ class AvatarPool:
         On failure any previously stored avatar is kept rather than dropped."""
         if not user_id or not url or not self.is_allowed(url):
             return False
-        if not self.needs_update(user_id, url):
-            return self.has(user_id)
+        # diskを見る判定(stat + meta読み)と書き込みはthreadで行う。この協程はevent loop上の
+        # worker(asset_prefetch)から呼ばれ、diskが応答しない間にloopを止めない。
+        if not await asyncio.to_thread(self.needs_update, user_id, url):
+            return await asyncio.to_thread(self.has, user_id)
         aid = _avatar_identity(url)
         lock = self._locks.setdefault(user_id, asyncio.Lock())
         async with lock:
-            if not self.needs_update(user_id, url):
-                return self.has(user_id)
+            if not await asyncio.to_thread(self.needs_update, user_id, url):
+                return await asyncio.to_thread(self.has, user_id)
             for attempt in range(1, self._attempts + 1):
                 retryable, done = await self._try_fetch(user_id, url, aid, attempt)
                 if done:
@@ -372,6 +374,17 @@ class AvatarPool:
                 # the concurrency slot during the wait so other avatars proceed.
                 await asyncio.sleep(self._backoff * attempt)
             return self.has(user_id)
+
+    def _store(self, user_id: str, content: bytes, content_type: str, url: str,
+               aid: str) -> tuple[int, int]:
+        """取得した画像と種別・metaをdiskへ置く(threadで呼ぶ)。(width, height)を返す。"""
+        self.path_for(user_id).write_bytes(content)
+        self._type_path(user_id).write_text(content_type, encoding="utf-8")
+        size = _image_size(content)
+        hint = _url_res_hint(url)
+        width, height = size if size else (hint or 72, hint or 72)
+        self._write_meta(user_id, aid, width, height)
+        return width, height
 
     async def _try_fetch(self, user_id: str, url: str, aid: str, attempt: int) -> tuple[bool, bool]:
         """One download attempt. Returns ``(retryable, succeeded)``: ``succeeded``
@@ -398,12 +411,8 @@ class AvatarPool:
             content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
             if not content_type.startswith("image/"):
                 content_type = "image/jpeg"
-            self.path_for(user_id).write_bytes(content)
-            self._type_path(user_id).write_text(content_type, encoding="utf-8")
-            size = _image_size(content)
-            hint = _url_res_hint(url)
-            width, height = size if size else (hint or 72, hint or 72)
-            self._write_meta(user_id, aid, width, height)
+            width, height = await asyncio.to_thread(
+                self._store, user_id, content, content_type, url, aid)
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
                     "%s のavatarを保存しました（%dx%d, %d bytes）",

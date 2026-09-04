@@ -153,6 +153,8 @@ def test_the_buffer_and_journal_keep_the_raw_string(
     tmp_db.add_event(session_id, event_builder("comment", user=event_builder.user(avatar=url)))
 
     lines = []
+    # journalは専用threadが書くので、読む前に書き切りを待つ。
+    assert tmp_db.wait_journal_idle()
     for path in sorted((env_guard / "journal").glob("events-*.jsonl")):
         lines += [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x]
     events = [r["r"] for r in lines if r["t"] == "e"]

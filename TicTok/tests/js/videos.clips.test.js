@@ -136,7 +136,7 @@ describe("videos.js の出力済みclip", () => {
     await showClips();
     const empty = doc.getElementById("clips-empty");
     expect(empty.classList.contains("list-failed")).toBe(true);
-    expect(empty.textContent).toContain("0件という意味ではありません");
+    expect(empty.textContent).toContain("取得できませんでした");
   });
 });
 

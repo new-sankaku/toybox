@@ -22,6 +22,7 @@ from tictok.api import files
 from tictok.api import fsfacts
 from tictok.api import media_jobs
 from tictok.api import runtime
+from tictok.core import perf
 
 router = APIRouter()
 
@@ -372,49 +373,61 @@ async def bulk_status(kinds: Optional[str] = None) -> dict:
                 "stt_available": stt_available()}
 
     def _collect() -> list:
-        recordings = runtime.storage.list_recordings(100000)
-        transcribed = runtime.storage.current_transcript_recording_ids(TIMEMAP_VERSION) if "transcribe" in requested else None
-        # 索引の件数はコメント索引の列に要る。種別に関係なく引くのはそのため(この一覧が
-        # 検索側の配信者選択の出所でもある)。
-        indexed = runtime.storage.search_indexed_counts()
-        laugh_meta = runtime.storage.laugh_index_meta_map() if "laugh" in requested else None
-        facts_by_id = fsfacts._bulk_fs_facts_batch(recordings)
-        # 種別に関わらず引く。実体の有無(playable)がこの走査でしか出せないためで、要求種別に
-        # よって has_hls が埋まったり埋まらなかったりすると、同じ配信者が要求の仕方で
-        # 「実体なし」と名乗ったり名乗らなかったりする。
-        fsfacts._bulk_hls_batch(recordings, facts_by_id)
-        per: dict = {}
-        for recording in recordings:
-            entry = per.setdefault(recording["unique_id"], {
-                "unique_id": recording["unique_id"],
-                "recordings": 0,
-                "playable": 0,
-                "comment_indexed": 0,
-                "seconds": 0.0,
-                "targets": {kind: 0 for kind in requested},
-                "done": {kind: 0 for kind in requested},
-            })
-            entry["recordings"] += 1
-            entry["seconds"] += files._recording_seconds(recording)
-            facts = facts_by_id[recording["id"]]
-            if facts.get("has_hls") or facts.get("has_file"):
-                entry["playable"] += 1
-            if indexer.SOURCE_COMMENT in (indexed.get(recording["id"]) or {}):
-                entry["comment_indexed"] += 1
-            for kind in requested:
-                ok, reason = _bulk_classify(kind, recording, facts, transcribed, indexed,
-                                            laugh_meta)
-                if ok:
-                    entry["targets"][kind] += 1
-                elif reason in _BULK_DONE_REASONS:
-                    entry["done"][kind] += 1
-        return sorted(per.values(), key=lambda e: -e["seconds"])
+        # 内訳を phase で残す。cache miss 1回が約1秒で、DB(10ms)とfs走査(70ms)を引いた残り
+        # 9割が /api/perf 上は "other" にしか出ず、どこが重いのか判断できなかった。
+        with perf.phase("bulk.db"):
+            recordings = runtime.storage.list_recordings(100000)
+            transcribed = runtime.storage.current_transcript_recording_ids(TIMEMAP_VERSION) if "transcribe" in requested else None
+            # 索引の件数はコメント索引の列に要る。種別に関係なく引くのはそのため(この一覧が
+            # 検索側の配信者選択の出所でもある)。
+            indexed = runtime.storage.search_indexed_counts()
+            laugh_meta = runtime.storage.laugh_index_meta_map() if "laugh" in requested else None
+        with perf.phase("bulk.facts"):
+            facts_by_id = fsfacts._bulk_fs_facts_batch(recordings)
+            # 種別に関わらず引く。実体の有無(playable)がこの走査でしか出せないためで、要求種別に
+            # よって has_hls が埋まったり埋まらなかったりすると、同じ配信者が要求の仕方で
+            # 「実体なし」と名乗ったり名乗らなかったりする。
+            fsfacts._bulk_hls_batch(recordings, facts_by_id)
+        with perf.phase("bulk.classify"):
+            return _bulk_status_rows(recordings, requested, facts_by_id, transcribed,
+                                     indexed, laugh_meta)
 
     payload = {"streamers": await asyncio.to_thread(_collect), "kinds": list(requested)}
     fsfacts._bulk_status_cache[key] = (now + fsfacts._BULK_STATUS_TTL_SECONDS, payload)
     # STTの可否はcacheへ入れない。設定で切り替わるものを20秒間そのままにすると、押せない
     # buttonが押せるままになる(押してから503で知ることになる)。
     return {**payload, "disk": disk._disk_report(), "stt_available": stt_available()}
+
+
+def _bulk_status_rows(recordings: list, requested, facts_by_id: dict, transcribed,
+                      indexed: dict, laugh_meta) -> list:
+    """配信者ごとの残り本数と出力済み本数を数える。DBもfsも触らない純粋な集計。"""
+    per: dict = {}
+    for recording in recordings:
+        entry = per.setdefault(recording["unique_id"], {
+            "unique_id": recording["unique_id"],
+            "recordings": 0,
+            "playable": 0,
+            "comment_indexed": 0,
+            "seconds": 0.0,
+            "targets": {kind: 0 for kind in requested},
+            "done": {kind: 0 for kind in requested},
+        })
+        entry["recordings"] += 1
+        entry["seconds"] += files._recording_seconds(recording)
+        facts = facts_by_id[recording["id"]]
+        if facts.get("has_hls") or facts.get("has_file"):
+            entry["playable"] += 1
+        if indexer.SOURCE_COMMENT in (indexed.get(recording["id"]) or {}):
+            entry["comment_indexed"] += 1
+        for kind in requested:
+            ok, reason = _bulk_classify(kind, recording, facts, transcribed, indexed,
+                                        laugh_meta)
+            if ok:
+                entry["targets"][kind] += 1
+            elif reason in _BULK_DONE_REASONS:
+                entry["done"][kind] += 1
+    return sorted(per.values(), key=lambda e: -e["seconds"])
 
 
 @router.get("/api/bulk/estimate")

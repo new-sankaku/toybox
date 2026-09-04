@@ -2492,7 +2492,11 @@ class TikTokCollector:
                 # byte・最新mtime)をts結合が必ず外すため — 積む順と候補の規則は
                 # startup._sweep_candidates の1箇所に残す。合図が届かなくても定期のsweepが
                 # 拾うので、ここは失敗してよい経路である。
-                sweep_signal.note_recording_finished(recorder.ended_at)
+                #
+                # hls_dirを添えるのは「このdirへ書く者はもう居ない」の印。この確定はrecorderが
+                # 捕捉ffmpegの終了(自然終了か_terminate)を見届けた後にしか来ないので、sweepは
+                # 静穏待ちを飛ばして直ちにts結合を積める。crash後の復旧はここを通らない。
+                sweep_signal.note_recording_finished(recorder.ended_at, recorder.hls_dir)
         text = (
             "録画を終了しました（Data未受信のため履歴から削除）。"
             if empty
@@ -3317,7 +3321,7 @@ class TikTokCollector:
             # silently stalled. ffmpeg keeps retrying the dead URL and never exits,
             # so _maybe_resume_after_finalize cannot fire — a reconnect to re-resolve
             # the stream URL is the only recovery.
-            if self._recording_stalled(stall_timeout):
+            if await self._recording_stalled(stall_timeout):
                 self._storage.record_ops_event(
                     logger, "collector.recording_stalled",
                     f"eventは届いているのに{stall_timeout}秒 映像が増えていません。"
@@ -3352,7 +3356,7 @@ class TikTokCollector:
         if not connect_task.done():
             connect_task.cancel()
 
-    def _recording_stalled(self, stall_timeout: float) -> bool:
+    async def _recording_stalled(self, stall_timeout: float) -> bool:
         """True when an active, wanted recording has produced no new video for
         stall_timeout seconds. A recording that has not yet produced its first
         segment (progress token (0,0)) is ignored: that startup case is owned by the
@@ -3363,7 +3367,11 @@ class TikTokCollector:
         if rec is None or not rec.is_active or not self._recording_desired:
             self._rec_progress = None
             return False
-        token = rec.progress_token()
+        # progress_tokenはsegment dirの列挙(未packの録画で最大2,800 entry)と最新1本のstat。
+        # 5秒ごとにloop上で呼ぶと、diskが応答しない間(Windows Updateの復元ポイント作成で
+        # 実測17〜19秒)そのままloopが止まり、live接続が切れて録画が分断される。stall stack
+        # 26件中6件がここだった(2026-09-03の監査)。threadなら止まるのはこの判定だけ。
+        token = await asyncio.to_thread(rec.progress_token)
         if token == (0, 0):
             return False
         now = time.time()

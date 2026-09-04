@@ -103,9 +103,14 @@ class EmotePool:
     def should_fetch(self, emote_id: str, url: str) -> bool:
         """その (emote_id, url) を取りに行く価値があるか。
 
-        取得を積む前に呼ぶ。既に在るもの、file名に使えないid、許可外hostのURLをここで
-        落とす。後ろの2つは再試行しても永久に変わらない上、その絵文字が焼き込みから
-        失われることを意味するので、無言で捨てずに1度だけ報告する。安価(stat 1回)。"""
+        既に在るもの、file名に使えないid、許可外hostのURLをここで落とす。後ろの2つは
+        再試行しても永久に変わらない上、その絵文字が焼き込みから失われることを意味する
+        ので、無言で捨てずに1度だけ報告する(``is_fetchable``)。在るかの判定はstat 1回。"""
+        return self.is_fetchable(emote_id, url) and not self.has(emote_id)
+
+    def is_fetchable(self, emote_id: str, url: str) -> bool:
+        """idとURLが取得に使える形か。diskは見ない — 投入側(event loop上)がここまでを
+        見て、cacheの有無はworkerがthreadで確かめる。"""
         if not emote_id or not url:
             return False
         if not is_valid_emote_id(emote_id):
@@ -127,7 +132,7 @@ class EmotePool:
                 ctx={"emote_id": emote_id, "host": host},
             )
             return False
-        return not self.has(emote_id)
+        return True
 
     def _report_permanent(self, scope: str, key: str, message: str, *args,
                           reason: str, ctx: dict) -> None:

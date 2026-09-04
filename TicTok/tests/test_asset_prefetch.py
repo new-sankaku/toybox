@@ -93,18 +93,33 @@ async def test_avatar_dedup_follows_the_on_disk_key_not_the_supplied_id(prefetch
     assert prefetch.avatars.calls == ["tester"]
 
 
-async def test_already_pooled_assets_never_enter_the_queue(prefetch):
-    """diskに在るものは投入前に落ちる。ここが効かないと、既知userだらけの配信で
-    queueが取得不要の要求で埋まる。"""
+async def test_already_pooled_assets_enter_the_queue_once_then_never_again(prefetch):
+    """diskに在るものはworkerが1度確かめた後は投入前に落ちる。ここが効かないと、既知user
+    だらけの配信でqueueが取得不要の要求で埋まる。
+
+    投入側はdiskを見ない(見るとevent loopがdiskの応答を待つ — Windows Updateの復元
+    ポイント作成で十数秒止まった実績がある)。初見の1回だけqueueを通り、workerがthreadで
+    diskを確かめて「在る」と覚える。2回目以降はその記憶だけで落ちる。"""
     (prefetch.gifts.dir / "77.img").write_bytes(b"icon")
     (prefetch.avatars.dir / f"{avatar_key('known')}.img").write_bytes(b"avatar")
     prefetch.emotes.path_for("70012345").write_bytes(b"emote")
+    payload = json.dumps([{"index": 0, "id": "70012345", "url": CDN_URL}])
 
+    prefetch.start()
     prefetch.submit_gift_icon(77, CDN_URL)
     prefetch.submit_avatar("known", CDN_URL)
-    prefetch.submit_emotes(json.dumps([{"index": 0, "id": "70012345", "url": CDN_URL}]))
+    prefetch.submit_emotes(payload)
+    await prefetch._queue.join()
+    first = prefetch.stats()["submitted"]
+    assert first <= 3
 
-    assert prefetch.stats()["submitted"] == 0
+    for _ in range(3):
+        prefetch.submit_gift_icon(77, CDN_URL)
+        prefetch.submit_avatar("known", CDN_URL)
+        prefetch.submit_emotes(payload)
+    await prefetch.aclose()
+
+    assert prefetch.stats()["submitted"] == first, "覚えた後もqueueへ入っている"
     assert prefetch._queue.qsize() == 0
 
 

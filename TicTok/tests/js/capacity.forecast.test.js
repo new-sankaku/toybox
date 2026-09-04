@@ -260,7 +260,7 @@ describe("capacity.js の移動対象(切り出しの随伴)", () => {
       items: 0, bytes: 0, clip_items: 5, clip_bytes: 1024 ** 3 * 2, locations: {},
     });
     expect(page.document.getElementById("cap-place-note").textContent)
-      .toContain("一緒に移る切り出し 5 本（2.0 GB）");
+      .toContain("切り出し 5 本 / 2.0 GB");
   });
 });
 
@@ -398,7 +398,7 @@ describe("capacity.js の配信者別の内訳", () => {
     expect(withButton.length).toBe(3);
     withButton.forEach((tr) => {
       expect(tr.textContent).toContain("作り直せる");
-      expect(tr.querySelector("button").textContent).toBe("保持policyで確認する");
+      expect(tr.querySelector("button").textContent).toBe("保持policy");
     });
   });
 });

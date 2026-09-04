@@ -54,7 +54,7 @@ PRESET_FIELDS = {
     "upscale": {"type": bool, "label": "AI高画質化を通す",
                 "note": "投稿先がどのみち再encodeするので、上げても情報は増えません。GPUを実時間の数倍占有します。既定はoffです。"},
     "sfx": {"type": bool, "label": "効果音を入れる（作品のみ）",
-            "note": "シーンの継ぎ目と、テロップが出る瞬間に効果音を置きます。時刻がミリ秒で分かっている場所だけに置くので、笑いの山には置きません（検出の刻みが1秒で、音を置ける精度に足りないため）。1シーンのshortには効きません。"},
+            "note": "シーンの継ぎ目とテロップが出る瞬間に置きます。1シーンのshortには効きません。"},
     "safe_top_percent": {"type": float, "min": 0.0, "max": 40.0, "label": "上の安全域(%)",
                          "note": "投稿先のUIが被る帯です。この範囲にはtelopを置きません。"},
     "safe_bottom_percent": {"type": float, "min": 0.0, "max": 40.0, "label": "下の安全域(%)",

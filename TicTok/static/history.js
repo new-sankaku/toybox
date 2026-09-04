@@ -82,7 +82,7 @@ async function loadKpi() {
     const bar = document.getElementById("kpi-bar");
     bar.title = errorDetailText(err);
     if (!bar.childElementCount) {
-      bar.textContent = "集計値を取得できませんでした（0件という意味ではありません）。";
+      bar.textContent = "集計値を取得できません";
     }
     return;
   }
@@ -282,7 +282,6 @@ function applySort(key) {
 function bindSortHeaders() {
   document.querySelectorAll("#session-table th[data-sort]").forEach((th) => {
     th.tabIndex = 0;
-    th.title = "この列で並べ替えます（もう一度押すと順序が入れ替わります）。";
     th.addEventListener("click", () => applySort(th.dataset.sort));
     th.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
@@ -357,14 +356,9 @@ function actionCells(session) {
   } else {
     const out = document.createElement("button");
     out.className = "btn btn-small";
-    // 出力済みでも再出力したいのでButtonは活性のまま、ラベルだけ「済」にする。
-    out.textContent = session.output_done ? "焼き込み出力済" : "焼き込み出力";
+    // 出力済みでも再出力したいのでButtonは活性のまま、ラベルに ✓ を付ける。
+    out.textContent = session.output_done ? "焼き込み ✓" : "焼き込み";
     out.disabled = isActive || !hasVideo;
-    out.title = isActive
-      ? "収集中のSessionは出力できません"
-      : !hasVideo
-        ? "このSessionには出力できる録画がありません（動画保存OFF等で動画が未保存）。"
-        : "このSessionの録画にコメント/Gift演出を焼き込み、recordings folderへ出力します（再Encodeのため時間がかかります）。完了時にブラウザ通知を出します。";
     out.addEventListener("click", (e) => {
       e.stopPropagation();
       outputSession(session, out);
@@ -381,14 +375,9 @@ function actionCells(session) {
     } else {
       const up = document.createElement("button");
       up.className = "btn btn-small";
-      // 出力済みでも再出力可能（活性のまま）。ラベルだけ「済」にする。
-      up.textContent = session.up_output_done ? "AI高画質済" : "AI高画質";
+      // 出力済みでも再出力可能（活性のまま）。ラベルに ✓ を付ける。
+      up.textContent = session.up_output_done ? "AI高画質 ✓" : "AI高画質";
       up.disabled = isActive || !hasVideo;
-      up.title = isActive
-        ? "収集中のSessionは出力できません"
-        : !hasVideo
-          ? "このSessionには出力できる録画がありません（動画保存OFF等で動画が未保存）。"
-          : "このSessionの録画をローカルAI(超解像model)で高画質化し、.up.mp4としてrecordings folderへ出力します。焼き込みが有効な場合は焼き込み後の動画を高画質化します。GPUでも録画時間の数倍かかります。完了時にブラウザ通知を出します。";
       up.addEventListener("click", (e) => {
         e.stopPropagation();
         upOutputSession(session, up);
@@ -403,16 +392,11 @@ function actionCells(session) {
   if (sttConfigured) {
     const tr = document.createElement("button");
     tr.className = "btn btn-small";
-    // 文字起こし済みでも再実行可能（活性のまま）。ラベルだけ「済」にする。
+    // 文字起こし済みでも再実行可能（活性のまま）。ラベルに ✓ を付ける。
     // 録画が複数ある場合は押すと選択menuが出る。▾でそれを予告する。
     const multi = (session.recording_count || 0) > 1;
-    tr.textContent = (session.transcript_done ? "字幕化済" : "字幕化") + (multi ? " ▾" : "");
+    tr.textContent = (session.transcript_done ? "字幕化 ✓" : "字幕化") + (multi ? " ▾" : "");
     tr.disabled = isActive || !hasVideo;
-    tr.title = isActive
-      ? "収集中のSessionは文字起こしできません"
-      : !hasVideo
-        ? "このSessionには文字起こしできる録画がありません。"
-        : "このSessionの録画音声をローカルAIで文字起こしします（初回はmodel読み込みで時間がかかります）。結果はキャッシュされます。";
     tr.addEventListener("click", (e) => {
       e.stopPropagation();
       transcribeSession(session, tr);
@@ -424,15 +408,10 @@ function actionCells(session) {
   del.className = "btn btn-small btn-danger";
   del.textContent = "削除";
   del.disabled = isActive || outputting || upOutputting;
-  del.title = isActive
-    ? "収集中のSessionは削除できません"
-    : outputting || upOutputting
-      ? "出力中のSessionは削除できません"
-      : "このSessionの記録(コメント/Gift/分析)と録画をまとめて削除します。取り消せません。";
   del.addEventListener("click", async (e) => {
     e.stopPropagation();
     const ok = await confirmDialog(
-      `Session #${sessionNo(session.id)} (@${session.unique_id}) を削除しますか？この操作は取り消せません。`,
+      `Session #${sessionNo(session.id)} (@${session.unique_id}) を削除`,
       { title: "Sessionの削除", confirmLabel: "削除する" },
     );
     if (!ok) return;
@@ -462,7 +441,7 @@ async function transcribeSession(session, btn) {
     const recs = (data.recordings || []).filter(
       (r) => r.status === "completed" || r.status === "interrupted");
     if (!recs.length) {
-      showToast("文字起こしできる録画がありません。", null,
+      showToast("録画がありません", null,
         { title: `Session #${sessionNo(session.id)} の文字起こし` });
       return;
     }
@@ -473,10 +452,7 @@ async function transcribeSession(session, btn) {
     // 複数録画は「どれを」が決まらない。詳細を開かせてscrollさせ直すのではなく、
     // その場で選ばせる(押した結果が「押せませんでした」になるのを避ける)。
     openMenuAt(btn, recs.map((rec) => ({
-      label: `${recName(rec)}${rec.has_transcript ? "（字幕化済）" : ""}`,
-      title: rec.has_transcript
-        ? "保存済みの文字起こしを表示します。"
-        : "この録画の音声をローカルAIで文字起こしします。",
+      label: `${recName(rec)}${rec.has_transcript ? "（字幕化 ✓）" : ""}`,
       onSelect: () => transcribeOrShow(rec, btn),
     })));
   } catch (err) {
@@ -622,7 +598,7 @@ function renderTable() {
   // 保存が0件なのか、filterに一致しないだけなのかは別の状態。後者を「保存が無い」と
   // 描くと、保存済みSessionを取り違えたことになる。
   else if (allSessions.length > 0)
-    setListMessage(emptyEl, "条件に一致するSessionがありません。filterを変更してください。");
+    setListMessage(emptyEl, "条件に一致しません");
   else setListState(emptyEl, "empty");
 
   // 並びも列数も変わっていないなら、行はそのまま使って中身だけ入れ替える。収集中は
@@ -680,8 +656,7 @@ function mergeTd(session) {
   const input = document.createElement("input");
   input.type = "checkbox";
   input.checked = mergeSelected.has(sessionId);
-  input.title = "マージ表示の対象に加えます（2件以上でまとめて表示できます）。";
-  input.setAttribute("aria-label", `Session #${sessionNo(sessionId)} をマージ表示の対象にする`);
+  input.setAttribute("aria-label", `Session #${sessionNo(sessionId)} を選択`);
   input.addEventListener("click", (e) => e.stopPropagation());
   input.addEventListener("change", () => {
     if (input.checked) mergeSelected.add(sessionId);
@@ -699,7 +674,7 @@ function syncMergeControls(rows) {
   const clear = document.getElementById("merge-clear");
   const selall = document.getElementById("merge-selall");
   const count = mergeSelected.size;
-  open.textContent = count ? `選択をマージ表示 (${count})` : "選択をマージ表示";
+  open.textContent = count ? `マージ表示 (${count})` : "マージ表示";
   open.disabled = count < 2;
   clear.classList.toggle("hidden", count === 0);
   const visible = rows || filteredSessions();
@@ -719,7 +694,7 @@ function noteTd(session) {
   input.className = "note-inline";
   input.value = session.note || "";
   input.placeholder = "—";
-  input.title = "Memo。ここで直接編集でき、離れると保存されます（検索boxの絞込対象です）。";
+  input.setAttribute("aria-label", "Memo");
   input.addEventListener("click", (e) => e.stopPropagation());
   input.addEventListener("change", async () => {
     // 行は再取得を跨いで生き残るので、掴んだ時点のsessionではなく今の一覧から引く。
@@ -751,7 +726,7 @@ async function showDetail(sessionId, fromHistory) {
   try {
     data = await apiSend("GET", `/api/sessions/${sessionId}`);
   } catch (err) {
-    showToast(["Session詳細を取得できませんでした。", errorDetailText(err)], "error",
+    showToast(["Session詳細を取得できません", errorDetailText(err)], "error",
       { title: `Session #${sessionNo(sessionId)} の詳細` });
     return;
   }
@@ -883,7 +858,7 @@ function openDock(merged) {
 async function showMerged(ids, fromHistory) {
   const list = [...new Set(ids)].filter((id) => Number.isFinite(id) && id > 0).sort((a, b) => a - b);
   if (list.length < 2) {
-    showToast("マージ表示は2件以上のSessionを選んでください。", "error", { title: "マージ表示" });
+    showToast("2件以上を選択", "error", { title: "マージ表示" });
     return;
   }
   const query = `ids=${list.join(",")}`;
@@ -891,7 +866,7 @@ async function showMerged(ids, fromHistory) {
   try {
     data = await apiSend("GET", `/api/sessions/merged?${query}`);
   } catch (err) {
-    showToast(["マージ表示を取得できませんでした。", errorDetailText(err)], "error",
+    showToast(["マージ表示を取得できません", errorDetailText(err)], "error",
       { title: `${list.length} Sessionのマージ表示` });
     return;
   }
@@ -1408,18 +1383,16 @@ function recordingActions(rec) {
   if (hasSource && finished) {
     const dl = document.createElement("button");
     dl.className = "btn btn-small";
-    // 出力済みでも再出力可能（活性のまま）。ラベルだけ「済」にする。
-    dl.textContent = rec.has_output ? "焼き込み出力済" : "焼き込み出力";
-    dl.title = "設定でコメント/Gift演出が有効な場合、焼き込み済み動画をrecordings folderへ出力します（再Encodeのため時間がかかります）。完了時にブラウザ通知を出します。";
+    // 出力済みでも再出力可能（活性のまま）。ラベルに ✓ を付ける。
+    dl.textContent = rec.has_output ? "焼き込み ✓" : "焼き込み";
     dl.addEventListener("click", () => downloadRecording(rec, dl));
     wrap.appendChild(dl);
 
     if (upscaleConfigured) {
       const up = document.createElement("button");
       up.className = "btn btn-small";
-      // Up出力済みでも再出力可能（活性のまま）。ラベルだけ「済」にする。
-      up.textContent = rec.has_up_output ? "AI高画質済" : "AI高画質";
-      up.title = "この録画をローカルAI(超解像model)で高画質化し、.up.mp4としてrecordings folderへ出力します。焼き込みが有効な場合は焼き込み後の動画を高画質化します。GPUでも録画時間の数倍かかります。";
+      // Up出力済みでも再出力可能（活性のまま）。ラベルに ✓ を付ける。
+      up.textContent = rec.has_up_output ? "AI高画質 ✓" : "AI高画質";
       up.addEventListener("click", () => upDownloadRecording(rec, up));
       wrap.appendChild(up);
     }
@@ -1430,11 +1403,8 @@ function recordingActions(rec) {
   if (finished && sttConfigured && (hasSource || rec.has_transcript)) {
     const tr = document.createElement("button");
     tr.className = "btn btn-small";
-    // 文字起こし済みでも再実行可能（活性のまま）。ラベルだけ「済」にする。
-    tr.textContent = rec.has_transcript ? "字幕化済" : "字幕化";
-    tr.title = rec.has_transcript && !hasSource
-      ? "保存済みの文字起こしを表示します（素材もmp4も残っていないため再実行はできません）。"
-      : "この録画の音声をローカルAIで文字起こしします（初回はmodel読み込みで時間がかかります）。結果はキャッシュされます。";
+    // 文字起こし済みでも再実行可能（活性のまま）。ラベルに ✓ を付ける。
+    tr.textContent = rec.has_transcript ? "字幕化 ✓" : "字幕化";
     tr.addEventListener("click", async () => {
       await transcribeOrShow(rec, tr);
       // done badge(文字起こし済)を反映するため詳細を再描画する。
@@ -1448,13 +1418,11 @@ function recordingActions(rec) {
     // 常用ではないのでmenuへ入れ、押下時はmenuのtoggle Buttonを進捗表示に使う。
     menuItems.push({
       label: "音量正規化",
-      title: "この録画の音量を設定の目標値(既定 -14 LUFS)へ揃えます。映像はそのまま複製し、音声だけを作り直して元のmp4と差し替えます(元は_backupへ退避)。配信ごと・場面ごとの音量差を1本ずつ直す手間が要らなくなります。",
       onSelect: () => audionormRecording(rec, wrap.querySelector(".row-menu-toggle")),
     });
 
     menuItems.push({
       label: "再mp4化",
-      title: "保持している元の.tsセグメントから、録画時と同じ処理でmp4を作り直します。配信中に解像度が変わってPlayerがカクつく録画を1解像度へ正しく直せます。元mp4は_backupへ退避します（.tsが残っていない録画は不可）。再Encodeのため時間がかかります。",
       onSelect: () => reprocessRecording(rec, wrap.querySelector(".row-menu-toggle")),
     });
 
@@ -1465,7 +1433,6 @@ function recordingActions(rec) {
       const der = document.createElement("button");
       der.className = "btn btn-small";
       der.textContent = "派生物削除";
-      der.title = "この録画の焼き込み(.overlay.mp4)・Up出力(.up.mp4)・renderの中間fileだけを削除します。元の録画は残るため、必要になれば出力し直せます。";
       der.addEventListener("click", () => deleteDerived(rec, () => {
         if (currentSessionId !== null) showDetail(currentSessionId);
       }));
@@ -1474,12 +1441,11 @@ function recordingActions(rec) {
   }
   menuItems.push({
     label: "削除",
-    title: "この録画のfileとDBの記録を削除します。派生物(焼き込み・Up出力)も一緒に消え、取り消せません。録画中は削除できません。",
     danger: true,
     disabled: rec.status === "recording",
     onSelect: async () => {
       const ok = await confirmDialog(
-        `録画 ${recName(rec)} を削除しますか？この操作は取り消せません。`,
+        `録画 ${recName(rec)} を削除`,
         { title: "録画の削除", confirmLabel: "削除する" },
       );
       if (!ok) return;
@@ -1492,8 +1458,10 @@ function recordingActions(rec) {
     },
   });
   // 残るのは音量正規化・再mp4化と削除だけ。「その他」では中身が読めないので用途を名乗らせる。
-  wrap.appendChild(rowMenu(menuItems,
-    { label: "作り直す/消す ⋯", title: "音量正規化・再mp4化・録画の削除" }));
+  // rowMenuはtitle未指定だと既定文を入れるので、付いたものを外す。
+  const menuToggle = rowMenu(menuItems, { label: "作り直す/消す ⋯" });
+  menuToggle.removeAttribute("title");
+  wrap.appendChild(menuToggle);
   return wrap;
 }
 
@@ -1519,7 +1487,6 @@ function renderRecordings(recordings) {
         const g = document.createElement("span");
         g.className = "st file-gone";
         g.textContent = "実体なし";
-        g.title = "素材(.ts)もmp4も残っていません。文字起こし・検索index・bookmark・解析は残っています。";
         state.appendChild(g);
       }
       // 保護はbadge自体をtoggleにする。状態が見えている場所でそのまま切り替えられる。
@@ -1554,8 +1521,8 @@ async function loadAiStatus() {
     aiConfigured = Boolean(st.configured);
     const note = document.getElementById("ai-status-note");
     if (st.configured) note.textContent = `model: ${st.model}`;
-    else if (st.enabled) note.textContent = "AI有効・model未設定 (TICTOK_AI_MODEL)";
-    else note.textContent = "AI無効 (TICTOK_AI_ENABLED=1 で有効化)";
+    else if (st.enabled) note.textContent = "model未設定";
+    else note.textContent = "AI無効";
   } catch (e) {
     /* status取得失敗時はAI無効扱いのまま */
   }
@@ -1570,10 +1537,10 @@ function renderAiMeta(payload) {
     meta.textContent = "";
     return;
   }
-  meta.textContent = `分析日時: ${fmtDateTime(payload.computed_at)}`
-    + ` / model: ${payload.model || "-"}`
-    + ` / prompt版: ${payload.prompt_version}`
-    + (payload.comment_count ? ` / ${fmtNum(payload.comment_count)}件のコメントを分析` : "");
+  meta.textContent = `${fmtDateTime(payload.computed_at)}`
+    + ` / ${payload.model || "-"}`
+    + ` / prompt版 ${payload.prompt_version}`
+    + (payload.comment_count ? ` / ${fmtNum(payload.comment_count)}件` : "");
 }
 
 function resetAiResult() {
@@ -1582,9 +1549,7 @@ function resetAiResult() {
   btn.textContent = "分析する";
   btn.classList.remove("hidden");
   document.getElementById("ai-rerun-btn").classList.add("hidden");
-  document.getElementById("ai-analyze-status").textContent = aiConfigured
-    ? ""
-    : "ローカルAIが未設定のため利用できません。";
+  document.getElementById("ai-analyze-status").textContent = aiConfigured ? "" : "AI未設定";
   document.getElementById("ai-meta").textContent = "";
   const result = document.getElementById("ai-result");
   result.classList.add("hidden");
@@ -1621,7 +1586,7 @@ async function runAiAnalysis(refresh) {
   const status = document.getElementById("ai-analyze-status");
   btn.disabled = true;
   rerun.disabled = true;
-  status.textContent = "ローカルAIで分析しています（modelにより数十秒かかることがあります）…";
+  status.textContent = "分析中…";
   try {
     const payload = await apiSend(
       "POST", `/api/sessions/${sessionId}/comment-analysis${refresh ? "?refresh=1" : ""}`);
@@ -1629,8 +1594,8 @@ async function runAiAnalysis(refresh) {
     renderAiAnalysis(payload);
     renderAiMeta(payload);
     status.textContent = payload.cached
-      ? "前回と同じ入力・同じmodelのため、保存済みの結果を表示しました。"
-      : `${fmtNum(payload.comment_count)}件のコメントを分析しました。`;
+      ? "保存済みの結果"
+      : `${fmtNum(payload.comment_count)}件を分析`;
     btn.classList.add("hidden");
     rerun.classList.remove("hidden");
   } catch (err) {
@@ -1851,21 +1816,16 @@ function openTranscript(rec, data) {
   if (sttTimemapVersion !== null && data.timemap_version !== sttTimemapVersion) {
     reasons.push(
       `古い時刻map（版 ${data.timemap_version === null || data.timemap_version === undefined ? "なし" : data.timemap_version}` +
-      ` / 現行 ${sttTimemapVersion}）で作られているため、時刻が動画とズレる場合があります。`);
+      ` / 現行 ${sttTimemapVersion}）`);
   }
   if (data.word_times === 0) {
     // 語ごとの時刻が無いとcueを語の端で締められず、segmentの終端が次のsegmentの開始まで
     // 伸びる。実測でSRTが録画の97.7%を覆う（実際の発話は約30%）ため、無音の上に関係のない
     // 字幕が出続ける。
-    reasons.push(
-      "語ごとの時刻を持たないため、無音の区間にも字幕が出続けます" +
-      "（SRTが録画のほぼ全区間を覆います）。");
+    reasons.push("語ごとの時刻なし（無音にも字幕）");
   }
   warn.classList.toggle("hidden", reasons.length === 0);
-  if (reasons.length) {
-    warn.textContent = "この文字起こしは" + reasons.join("また、") +
-      "文字起こしをやり直すと直ります。";
-  }
+  if (reasons.length) warn.textContent = reasons.join(" / ");
   const wrap = document.getElementById("transcript-segments");
   wrap.innerHTML = "";
   transcriptSegEls = [];
@@ -1984,7 +1944,7 @@ async function openUserDelete() {
   const empty = document.getElementById("userdel-empty");
   try {
     const res = await fetch("/api/streamers");
-    if (!res.ok) throw new Error("配信者一覧の取得に失敗しました。");
+    if (!res.ok) throw new Error("配信者一覧を取得できません");
     userdelStreamers = (await res.json()).streamers || [];
     setListState(empty, "empty");
   } catch (err) {
@@ -2048,9 +2008,7 @@ function syncUserDeleteControls() {
   selall.indeterminate = selectedVisible > 0 && selectedVisible < visible.length;
   const run = document.getElementById("userdel-run");
   run.disabled = userdelSelected.size === 0;
-  run.textContent = userdelSelected.size > 0
-    ? `選択した${userdelSelected.size}名を削除`
-    : "選択した配信者を削除";
+  run.textContent = userdelSelected.size > 0 ? `${userdelSelected.size}名を削除` : "削除";
 }
 
 async function runUserDelete() {
@@ -2061,7 +2019,7 @@ async function runUserDelete() {
     .map((s) => `@${s.unique_id}`)
     .join("\n");
   const ok = await confirmDialog(
-    `次の${ids.length}名の履歴をすべて削除しますか？この操作は取り消せません。\n\n${names}`,
+    `次の${ids.length}名の履歴を削除\n\n${names}`,
     { title: "配信者を削除", confirmLabel: "削除する" },
   );
   if (!ok) return;
@@ -2077,7 +2035,7 @@ async function runUserDelete() {
     // modalが閉じる見た目は中止と同じなので、消えた量はtoastで名乗る。取り消せない削除で
     // 「何名ぶん・何Session消えたか」がどこにも残らないと、対象を間違えても気付けない。
     showToast(
-      `${fmtNum(ids.length)}名の履歴を削除しました（Session ${fmtNum(result.deleted_sessions ?? 0)}件）。`,
+      `${fmtNum(ids.length)}名を削除（Session ${fmtNum(result.deleted_sessions ?? 0)}件）`,
       null, { title: "配信者を削除" });
   } catch (err) {
     status.textContent = err.message;

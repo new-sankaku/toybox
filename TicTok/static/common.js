@@ -10,12 +10,14 @@ const NAV_ITEMS = [
   ["/history", "履歴"],
   ["/streamers", "配信者"],
   ["/videos", "配信者動画"],
+  ["/story", "ストーリー"],
   ["/capacity", "動画容量"],
   ["/fans", "Fan台帳"],
   ["/analytics", "全体解析"],
   ["/jobs", "Job"],
   ["/assets", "素材"],
   ["/ops", "運用log"],
+  ["/backup", "バックアップ"],
   ["/settings", "設定"],
 ];
 
@@ -70,14 +72,14 @@ function focusModalClose(overlay) {
 
 const STATUS_LABELS = {
   idle: { badge: "IDLE", cls: "badge-idle", message: "待機中" },
-  waiting: { badge: "WAITING", cls: "badge-waiting", message: "LIVE配信の開始を待っています…（開始を検出すると自動で収集を始めます）" },
-  connecting: { badge: "CONNECTING", cls: "badge-connecting", message: "接続処理を実行中です…" },
-  connected: { badge: "RECEIVING", cls: "badge-connected", message: "LIVEに接続済み。Eventを受信しています。" },
-  reconnecting: { badge: "RECONNECTING", cls: "badge-reconnecting", message: "接続が不安定なため再接続しています…（収集Dataは保持されます）" },
-  disconnected: { badge: "STOPPED", cls: "badge-idle", message: "収集を停止しました。" },
-  ended: { badge: "LIVE ENDED", cls: "badge-ended", message: "LIVE配信が終了しました。" },
-  error: { badge: "ERROR", cls: "badge-error", message: "Errorが発生しました。" },
-  restricted: { badge: "録画不可", cls: "badge-restricted", message: "録画できない配信のため接続していません（メンバー限定・年齢制限、または配信の署名が通らない）。理由はOps画面のeventに残ります。通常配信の開始を監視継続中です。" },
+  waiting: { badge: "WAITING", cls: "badge-waiting", message: "待機中" },
+  connecting: { badge: "CONNECTING", cls: "badge-connecting", message: "接続中" },
+  connected: { badge: "RECEIVING", cls: "badge-connected", message: "受信中" },
+  reconnecting: { badge: "RECONNECTING", cls: "badge-reconnecting", message: "再接続中" },
+  disconnected: { badge: "STOPPED", cls: "badge-idle", message: "停止" },
+  ended: { badge: "LIVE ENDED", cls: "badge-ended", message: "配信終了" },
+  error: { badge: "ERROR", cls: "badge-error", message: "Error" },
+  restricted: { badge: "録画不可", cls: "badge-restricted", message: "録画不可（メンバー限定・年齢制限・署名不可のいずれか）" },
 };
 
 // Timelineはbucket 1本ごとにlabelを作るので、6時間の配信で数千回通る。
@@ -182,17 +184,17 @@ function recName(rec) {
 // 後者をそのまま画面へ出すと日本語UIの中に意味の取れない生文言が並ぶため、statusから
 // 引いた日本語に置き換え、生文言はerrorのdetailに残してtooltip/consoleから辿れるようにする。
 const HTTP_ERROR_TEXT = {
-  400: "Requestの内容が不正です。",
-  401: "この操作には認証が必要です。",
-  403: "この操作は許可されていません。",
-  404: "対象が見つかりませんでした（Serverのcodeが古い可能性があります）。",
-  405: "この操作をServerが受け付けていません。",
-  409: "他の処理と競合したため実行できませんでした。",
-  422: "入力値をServerが受け付けませんでした。",
-  500: "Server内部でErrorが発生しました。",
-  502: "外部からの取得に失敗しました。",
-  503: "Serverが一時的に応答できません。",
-  504: "Serverの応答が時間内に返りませんでした。",
+  400: "Requestが不正",
+  401: "認証が必要",
+  403: "許可されていません",
+  404: "対象が見つかりません",
+  405: "Serverが受け付けない操作",
+  409: "他の処理と競合",
+  422: "入力値が不正",
+  500: "Server内部Error",
+  502: "外部からの取得に失敗",
+  503: "Serverが応答不能",
+  504: "Serverの応答がtimeout",
 };
 
 function hasJapanese(text) {
@@ -204,7 +206,7 @@ function httpError(status, detail) {
   const passthrough = raw && hasJapanese(raw);
   const message = passthrough
     ? raw
-    : (HTTP_ERROR_TEXT[status] || `Serverが処理できませんでした（HTTP ${status}）。`);
+    : (HTTP_ERROR_TEXT[status] || `Server Error（HTTP ${status}）`);
   // 画面へ出さなかった生文言はconsoleに残す。alertのように後から辿れない出し方をする
   // 呼び出し元でも、原因の特定に必要な情報が消えないようにする。
   if (!passthrough) console.warn(`API error: HTTP ${status}${raw ? ` / ${raw}` : ""}`);
@@ -232,7 +234,7 @@ async function apiSend(method, path, body) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
-    const err = new Error("Serverへ接続できませんでした。");
+    const err = new Error("Server未接続");
     err.status = 0;
     err.detail = String((e && e.message) || e);
     throw err;
@@ -1511,10 +1513,8 @@ function createSessionTrendChart(container, opts = {}) {
           const lines = p.sub ? [p.sub] : [];
           // 宝箱窓を除いた同接は、除いた後に残る時間が短いほど代表性が落ちる。何割を
           // 残した平均なのかを添えないと、窓が配信の8割を占める配信でも同じ重みで読める。
-          if (spec.key === "viewers" && p.observedSeconds > 0) {
-            lines.push(p.viewersNobox == null
-              ? "宝箱窓を除く: 宝箱の記録が無い期間"
-              : `宝箱窓の外: 観測時間の ${Math.round((p.noboxSeconds / p.observedSeconds) * 100)}%`);
+          if (spec.key === "viewers" && p.observedSeconds > 0 && p.viewersNobox != null) {
+            lines.push(`宝箱窓の外: 観測時間の ${Math.round((p.noboxSeconds / p.observedSeconds) * 100)}%`);
           }
           return lines;
         },
@@ -1790,10 +1790,8 @@ function buildBattleHead(battle, ordinal) {
   // 食い違うときだけ元の値を注記する(全体解析の勝敗と必ず一致する)。
   if (battle.result_basis === "settled" && battle.result_reported !== battle.result) {
     res.title =
-      `PK確定時点（${fmtNum(battle.own_score || 0)} 対 ${fmtNum(battle.opp_score || 0)}）の判定です。`
-      + ` TikTokから最後に届いたスコアは ${fmtNum(battle.own_score_reported || 0)} 対 `
-      + `${fmtNum(battle.opp_score_reported || 0)}（${battleResultMeta(battle.result_reported).text}）ですが、`
-      + `これはPK終了後に相手が枠から抜けた後の値です。`;
+      `報告値 ${fmtNum(battle.own_score_reported || 0)} 対 `
+      + `${fmtNum(battle.opp_score_reported || 0)}（${battleResultMeta(battle.result_reported).text}）`;
   }
   head.append(id, mode, when, res);
   return head;
@@ -1964,14 +1962,11 @@ function coinCoverageNote(battle, host) {
   const cov = (battle.coin_coverage || {})[host.user_id];
   if (!cov) return null;
   if (!cov.attached_at) {
-    return { text: "実弾 未取得", title: cov.error || "相手Roomへ接続できませんでした" };
+    return { text: "実弾 未取得", title: cov.error || "" };
   }
   const late = cov.attached_at - (battle.start_time || 0);
   if (late > 1) {
-    return {
-      text: `実弾 途中(${fmtDuration(late)}〜)`,
-      title: `相手Roomへ繋がったのがPK開始の${fmtDuration(late)}後です。それ以前のGiftは取得できていません`,
-    };
+    return { text: `実弾 途中(${fmtDuration(late)}〜)`, title: "" };
   }
   return null;
 }
@@ -2024,11 +2019,11 @@ function buildBattleHostContrib(host, byHost, owner, battle) {
     : `BS ${fmtBs(host.score)} / 実弾 ${fmtBs(coinsSum)}`;
   if (note) {
     score.classList.add("bch-host-nocoin");
-    score.title = note.title;
+    if (note.title) score.title = note.title;
   }
   const cnt = document.createElement("span");
   cnt.className = "bch-host-cnt";
-  cnt.textContent = `貢献者${rows.length}人`;
+  cnt.textContent = `${rows.length}人`;
   head.append(userCell(participantUser(host, owner), { hideId: true }), score, cnt);
   box.appendChild(head);
 
@@ -2036,7 +2031,7 @@ function buildBattleHostContrib(host, byHost, owner, battle) {
     const empty = document.createElement("div");
     empty.className = "bc-empty";
     // 0件の意味は「送られなかった」と「拾えなかった」で違う。取り違えると欠測が実績になる。
-    empty.textContent = note ? note.title : "実弾Giftなし";
+    empty.textContent = note ? note.text : "実弾Giftなし";
     box.appendChild(empty);
     return box;
   }
@@ -2125,10 +2120,9 @@ function buildBattleUnattributed(byHost, key) {
   const label = document.createElement("span");
   label.className = "bch-host-unattr";
   label.textContent = "宛先不明（陣営の合計のみ）";
-  label.title = "チーム戦のスコア内訳はチーム単位で届くため、どの配信者への貢献かが判りません。";
   const cnt = document.createElement("span");
   cnt.className = "bch-host-cnt";
-  cnt.textContent = `貢献者${rows.length}人`;
+  cnt.textContent = `${rows.length}人`;
   head.append(label, cnt);
   box.appendChild(head);
   box.appendChild(buildBattleContribTable(rows));
@@ -2197,7 +2191,7 @@ function syncBattleScoreChart(entry, battle) {
 }
 
 // 倍率タイム(Match Bonus Mission)。Battle中にギフト倍率タイムが発生した場合のみ表示。
-// 倍率・発動時間帯・達成可否・獲得ボーナス💎・後押しした貢献者を1ブロックに集約する。
+// 倍率・発動時間帯・達成可否・獲得ボーナス🪙・後押しした貢献者を1ブロックに集約する。
 // bonus_missions[] は発生回数ぶん縦に並べる。発生していないBattleでは何も描かない。
 function fmtClock(ts) {
   if (!ts) return "";
@@ -2275,7 +2269,7 @@ function buildBonusMission(m) {
     : "";
   if (window) row.appendChild(kv("発動時間帯", window));
   if (m.progress_target) row.appendChild(kv("進捗", `${m.progress}/${m.progress_target}`));
-  if (m.bonus_sum) row.appendChild(kv("獲得ボーナス", `+${fmtNum(m.bonus_sum)} 💎`));
+  if (m.bonus_sum) row.appendChild(kv("獲得ボーナス", `🪙 +${fmtNum(m.bonus_sum)}`));
   box.appendChild(row);
 
   // 後押しした貢献者
@@ -2448,7 +2442,7 @@ function giftItemsNode(items, icons) {
     count.textContent = `×${fmtNum(info.count)}`;
     const coin = document.createElement("span");
     coin.className = "gi-coin";
-    coin.textContent = `コイン ${fmtNum(info.diamonds)}`;
+    coin.textContent = `🪙 ${fmtNum(info.diamonds)}`;
     line.append(n, count, coin);
     wrap.appendChild(line);
   });
@@ -2462,9 +2456,52 @@ function fmtCompact(value) {
   return String(n);
 }
 
+// 人が読む文字を切るところは全部ここを通す。charAt(0)やslice(n)はUTF-16の単位で切るので、
+// 絵文字で始まる名前では上位surrogateだけが残って豆腐(□)が出る ―― 実データの
+// 「🟡むらたろう🍑🏌️‍♂️🍔」の頭文字avatarがその形で壊れていた。TikTokの表示名は結合文字を
+// 含む絵文字(ZWJ結合の 🐈‍⬛、ZWJ+異体字選択子の 🏌️‍♂️)を普通に含むため、code point単位
+// ([...str])でも足りない ―― 1つの絵文字が複数のcode pointに割れる。
+// Intl.Segmenterは主要browserに揃っている。持たない環境ではcode point単位まで戻す
+// (surrogateを割るよりは正しい)。
+const GRAPHEME_SEGMENTER =
+  typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
+    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    : null;
+
+// 先頭から書記素をcount個。文字の途中で切らない唯一の取り方。
+function firstGraphemes(text, count) {
+  const value = String(text === undefined || text === null ? "" : text);
+  if (!value || count <= 0) return "";
+  if (!GRAPHEME_SEGMENTER) return [...value].slice(0, count).join("");
+  const out = [];
+  for (const { segment } of GRAPHEME_SEGMENTER.segment(value)) {
+    out.push(segment);
+    if (out.length >= count) break;
+  }
+  return out.join("");
+}
+
+// 書記素の数。長さの判定を .length で行うと、絵文字1つが2にも7にも数えられる。
+function graphemeLength(text) {
+  const value = String(text === undefined || text === null ? "" : text);
+  if (!value) return 0;
+  if (!GRAPHEME_SEGMENTER) return [...value].length;
+  let n = 0;
+  for (const _ of GRAPHEME_SEGMENTER.segment(value)) n += 1;
+  return n;
+}
+
+// 長い名前を省略する。CSSのtext-overflowが効く場所はCSSに任せ、ここは文字列そのものを
+// 短くしたいとき(file名の下見など)に使う。
+function truncateGraphemes(text, count) {
+  const value = String(text === undefined || text === null ? "" : text);
+  if (graphemeLength(value) <= count) return value;
+  return `${firstGraphemes(value, count)}…`;
+}
+
 function avatarChar(user) {
   const base = (user && (user.nickname || user.unique_id)) || "?";
-  return base.trim().charAt(0).toUpperCase() || "?";
+  return firstGraphemes(base.trim(), 1).toUpperCase() || "?";
 }
 
 // TikTok CDN avatars hotlink/Referer-block direct browser loads and their signed
@@ -2582,10 +2619,7 @@ function userCell(user, opts = {}) {
   // href付きならlinkにする。名前が出ている場所からその人の画面へ直接飛べないと、
   // nav→検索box→入力→行clickの遠回りになる(Fan台帳と配信者画面が実際そうだった)。
   const wrap = document.createElement(opts.href ? "a" : "span");
-  if (opts.href) {
-    wrap.href = opts.href;
-    if (opts.linkTitle) wrap.title = opts.linkTitle;
-  }
+  if (opts.href) wrap.href = opts.href;
   wrap.className = "u" + (opts.stackId ? " u-stack" : "") + (opts.href ? " u-link" : "");
   // leagueFirst: リーグchipをアイコンの前に出す(履歴一覧など)。
   if (opts.leagueFirst && user && user.league) wrap.appendChild(leagueChip(user.league));
@@ -2722,7 +2756,7 @@ function rowMenu(items, opts) {
   const toggle = document.createElement("button");
   toggle.className = "btn btn-small row-menu-toggle";
   toggle.textContent = options.label || "その他 ⋯";
-  toggle.title = options.title || "その他の操作";
+  if (options.title) toggle.title = options.title;
   toggle.addEventListener("click", () => {
     const wasOpenFor = openRowMenu && openRowMenu.dataset.owner === String(toggle.dataset.menuId);
     closeRowMenu();
@@ -3123,8 +3157,7 @@ function setListState(el, state, err) {
   }
   if (state === "failed") {
     el.classList.add("list-failed");
-    el.textContent =
-      `${el.dataset.label || "Data"}を取得できませんでした（0件という意味ではありません）。`;
+    el.textContent = `${el.dataset.label || "Data"}を取得できませんでした`;
     el.title = errorDetailText(err);
     console.warn(`${el.id || "list"}: ${errorDetailText(err)}`, err);
     return;
@@ -3172,9 +3205,8 @@ function fmtBytes(bytes) {
 // 残る。srcが404でも<video>はerror eventを出すだけで画面は無言で止まるので、理由を出す。
 // 「動画file」ではなく素材とmp4の両方を名乗る。判定(/path の exists)はmp4だけを見ていた
 // 頃があり、素材が丸ごと残っている録画にまで「削除されています」と出していた。
-const VIDEO_MISSING_TEXT =
-  "この録画は素材(.ts)もmp4も残っていません。文字起こし・検索・bookmarkは引き続き使えます。";
-const VIDEO_ERROR_TEXT = "この録画を再生できませんでした。";
+const VIDEO_MISSING_TEXT = "動画なし（素材・mp4とも削除済み）";
+const VIDEO_ERROR_TEXT = "再生できません";
 
 // error eventはfile削除以外(codec・網)でも飛ぶ。消えたと決め打ちすると、実際は別の
 // 原因のときに嘘の説明を出すことになるので、実在をserverに確かめてから文言を選ぶ。
@@ -3234,7 +3266,8 @@ function renderDiskBar(container, data) {
   if (!names.length) {
     const empty = document.createElement("span");
     empty.className = "d-empty";
-    empty.textContent = "空き容量: 不明";
+    empty.textContent = "—";
+    empty.setAttribute("aria-label", "空き容量 不明");
     container.appendChild(empty);
     return;
   }
@@ -3248,8 +3281,7 @@ function renderDiskBar(container, data) {
     item.href = "/capacity";
     item.className = low.has(name) ? "d-vol low" : "d-vol";
     item.title = `${info.path}\n空き ${fmtGb(info.free_bytes)}GB / 全体 ${fmtGb(info.total_bytes)}GB`
-      + (Number(data.min_free_bytes) > 0 ? `\n出力を拒否する下限 ${floorGb}GB` : "")
-      + "\nclickで容量の内訳と整理へ";
+      + (Number(data.min_free_bytes) > 0 ? `\n下限 ${floorGb}GB` : "");
     const label = document.createElement("span");
     label.className = "l";
     label.textContent = name;
@@ -3292,7 +3324,8 @@ function showDiskUnavailable(container) {
   container.innerHTML = "";
   const err = document.createElement("span");
   err.className = "d-empty";
-  err.textContent = "空き容量: 取得失敗";
+  err.textContent = "?";
+  err.setAttribute("aria-label", "空き容量 取得失敗");
   container.appendChild(err);
 }
 
@@ -3363,9 +3396,11 @@ async function loadOpsBadge() {
   } catch (e) {
     badge.textContent = "?";
     badge.className = "nav-badge unknown";
-    badge.title = "運用logの件数を取得できませんでした（0件という意味ではありません）。";
+    badge.setAttribute("aria-label", "運用log 取得失敗");
+    badge.removeAttribute("title");
     return;
   }
+  badge.removeAttribute("aria-label");
   const errors = Number((data.counts || {}).error || 0);
   const warnings = Number((data.counts || {}).warning || 0);
   badge.title = `直近${Math.round(data.window_hours)}時間: error ${errors} / warning ${warnings}`;
@@ -3381,6 +3416,60 @@ async function loadOpsBadge() {
 if (navLink("/ops")) {
   loadOpsBadge();
   pollWhileVisible(loadOpsBadge, OPS_BADGE_POLL_MS);
+}
+
+// ---- 退避のbadge(全画面共通のnav) ----
+// backupが黙って止まるのは、backupの事故のうち最もよくある形である。運用logのerror badgeでは
+// 拾えない —— 退避先が外れたまま**録画が1本も終わっていない**時間帯は、失敗の記録がまだ
+// 生まれていないのに退避は止まっている。だから件数ではなく、退避そのものの状態を引く。
+// 引き先は状況画面(/api/backup/overview)ではなく軽い方(/api/backup/health)にする。あちらは
+// 退避先のfolderを開くので、外付けが1台外れているだけで全画面が待たされる。
+const BACKUP_BADGE_POLL_MS = 60000;
+const BACKUP_BADGE_MARKS = { unreachable: "!", failing: "!", late: "…" };
+
+function backupBadgeElement() {
+  const link = navLink("/backup");
+  if (!link) return null;
+  let badge = link.querySelector(".nav-badge");
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "nav-badge";
+    link.appendChild(badge);
+  }
+  return badge;
+}
+
+async function loadBackupBadge() {
+  const badge = backupBadgeElement();
+  if (!badge) return;
+  let data;
+  try {
+    data = await apiSend("GET", "/api/backup/health");
+  } catch (e) {
+    // 取得できなかったことを「異常なし」として描かない。退避の話でそれをやると、
+    // 止まっていることに誰も気付かないという、この機能が防ごうとしている形そのものになる。
+    badge.textContent = "?";
+    badge.className = "nav-badge unknown";
+    badge.setAttribute("aria-label", "退避 取得失敗");
+    badge.removeAttribute("title");
+    return;
+  }
+  badge.removeAttribute("aria-label");
+  const alerts = data.alerts || [];
+  if (!data.state) {
+    badge.textContent = "";
+    badge.className = "nav-badge";
+    badge.removeAttribute("title");
+    return;
+  }
+  badge.textContent = BACKUP_BADGE_MARKS[data.state] || "!";
+  badge.className = data.state === "late" ? "nav-badge unknown" : "nav-badge alert";
+  badge.title = alerts.map((item) => item.label).join(" / ");
+}
+
+if (navLink("/backup")) {
+  loadBackupBadge();
+  pollWhileVisible(loadBackupBadge, BACKUP_BADGE_POLL_MS);
 }
 
 // ---- 共通UI: 通知toast ----
@@ -3473,7 +3562,7 @@ function showToast(message, kind, opts) {
   close.className = "toast-close";
   close.type = "button";
   close.textContent = "✕";
-  close.title = "この通知を閉じる";
+  close.setAttribute("aria-label", "閉じる");
   close.addEventListener("click", () => dismissToast(toast));
   toast.append(main, count, close);
   if (kind !== "error") {
@@ -3523,9 +3612,6 @@ function protectBadge(rec, onDone) {
   badge.type = "button";
   badge.textContent = rec.protected ? "保護中" : "保護";
   badge.setAttribute("aria-pressed", rec.protected ? "true" : "false");
-  badge.title = rec.protected
-    ? "保持policyの自動削除から除外されています。押すと解除します。"
-    : "押すと保持policyの自動削除から除外します。手動の削除は保護中でも実行できます。";
   badge.addEventListener("click", async () => {
     badge.disabled = true;
     try {
@@ -3545,7 +3631,7 @@ function protectBadge(rec, onDone) {
 async function deleteDerived(rec, onDone) {
   try {
     const res = await apiSend("DELETE", `/api/recordings/${rec.id}/derived`);
-    showToast(`録画 ${recName(rec)} の派生物 ${fmtBytes(res.freed_bytes)} を削除しました。`);
+    showToast(`派生物 ${fmtBytes(res.freed_bytes)} を削除`);
     if (onDone) onDone();
   } catch (err) {
     showError(err, "派生物の削除");
@@ -3764,10 +3850,8 @@ function setJobProgress(prog, job) {
       ? (short ? `待機 ${position}番目` : `待機中（${position}番目）`)
       : "待機中";
     prog.querySelector(".dl-pct").textContent = "";
-    const wait = position > 1
-      ? `順番待ちです。前に${position - 1}件あります。終わり次第、自動で始まります。`
-      : "順番待ちです。前のjobが終わり次第、自動で始まります。";
-    prog.title = short ? `${short}｜${wait}` : wait;
+    if (short) prog.title = short;
+    else prog.removeAttribute("title");
     return;
   }
   setProgress(prog, job.stage || "準備中", job.pct);
@@ -3834,10 +3918,14 @@ function jobBarFailedCount() {
 }
 
 function renderJobBar() {
-  const badge = jobBarElement();
-  if (!badge || !jobBarState) return;
-  const link = badge.parentElement;
+  if (!jobBarState) return;
   const rows = [...jobBarState.values()].filter(jobBarCountable);
+  // Podはnavのbadgeが無い画面でも出す(badgeの有無はnavの作りの話で、jobが動いている
+  // かどうかとは関係が無い)。
+  reportJobsToPod(rows);
+  const badge = jobBarElement();
+  if (!badge) return;
+  const link = badge.parentElement;
   const running = rows.filter((job) => job.state === "running").length;
   const pending = rows.filter((job) => job.state === "pending").length;
   const failed = jobBarFailedCount();
@@ -3858,10 +3946,52 @@ function renderJobBar() {
   badge.textContent = String(failed || running + pending);
   badge.className = failed ? "nav-badge alert" : "nav-badge";
   link.title = failed
-    ? `実行中 ${running} / 待機中 ${pending}。直近のjob履歴に失敗・中断が${failed}件あります。`
-      + "押すとJob画面へ移動します（失敗・中断は状態filterで絞れます）。"
-    : `焼き込み・Up出力・文字起こしなどのjob: 実行中 ${running} / 待機中 ${pending}。`
-      + "押すとJob画面へ移動します。";
+    ? `実行中 ${running} / 待機中 ${pending} / 失敗 ${failed}`
+    : `実行中 ${running} / 待機中 ${pending}`;
+}
+
+// ---- Podへjobの現況を渡す ----
+// 台帳はどの画面のWSにも届いているのに、進行はnavの数字にしか出ていなかった。
+// 数字は「何本あるか」しか言わず、「今どの段階か」「終わったか」は Job画面を開くまで
+// 分からない。Podはその2つだけを、job中に限って言う。
+//
+// 台詞はすべてjobが持っている値(段階名・失敗message)から作る。飾りの台詞は言わせない
+// ―― 出所の無い言葉が混じると、どれがjobの実際の報告なのか区別できなくなる。
+const podSeen = new Map();
+
+function podJobLabel(job) {
+  // 対象名はjobによって持ち方が違うので、在る物を順に使う。どれも無ければ種別で呼ぶ。
+  return job.title || job.target || job.recording_name || job.domain || "job";
+}
+
+function reportJobsToPod(rows) {
+  const running = rows.filter((job) => job.state === "running");
+  // 終わった物の報告。前に実行中として見ていたjobだけを対象にする(画面を開いた時点で
+  // 既に終わっていた過去のjobまで報告すると、起動のたびに古い結果を読み上げる)。
+  let finished = null;
+  rows.forEach((job) => {
+    const was = podSeen.get(job.job_id);
+    if (was === "running" && job.state !== "running") finished = job;
+    if (job.state === "running" || was) podSeen.set(job.job_id, job.state);
+  });
+  // 台帳から消えた行を覚え続けない。
+  const alive = new Set(rows.map((job) => job.job_id));
+  [...podSeen.keys()].forEach((id) => { if (!alive.has(id)) podSeen.delete(id); });
+
+  if (finished) {
+    const failed = JOB_BAR_FAILED_STATES.includes(finished.state);
+    const detail = failed && finished.message ? `：${finished.message}` : "";
+    podSay(`${podJobLabel(finished)} ${failed ? "停止" : "完了"}${detail}`,
+      failed ? "warn" : null);
+    // 続きが在るならそのまま次の報告へ移り、無ければ帰る。
+    if (!running.length) podSay("");
+    return;
+  }
+  if (!running.length) { podSay(""); return; }
+  const job = running[0];
+  const rest = running.length > 1 ? `（ほか ${running.length - 1} 本）` : "";
+  const pct = Number.isFinite(Number(job.pct)) ? ` ${Math.round(Number(job.pct))}%` : "";
+  podSay(`${podJobLabel(job)}：${job.stage || "実行中"}${pct}${rest}`);
 }
 
 function applyJobBar(message) {
@@ -3983,16 +4113,15 @@ function renderJumpList() {
     return;
   }
   if (jumpState === "failed") {
-    note.textContent = "候補を取得できませんでした（0件という意味ではありません）。";
+    note.textContent = "候補を取得できませんでした";
     note.title = errorDetailText(jumpError);
     return;
   }
   note.removeAttribute("title");
   jumpRows = filterJumpItems(jumpUI.input.value);
-  if (!jumpRows.length) {
-    note.textContent = jumpUI.input.value.trim()
-      ? "一致する配信者・Session・録画がありません。"
-      : "配信者名・Session番号・録画file名で絞り込めます。";
+  // 絞込前に0件なのは候補そのものが無いときだけ。下の「検索対象」が0を名乗る。
+  if (!jumpRows.length && jumpUI.input.value.trim()) {
+    note.textContent = "一致なし";
     return;
   }
   if (jumpActive >= jumpRows.length) jumpActive = jumpRows.length - 1;
@@ -4043,12 +4172,13 @@ function buildJumpUI() {
   title.textContent = "横断jump";
   const close = document.createElement("button");
   close.className = "modal-close";
-  close.textContent = "閉じる ✕";
+  close.textContent = "✕";
+  close.setAttribute("aria-label", "閉じる");
   head.append(title, close);
   const input = document.createElement("input");
   input.type = "text";
   input.className = "jump-input";
-  input.placeholder = "🔎 配信者 / Session / 録画 を横断で絞込";
+  input.placeholder = "🔎 配信者 / Session / 録画";
   input.autocomplete = "off";
   const list = document.createElement("div");
   list.className = "jump-list";
@@ -4202,3 +4332,281 @@ window.addEventListener("wheel", (ev) => {
   scrollLatchEl = held || under;
   scrollLatchAt = now;
 }, { passive: false });
+
+// ---- 共通UI: 押下の演出 ----
+// 演出が担う仕事は3つだけに絞る。①押下と同時に返す ②結果の場所を指す ③効かなかった事も
+// 返す。この3つに当てはまらない動きは、増えるのは見た目だけで読み取れる事は増えないので
+// 置かない。動きを減らす設定では、線を飛ばさず結果だけを即座に置く(styleではなくここで
+// 分岐するのは、線の生成そのものを止めたいため)。
+function motionReduced() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+// ① 押下と同時に「受け付けた」を返す。処理の完了を待って返すと、待っている間は無反応と
+// 区別が付かず、人はもう一度押す。
+function ackPress(el) {
+  if (!el) return;
+  el.classList.remove("fx-ack");
+  // classを外した直後に付け直すだけでは同じ再描画に畳まれ、2回目以降が走らない。
+  void el.offsetWidth;
+  el.classList.add("fx-ack");
+  el.addEventListener("animationend", () => el.classList.remove("fx-ack"), { once: true });
+}
+
+// ② 押した場所から、結果が現れた場所へ線を1本飛ばす。増えた物を人が探し直さずに済むのが
+// 目的なので、線は「どこへ行ったか」だけを示して即座に消える。着地してからonArriveを呼び、
+// 印はその時に立てる(先に立てると、線が着く前に結果が出て因果が逆に見える)。
+const FLY_MS = 220;
+
+function flyTo(fromEl, target, onArrive) {
+  const done = () => { if (onArrive) onArrive(); };
+  if (!fromEl || !target || motionReduced()) { done(); return; }
+  const from = fromEl.getBoundingClientRect();
+  const to = target instanceof Element ? target.getBoundingClientRect() : null;
+  if (!from.width && !from.height) { done(); return; }
+  const x0 = from.left + from.width / 2;
+  const y0 = from.top + from.height / 2;
+  // 要素を渡された時はその中心へ。着地点を細かく指したい画面(timelineの位置・棚の1行)は
+  // {x, y} を直接渡す。
+  const x1 = to ? to.left + to.width / 2 : Number(target.x);
+  const y1 = to ? to.top + to.height / 2 : Number(target.y);
+  if (!Number.isFinite(x1) || !Number.isFinite(y1)) { done(); return; }
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  const rot = `rotate(${Math.atan2(y1 - y0, x1 - x0)}rad)`;
+  const line = document.createElement("div");
+  line.className = "fx-fly";
+  line.style.insetInlineStart = `${x0}px`;
+  line.style.insetBlockStart = `${y0}px`;
+  line.style.transform = rot;
+  document.body.appendChild(line);
+  const anim = line.animate(
+    [
+      { inlineSize: "0px", transform: rot },
+      { inlineSize: `${len}px`, transform: rot, offset: 0.55 },
+      { inlineSize: "0px", transform: `${rot} translateX(${len}px)` },
+    ],
+    { duration: FLY_MS, easing: "cubic-bezier(0.3,0,0.2,1)" },
+  );
+  const finish = () => { line.remove(); done(); };
+  anim.finished.then(finish, finish);
+}
+
+
+// ③ 効かなかった事を返す。文言(toast)だけでは、押した物と返答が離れていて結び付かない。
+// 押した物そのものを揺らして「これは効いていない」を押下点で返す。
+function denyPress(el) {
+  if (!el) return;
+  el.classList.remove("fx-deny");
+  void el.offsetWidth;
+  el.classList.add("fx-deny");
+  el.addEventListener("animationend", () => el.classList.remove("fx-deny"), { once: true });
+}
+
+// ---- 共通UI: paneのdrag分割 ----
+// 触るのはCSS変数1本だけで、寸法は持たせない(固定幅を置くと、窓を狭めた時に片側が
+// 潰れる)。比率は画面ごとにbindPrefと同じkeyへ残し、次に開いた時も同じ割り方で出す。
+const SPLIT_MIN = 0.18;
+const SPLIT_MAX = 0.82;
+// 2度押しを「既定へ戻す」と読む間隔。
+const SPLIT_DBL_MS = 400;
+
+// varPrefix には列の変数の頭を渡す(例 "--vd-msplit")。両側の取り分をまとめて書くのは、
+// 片側だけを書くと残った側の既定値(2.5fr など)がそのまま比の相手になり、55%のつもりが
+// 55 : 2.5 になるため。100を分け合う2つの数にして、比を変数の中で閉じる。
+function bindSplitter(container, bar, varPrefix, prefName, onDone) {
+  if (!container || !bar) return;
+  const apply = (ratio, save) => {
+    const p = Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, ratio));
+    container.style.setProperty(`${varPrefix}-a`, `minmax(0, ${(p * 100).toFixed(1)}fr)`);
+    container.style.setProperty(`${varPrefix}-b`, `minmax(0, ${((1 - p) * 100).toFixed(1)}fr)`);
+    bar.setAttribute("aria-valuenow", String(Math.round(p * 100)));
+    if (save) prefSet(prefName, p.toFixed(3));
+    return p;
+  };
+  const saved = Number(prefGet(prefName));
+  if (Number.isFinite(saved) && saved > 0) apply(saved, false);
+
+  let dragging = false;
+  let moved = false;
+  const ratioAt = (clientX) => {
+    const r = container.getBoundingClientRect();
+    return r.width ? (clientX - r.left) / r.width : 0.5;
+  };
+  let lastDown = 0;
+  bar.addEventListener("pointerdown", (ev) => {
+    // 2度押しは既定へ戻す合図。**dblclickでは受け取れない** ―― 掴んだまま字を選ばせない
+    // ための preventDefault が、pointerdown に続く mouse系のeventごと止めるので、この棒に
+    // dblclick は最初から届いていなかった(tooltipだけが「ダブルクリックで半々」と
+    // 名乗っていた)。押した間隔で自分で数える。
+    if (ev.timeStamp - lastDown < SPLIT_DBL_MS) {
+      lastDown = 0;
+      dragging = false;
+      bar.classList.remove("is-drag");
+      ev.preventDefault();
+      apply(0.5, true);
+      if (onDone) onDone();
+      return;
+    }
+    lastDown = ev.timeStamp;
+    dragging = true;
+    moved = false;
+    // captureが取れない環境でもpointerupはbarへ届くので、取れなかった事は失敗にしない。
+    try { bar.setPointerCapture(ev.pointerId); } catch (err) { /* noop */ }
+    bar.classList.add("is-drag");
+    ev.preventDefault();
+  });
+  bar.addEventListener("pointermove", (ev) => {
+    if (!dragging) return;
+    moved = true;
+    apply(ratioAt(ev.clientX), false);
+  });
+  ["pointerup", "pointercancel"].forEach((type) => {
+    bar.addEventListener(type, (ev) => {
+      if (!dragging) return;
+      dragging = false;
+      bar.classList.remove("is-drag");
+      // 動かしていない押下では書き換えない。押した位置と境目には棒の太さぶんのずれが
+      // あるので、ただ押しただけで割り方が数px動き、2度押しの2回目が棒から外れる。
+      if (!moved) return;
+      apply(ratioAt(ev.clientX), true);
+      if (onDone) onDone();
+    });
+  });
+  // 掴む操作を持たない人にも同じ割り方ができるようにする。矢印は1押し2%、Homeで既定へ。
+  bar.addEventListener("keydown", (ev) => {
+    const now = Number(bar.getAttribute("aria-valuenow")) / 100 || 0.5;
+    let next = null;
+    if (ev.key === "ArrowLeft") next = now - 0.02;
+    else if (ev.key === "ArrowRight") next = now + 0.02;
+    else if (ev.key === "Home") next = 0.5;
+    if (next === null) return;
+    ev.preventDefault();
+    apply(next, true);
+    if (onDone) onDone();
+  });
+}
+
+// 3つのpaneを2本の棒で割る。比は**左端からの位置2つ**で持つ ―― 取り分3つで持つと、
+// 1本の棒を動かすたびに残り2つをどう配分するかが決まらず、触っていない側まで動く。
+// 変数は -a/-b/-c の3本ともまとめて書く(理由は上の2分割と同じ)。
+const SPLIT3_MIN = 0.12;
+
+function bindSplitter3(container, bars, varPrefix, prefName, defaults, onDone) {
+  if (!container || !bars || bars.length !== 2 || !bars[0] || !bars[1]) return;
+  const base = defaults && defaults.length === 2 ? defaults : [0.34, 0.5];
+  let pos = base.slice();
+  const apply = (next, save) => {
+    // 左の棒が先、右の棒が後。順が入れ替わらないよう、必ず左から詰める。
+    const p1 = Math.min(1 - SPLIT3_MIN * 2, Math.max(SPLIT3_MIN, next[0]));
+    const p2 = Math.min(1 - SPLIT3_MIN, Math.max(p1 + SPLIT3_MIN, next[1]));
+    pos = [p1, p2];
+    const share = [p1, p2 - p1, 1 - p2];
+    ["a", "b", "c"].forEach((key, i) => {
+      container.style.setProperty(
+        `${varPrefix}-${key}`, `minmax(0, ${(share[i] * 100).toFixed(1)}fr)`);
+    });
+    bars[0].setAttribute("aria-valuenow", String(Math.round(p1 * 100)));
+    bars[1].setAttribute("aria-valuenow", String(Math.round(p2 * 100)));
+    if (save) prefSet(prefName, `${p1.toFixed(3)},${p2.toFixed(3)}`);
+  };
+  const saved = String(prefGet(prefName) || "").split(",").map(Number);
+  if (saved.length === 2 && saved.every((v) => Number.isFinite(v) && v > 0)) {
+    apply(saved, false);
+  }
+
+  const ratioAt = (clientX) => {
+    const r = container.getBoundingClientRect();
+    return r.width ? (clientX - r.left) / r.width : 0.5;
+  };
+  bars.forEach((bar, which) => {
+    // 触っているのはこの1本だけ。もう1本の位置はそのまま持ち越す。
+    const at = (ratio) => (which === 0 ? [ratio, pos[1]] : [pos[0], ratio]);
+    let dragging = false;
+    let moved = false;
+    let lastDown = 0;
+    bar.addEventListener("pointerdown", (ev) => {
+      // 2度押しで3つとも既定へ。dblclickが届かない理由は2分割の方に書いた。
+      if (ev.timeStamp - lastDown < SPLIT_DBL_MS) {
+        lastDown = 0;
+        dragging = false;
+        bar.classList.remove("is-drag");
+        ev.preventDefault();
+        apply(base, true);
+        if (onDone) onDone();
+        return;
+      }
+      lastDown = ev.timeStamp;
+      dragging = true;
+      moved = false;
+      try { bar.setPointerCapture(ev.pointerId); } catch (err) { /* noop */ }
+      bar.classList.add("is-drag");
+      ev.preventDefault();
+    });
+    bar.addEventListener("pointermove", (ev) => {
+      if (!dragging) return;
+      moved = true;
+      apply(at(ratioAt(ev.clientX)), false);
+    });
+    ["pointerup", "pointercancel"].forEach((type) => {
+      bar.addEventListener(type, (ev) => {
+        if (!dragging) return;
+        dragging = false;
+        bar.classList.remove("is-drag");
+        // 理由は2分割の方と同じ(ただ押しただけでは割り方を書き換えない)。
+        if (!moved) return;
+        apply(at(ratioAt(ev.clientX)), true);
+        if (onDone) onDone();
+      });
+    });
+    bar.addEventListener("keydown", (ev) => {
+      const now = pos[which];
+      let next = null;
+      if (ev.key === "ArrowLeft") next = now - 0.02;
+      else if (ev.key === "ArrowRight") next = now + 0.02;
+      else if (ev.key === "Home") next = base[which];
+      if (next === null) return;
+      ev.preventDefault();
+      apply(at(next), true);
+      if (onDone) onDone();
+    });
+  });
+}
+
+// ---- 共通UI: Pod ----
+// job中だけ降りてきて、終わったら報告して消える。常駐はさせない ―― 1日見る道具の上に
+// 動く物を置き続けると、読む時に必ず視界へ入ってくる。報告の中身はjobの実際の段階名で、
+// 出所を持たない台詞は言わせない。
+const POD_LEAVE_MS = 2600;
+let podEl = null;
+let podLeaveTimer = 0;
+
+function podLayer() {
+  if (podEl && podEl.isConnected) return podEl;
+  podEl = document.createElement("div");
+  podEl.className = "pod";
+  podEl.setAttribute("aria-hidden", "true");
+  podEl.innerHTML = '<div class="pod-say"></div>'
+    + '<svg class="pod-body" width="42" height="42" viewBox="0 0 46 46">'
+    + '<circle cx="23" cy="23" r="13" fill="var(--sand-panel)" stroke="var(--ink-strong)" stroke-width="1.4" />'
+    + '<circle cx="23" cy="23" r="5.2" fill="var(--invert-bg)" stroke="var(--ink-strong)" stroke-width="1" />'
+    + '<circle class="pod-eye" cx="23" cy="23" r="2" fill="var(--accent-bright)" />'
+    + '<path d="M10 23 L4 19 M10 23 L4 27" stroke="var(--ink-strong)" stroke-width="1.2" fill="none" />'
+    + '<path d="M36 23 L42 19 M36 23 L42 27" stroke="var(--ink-strong)" stroke-width="1.2" fill="none" />'
+    + '<rect x="19" y="37" width="8" height="2.4" fill="var(--ink-muted)" />'
+    + "</svg>";
+  document.body.appendChild(podEl);
+  return podEl;
+}
+
+// text が空の時は「もう報告する事が無い」= 帰る合図。kind は "warn" で失敗を言う。
+function podSay(text, kind) {
+  const pod = podLayer();
+  clearTimeout(podLeaveTimer);
+  if (!text) {
+    podLeaveTimer = setTimeout(() => { pod.classList.remove("is-in"); }, POD_LEAVE_MS);
+    return;
+  }
+  pod.querySelector(".pod-say").textContent = text;
+  pod.classList.toggle("pod-warn", kind === "warn");
+  pod.classList.add("is-in");
+}

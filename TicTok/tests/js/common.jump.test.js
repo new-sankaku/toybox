@@ -113,16 +113,14 @@ describe("横断jump (Ctrl+K)", () => {
     expect(kinds).toEqual(["streamer", "streamer", "fan", "session", "recording"]);
   });
 
-  it("一致が無ければ「ありません」と名乗る", async () => {
+  it("一致が無ければ「一致なし」と名乗る", async () => {
     ctrlK(win);
     await page.settle();
     const input = page.document.querySelector(".jump-overlay input");
     input.value = "存在しない語";
     input.dispatchEvent(new win.Event("input", { bubbles: true }));
     expect(rows()).toHaveLength(0);
-    expect(page.document.querySelector(".jump-overlay").textContent).toContain(
-      "一致する配信者・Session・録画がありません。",
-    );
+    expect(page.document.querySelector(".jump-note").textContent).toBe("一致なし");
   });
 
   it("配信者の飛び先は /streamers?uid=、Sessionと録画は /history?session=", async () => {
@@ -171,8 +169,8 @@ describe("横断jumpの取得失敗", () => {
     warn = vi.spyOn(page.win.console, "warn").mockImplementation(() => {});
     ctrlK(page.win);
     await page.settle();
-    expect(page.document.querySelector(".jump-overlay").textContent).toContain(
-      "候補を取得できませんでした（0件という意味ではありません）。",
+    expect(page.document.querySelector(".jump-note").textContent).toBe(
+      "候補を取得できませんでした",
     );
   });
 });

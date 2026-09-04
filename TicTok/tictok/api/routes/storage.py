@@ -48,6 +48,12 @@ async def relocate_api(request: RelocateRequest) -> dict:
             detail="最終保存先が設定されていません（作業先と同じため退避先がありません）。")
     if request.confirm and _relocate_lock.locked():
         raise HTTPException(status_code=409, detail="最終保存先への移動が既に実行中です。")
+    if request.confirm:
+        # 片系統でも見えないなら始めない。見えないrootは空に見えるので、そのまま走らせると
+        # 「向こうには無い」と読んで片系統だけへ書き、片側だけが最新の状態を作る。dry-runでは
+        # 呼ばない(読むだけの操作が運用logへ警告を積む理由が無い。planは同じ事実を
+        # unavailable_dirs で返す)。
+        await asyncio.to_thread(disk._require_mirrors_available, "最終保存先への退避")
     plan = await asyncio.to_thread(disk._relocation_plan)
     if not request.confirm:
         return {"applied": False, "plan": plan}
@@ -82,10 +88,106 @@ async def relocate_api(request: RelocateRequest) -> dict:
             detail={"moved": result["moved"], "moved_bytes": result["moved_bytes"],
                     "clips_moved": result["clips_moved"],
                     "clips_moved_bytes": result["clips_moved_bytes"],
-                    "failures": result["failures"], "final_dir": str(runtime.FINAL_DIR)},
+                    "failures": result["failures"], "final_dir": str(runtime.FINAL_DIR),
+                    # 2系統ある構成では、この移送は両方へ書けたときだけ成立している。
+                    # どこへ書いたかを残さないと、後から片方が古い理由を辿れない。
+                    "final_dirs": [str(root) for root in disk._final_dirs()]},
         )
     return {"applied": True, "result": result,
             "plan": await asyncio.to_thread(disk._relocation_plan)}
+
+
+# ---- 最終保存先の再同期 --------------------------------------------------------------
+# 2系統の最終保存先は相互mirrorで、常に同じ内容でなければならない。移送は必ず全系統へ書くが、
+# 2系統目を後から設定した場合は過去のdataが片方にしか無い。それを埋める操作で、lockは移送と
+# 共有する: どちらも同じrootの同じfileを触るので、並走すると再同期が書き途中のfileを読む。
+
+@router.get("/api/storage/mirror")
+async def mirror_plan_api() -> dict:
+    """2系統の最終保存先を突き合わせた結果(dry-run)。実行はPOSTのみ。
+
+    両rootの全dirを辿る走査を伴う(実測2026-09-02で最終保存先1は12,340 file)。二次保存先に何が
+    在るかの台帳はDBに無いので、実体を見る以外に答えを出す方法が無い。"""
+    return disk._mirror_report(await asyncio.to_thread(disk._mirror_plan), current=True)
+
+
+class MirrorResyncRequest(BaseModel):
+    # 既定がdry-runなのは移送と同じ理由。bodyを付け忘れたrequestが、片方が空なら最終保存先
+    # まるごと(実測2026-09-02で0.59TB)のcopyを始めてしまわないようにする。
+    confirm: bool = False
+
+
+@router.post("/api/storage/mirror/resync")
+async def mirror_resync_api(request: MirrorResyncRequest) -> dict:
+    """片方に欠けているfileを、在る方から欠けている方へ複製する。
+
+    元は消さない(移送と違い、これはcopyだけの操作である)。両系統に同名でsizeの違うfileが
+    在る場合は触らず、件数だけを返して運用logに残す —— どちらが正しいかはここでは決められず、
+    上書きは取り返しがつかない。"""
+    if not disk._mirror_enabled():
+        raise HTTPException(
+            status_code=409,
+            detail="最終保存先が2つ設定されていません（再同期する相手がありません）。")
+    if request.confirm and _relocate_lock.locked():
+        raise HTTPException(status_code=409,
+                            detail="最終保存先への移動または再同期が既に実行中です。")
+    if request.confirm:
+        await asyncio.to_thread(disk._require_mirrors_available, "最終保存先の再同期")
+    plan = await asyncio.to_thread(disk._mirror_plan)
+    if not request.confirm or not plan["items"]:
+        return {"applied": False, "plan": disk._mirror_report(plan, current=True)}
+    async with _relocate_lock, runtime._tracked_job("mirror_resync", "最終保存先の再同期") as job_id:
+        loop = asyncio.get_running_loop()
+
+        def _on_item(done: int, total: int, group: Optional[dict]) -> None:
+            pct = int(done * 100 / total) if total else 100
+            label = f"{done:,}/{total:,}件"
+            if group is not None:
+                label += f"  {group['rel'] or '(root)'}"
+            asyncio.run_coroutine_threadsafe(runtime.jobs.progress(job_id, pct, stage=label), loop)
+
+        result = await asyncio.to_thread(disk._run_mirror_resync, plan, _on_item)
+        # 残っている突き合わせの要約は、この瞬間から実行前の姿になる。件数を書き換えずに
+        # 古いと名乗らせる —— 複製に失敗した分まで「揃った」と読ませないため。
+        await asyncio.to_thread(disk.invalidate_mirror_check)
+        if result["diverged_count"]:
+            # 上書きしなかった食い違い。人が判断するものなので、件数と実例を運用logに残す。
+            await asyncio.to_thread(
+                runtime.storage.record_ops_event,
+                runtime.logger,
+                "storage.mirror_diverged",
+                "最終保存先の2系統で {n}件のfileが同名でsizeが違います"
+                "（上書きしていません。どちらが正しいか確認してください）".format(
+                    n=result["diverged_count"]),
+                severity=OPS_WARNING,
+                job_id=job_id,
+                detail={"count": result["diverged_count"],
+                        "examples": plan["diverged"][:20],
+                        "final_dirs": plan["final_dirs"]},
+            )
+        await asyncio.to_thread(
+            runtime.storage.record_ops_event,
+            runtime.logger,
+            "storage.mirror_resynced",
+            "最終保存先の再同期: {copied}件（{gb:.1f}GB）を複製しました{failed}".format(
+                copied=result["copied"], gb=result["copied_bytes"] / (1024 ** 3),
+                failed=f"。{len(result['failures'])}件は失敗しました" if result["failures"] else ""),
+            severity=OPS_WARNING if result["failures"] else OPS_INFO,
+            job_id=job_id,
+            detail={"copied": result["copied"], "copied_bytes": result["copied_bytes"],
+                    "failures": result["failures"][:20],
+                    "failure_count": len(result["failures"]),
+                    "diverged_count": result["diverged_count"],
+                    "final_dirs": plan["final_dirs"]},
+        )
+    # 実行後にplanを取り直さない。突き合わせは両rootの全dirを辿る走査(実測2026-09-02で最終
+    # 保存先1は12,340 file)で、外付けHDDのmetadata I/Oとしては無視できる費用ではない。同じ
+    # 走査は計画(GET)がいつでも行えるので、応答を作るためだけにもう一度回す理由が無い
+    # (移送も同じ場面で計画を引き直しているが、あちらの再計算はDBのqueryである)。返すのは
+    # 実行した**実行前の**planと結果で、それが現在の状態でないことは応答自身が名乗る
+    # (``current: false``) —— 名乗らないと、画面はこの件数を「残り」として描く。
+    return {"applied": True, "result": result,
+            "plan": disk._mirror_report(plan, current=False)}
 
 
 @router.get("/api/capacity")

@@ -8,18 +8,25 @@ lifespanのcommentが理由を持っている。派生物のsweepが「finalize�
 """
 
 import asyncio
+import json
 import shutil
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, HTTPException
-from tictok.core.config import (get_media_job_auto_requeue_limit, get_media_job_history_days,
-    get_media_queue_sweep_concurrency, get_no_restore)
+from tictok.core.config import (get_db_backup_on_recording_finished, get_db_path,
+    get_media_job_auto_requeue_limit, get_media_job_history_days,
+    get_media_queue_sweep_concurrency, get_no_restore,
+    get_record_backup_min_interval_minutes, get_record_backup_quiet_minutes,
+    record_backup_dir_from_db)
 from tictok.core import perf
 from tictok.core import layout
 from tictok.core import orphan_capture
 from tictok.core import sweep_signal
+from tictok.core import dbmaint, settings_export, tables_export
+from tictok.store._common import OPS_ERROR, OPS_INFO, OPS_WARNING
+from tictok.record import primary_backup
 from tictok.record.recorder import (ffmpeg_available, ffprobe_available,
     reclaim_pending_normalizations, recover_interrupted_recordings)
 # 文字起こしは必ず別processで走らせる。serverでCTranslate2を読むと、torch(焼き込み・Up出力)
@@ -201,6 +208,14 @@ def _pack_sweep_ready(row: dict, quiet: float) -> bool:
     dirs = files._recording_media_dirs(row)
     if not dirs or hls_pack.is_packed(dirs[0]):
         return False
+    # serverが自分で捕捉ffmpegの終了を見届けた録画は、そのdirへ書く者が居ないと分かって
+    # いるので静穏待ちを飛ばす。静穏待ちは「まだ書いている者が居ないか」をfileの更新時刻から
+    # 推定する代理にすぎず、確定直後に束ねてしまえば、userが開く5〜15分より前に
+    # ts結合とsidecar(pack後に積む)が揃う。それまでは開いた時点でその場生成(1〜3分待ち)
+    # になり、その成果物は15分後の結合で丸ごと作り直しになっていた(2026-09-03の監査)。
+    # crash後の復旧・中断録画はこの合図を持たないので、従来どおり静穏待ちで判定する。
+    if sweep_signal.is_clean(dirs[0]):
+        return True
     newest = 0.0
     for f in layout.media_files(dirs[0]):
         try:
@@ -467,12 +482,22 @@ async def _wait_next_sweep(minutes: int) -> None:
     while True:
         quiet = int(runtime.settings.get("pack_sweep_quiet_minutes")) * 60
         finished = sweep_signal.earliest()
+        # 綺麗に終わった(serverがffmpegの終了を見届けた)録画は静穏待ちを飛ばして起こす。
+        # 候補判定(_pack_sweep_ready)も同じ合図を見る。
+        clean = sweep_signal.earliest_clean_unwoken()
         target = deadline
         if finished is not None:
             target = min(target, finished + quiet + SWEEP_SIGNAL_MARGIN_SECONDS)
+        if clean is not None:
+            target = min(target, clean + SWEEP_SIGNAL_MARGIN_SECONDS)
         remaining = target - time.time()
         if remaining <= 0:
-            sweep_signal.consume(time.time() - quiet)
+            now = time.time()
+            sweep_signal.consume(now - quiet)
+            # 起こし済みの印を付けるだけで捨てない(この回でpackを積めなくても次の回で
+            # 拾えるように)。捨てるのは静穏待ちが明けたぶん — その先は従来の規則で同じ答え。
+            sweep_signal.mark_clean_woken(now - SWEEP_SIGNAL_MARGIN_SECONDS)
+            sweep_signal.prune_clean(now - quiet)
             return
         await asyncio.sleep(min(remaining, SWEEP_SIGNAL_POLL_SECONDS))
 
@@ -527,6 +552,483 @@ async def _backfill_search_index_bg():
             "検索indexの補完に失敗しました",
             extra={"event": "search.backfill_failed", "ctx": {}},
         )
+
+
+# ---- 録画の確定を合図にした退避 ------------------------------------------------------
+# DBのsnapshot・設定値の書き出し・一次保存のbackupは、録画が確定して落ち着いたことを合図に
+# 走らせる。
+#
+# **「配信が終わった」を全体の状態として扱わない。** 配信者を複数監視していれば、ある録画が
+# 終わった瞬間に他が走っているのが普通である。実測(2026-09-02、確定録画529本・76日)では
+# 終了の29.5%がそれに当たり、同時録画は最大5本だった。最初に書いた「最後の終了から静穏時間
+# だけ待つ」という全体gateを同じ実測へ当てると、走った回の**65.4%が他の録画の進行中**で、
+# 書き込み中の.tsを写しに行っていた。
+#
+# しかもその形は**監視数が増えるほど成立しなくなる**。同じ実測を多重化して測ると、
+# 「最後の終了から15分静か」が成立する時間は 4人で94.1% / 20人で74.2% / 80人で30.6% まで
+# 落ち、成立しない区間は最長3.1時間に伸びる。全体の静けさに依存する条件は、監視数という
+# 外から決まる量に振り回される。
+#
+# 代わりに、**周期は固定**(監視数に一切依らない)・**録画1本ずつを見て落ち着いた物だけを写す**
+# 形にする。落ち着いていない録画は写す対象から外すだけで、待たない。
+#
+# I/Oの奪い合いは実測の結果、設計要因から外した。録画の書き込みは1本 0.10 MB/s(実測: 452本
+# 259GB / 総尺)で、1人1日あたり0.85GB。80人へ増えても1日68GBで、逐次149.5MB/s(実測D:)なら
+# **1日8分**の書き込みでしかない。周期を静けさに合わせる価値より、監視数に依らないことの方が
+# 大きい。
+#
+# 合図を ``core.sweep_signal`` から取らないのは、あれが**再起動で消える**揮発の仕組みで、
+# consumeを持つ利用者が2つになると片方が捨てた合図をもう片方が永久に見られなくなるためである
+# (sweep_signalのdocstring)。DBに残る終了時刻なら、録画の直後にserverを落としても起動後の
+# 最初の周期がそのまま拾う。
+BACKUP_TICK_SECONDS = 60.0
+# 失敗した退避を再試行する間隔の上限。間隔は失敗のたびに倍にして(60秒→2分→…)ここで
+# 頭打ちにする。退避が失敗する理由はほぼ「退避先のdriveが外れた・満杯」で、60秒後に直って
+# いることは無い。上限を置かないと、driveが外れている1日のあいだにDBのsnapshot(1.65GB・
+# 実測 K:で約40秒)を860回、1.4TBぶん書いて消すことになる ―― K:のようなSMR driveは
+# その繰り返しで20〜30MB/sまで落ち、同じdriveの移送とfile backupを道連れにする。
+BACKUP_RETRY_MAX_SECONDS = 3600.0
+
+# 「どの録画まで退避したか」の記録key。**退避ごとに別のkey**を持つ ―― 1つの印で3つを
+# まとめると、1つが失敗した周期にDBのsnapshotまで取り直すことになる(印は3つとも済んで
+# からしか進められない)。DBに置くのは、これが**予定の記録**であって守るべきdataではない
+# からである(失っても、次の周期が同じ録画をもう一度退避するだけで済む)。行数の見張りの
+# 台帳は逆にDBの外へ置く —— あちらはDBが壊れた瞬間に一緒に失われては困る。
+BACKUP_STEP_DB = "db"
+BACKUP_STEP_SETTINGS = "settings"
+BACKUP_STEP_FILES = "files"
+_BACKUP_MARK_KEYS = {
+    BACKUP_STEP_DB: "backup_db_after_recording_at",
+    BACKUP_STEP_SETTINGS: "backup_settings_after_recording_at",
+    BACKUP_STEP_FILES: "backup_files_after_recording_at",
+}
+# 退避ごとの再試行の状態(``{"failures": 回数, "until": monotonic秒}``)。processの中だけで
+# 持つ ―― 再起動は人が何かを直した合図で、そこから数え直してよい。
+_backup_retry: dict = {}
+# 一次保存のbackup先の識別子の控え(``db_maintenance``)。値は ``{"dir": 設定値, "id": 識別子}``
+# のJSON。保存先の文字列と組で持つので、設定画面で保存先を変えれば控えは自動的に「無い」
+# 扱いになり、新しい先の識別子を採用し直す(``primary_backup._verify_root_identity``)。
+_RECORD_BACKUP_ROOT_KEY = "record_backup_root"
+# 下限間隔で見送ったことを記録した合図。見送りは印を進めないので、間隔が明けるまで毎周期
+# 同じ判断になる。1周期ごとに同じ行を出すと、1時間で60行の「見送り」が並ぶ。
+_backup_skip_logged: dict = {}
+
+
+def _backup_retry_delay(failures: int) -> float:
+    """``failures`` 回目の失敗のあと、次に試すまでの秒数(指数backoff、上限あり)。"""
+    return min(BACKUP_TICK_SECONDS * (2 ** max(0, failures - 1)), BACKUP_RETRY_MAX_SECONDS)
+
+
+def _backup_retry_pending(step: str, now: float) -> bool:
+    state = _backup_retry.get(step)
+    return bool(state) and now < float(state["until"])
+
+
+def _backup_step_failed(step: str, now: float) -> float:
+    """失敗を数え、次に試す時刻を決めて返す(次回までの秒数)。"""
+    failures = int((_backup_retry.get(step) or {}).get("failures", 0)) + 1
+    delay = _backup_retry_delay(failures)
+    _backup_retry[step] = {"failures": failures, "until": now + delay}
+    return delay
+
+
+def _reset_backup_state() -> None:
+    """再試行と見送りの記録を捨てる(testが周期をまたいで状態を持ち越さないため)。"""
+    _backup_retry.clear()
+    _backup_skip_logged.clear()
+
+
+def _backup_recording_split(rows: list, quiet_seconds: float, now: float) -> tuple:
+    """録画を「落ち着いた(写してよい)」と「まだ動いている(写してはならない)」に分ける。
+
+    動いている条件は4つで、どれか1つでも当たれば除外する:
+
+    1. まだ終わっていない(``ended_at`` が無い / status が完了でない)
+    2. 確定処理の最中(``recorder.is_finalizing``)
+    3. 派生物のjobが控えている・実行中(ts結合・波形・サムネ・文字起こし)
+    4. 終わってから静穏時間が経っていない
+
+    3を見るのは、確定の直後に ts結合が.tsを束ね直し、波形とサムネが同じfileを読み書き
+    するためである(``_sweep_candidates``)。その最中に写すと控えに途中の姿が残るうえ、
+    同じdiskを奪い合って両方が遅くなる。判定の3条件は最終保存先への移送
+    (``api.disk._run_relocation``)と同じ物を使う —— 素材を触る操作が2つあって片方だけ
+    条件が緩いと、移送では触らない録画をbackupが触る。
+
+    戻り値は ``(写す対象の行, 除外する行)``。除外は「まだ見ていない」であって「消えた」
+    ではないので、呼ぶ側は削除の伝播からも外すこと。"""
+    from tictok.record.recorder import is_finalizing
+
+    busy_ids = {rid for _kind, rid in runtime.storage.pending_media_job_keys()}
+    ready, held = [], []
+    for row in rows:
+        ended = row.get("ended_at")
+        settled = (
+            ended
+            and row.get("status") in ("completed", "interrupted")
+            and (now - float(ended)) >= quiet_seconds
+            and not is_finalizing(row.get("id"))
+            and row.get("id") not in busy_ids
+        )
+        (ready if settled else held).append(row)
+    return ready, held
+
+
+def _backup_exclusions(rows: list) -> set:
+    """写してはならない録画の、一次保存先からの相対path接頭辞。
+
+    1本の録画は3箇所に散るので、stemを含む接頭辞を3つ返す:
+
+    - ``<配信者>/ts/<stem>``      … HLSの素材(録画中はここへ書き込まれ続ける)
+    - ``<配信者>/mp4/<stem>``     … 完成mp4(ts結合が書く)
+    - ``.sidecars/<stem>``        … 時刻map・波形・サムネ。**root直下**で配信者別ではない
+      (``recorder.sidecar_dir`` = ``record_root_of(src) / .sidecars``)
+
+    path componentの境目で照合する前提の値である ―― 単純な前方一致だと ``<stem>`` の
+    除外が ``<stem>2`` まで巻き込む。mp4とsidecarに拡張子を付けないのは、1つのstemから
+    ``.overlay.mp4`` ``.up.mp4`` ``.waveform.json`` のように複数の派生が出るためで、
+    接頭辞のまま渡してそれら全部を覆う。"""
+    from tictok.record.recorder import SIDECAR_DIRNAME
+
+    rels = set()
+    for row in rows:
+        raw = row.get("filename") or Path(row.get("path") or "").name
+        stem = Path(raw).stem if raw else ""
+        streamer = layout.streamer_of(stem) if stem else None
+        if not stem:
+            continue
+        rels.add(f"{SIDECAR_DIRNAME}/{stem}")
+        if streamer:
+            rels.add(f"{streamer}/{layout.TS_DIRNAME}/{stem}")
+            rels.add(f"{streamer}/{layout.MP4_DIRNAME}/{stem}")
+    return rels
+
+
+async def _backup_db_snapshot(ended_at: float) -> None:
+    """稼働したままDBのsnapshotを1世代取る(reason=scheduled)。
+
+    ここで ``flush`` を先に呼ぶのは、退避がbatch writerのbufferに残った行を含んだ像で
+    あるべきだからである。手動の退避(``routes.system``)と同じ順序にしておかないと、
+    自動と手動で「どこまで入っているか」が違う退避が並ぶ。"""
+    # 手動の保守(VACUUM・checkpoint)と同じlock。snapshotは読み transaction を数十秒握る
+    # ので、その最中にVACUUMが走り出すと書き込みを止めた上で失敗する。
+    async with runtime.maintenance_lock:
+        async with runtime._tracked_job("maintenance", "DB退避（配信終了後）") as job_id:
+            await asyncio.to_thread(runtime.storage.flush)
+            result = await asyncio.to_thread(
+                dbmaint.create_backup, get_db_path(), reason=dbmaint.REASON_SCHEDULED)
+            # 完了は手動の退避と同じkindで残す。自動の世代が取れているかは、この行が
+            # 一定の間隔で並んでいるかでしか後から読めない。
+            await asyncio.to_thread(
+                runtime.storage.record_ops_event,
+                runtime.logger,
+                "maintenance.backup_completed",
+                "配信終了後のDB退避を書き出しました: {name}（{gb:.2f}GB）".format(
+                    name=result["name"], gb=result["bytes"] / (1024 ** 3)),
+                job_id=job_id,
+                duration_ms=result["duration_ms"],
+                detail={"path": result["path"], "bytes": result["bytes"],
+                        "reason": result["reason"], "pruned": result["pruned"],
+                        "ended_at": ended_at},
+            )
+            # 行数の見張り(凍結・急減の検知)の記録は create_backup が返す。運用logへ載せる
+            # 口をdbmaint側の1関数に集めてあるので、画面・migration前・ここのどれから呼んでも
+            # 同じ行が残る。
+            await asyncio.to_thread(
+                dbmaint.record_backup_ops_events, runtime.storage, runtime.logger,
+                result, job_id=job_id)
+
+
+async def _backup_settings_export() -> None:
+    """設定値と手入力データを、一次保存先と全ての最終保存先へ人が読めるJSONで書き出す。
+
+    移送と違い、書けない保存先が在っても書ける保存先には書く —— 元を消さない写しで、
+    fileに時刻が入っているので、読む人は新しい方を採れる。
+
+    運用logは ``settings_export`` / ``tables_export`` 自身が残す(書けた先・書けなかった先・
+    severityの決め方をそちらが持っている)。ここで重ねて記録しない —— 同じeventが2行出ると、
+    どちらが実際の結果なのか後から読めない。
+
+    2つは同じ退避の印(``BACKUP_STEP_SETTINGS``)で進む。設定値が書けて表が書けなかった回は
+    印が進まず次の周期で両方をやり直すが、設定値の方は中身が同じなら世代を作らないので
+    重ねて書くことはない。"""
+    roots = [runtime.RECORD_DIR, *runtime.FINAL_DIRS]
+    await asyncio.to_thread(
+        settings_export.export_settings, runtime.settings, roots, get_db_path())
+    await asyncio.to_thread(
+        tables_export.export_tables, runtime.storage, roots, get_db_path())
+
+
+async def _backup_primary_files(exclude) -> None:
+    """一次保存先をbackup先へ写す。進捗はjob台帳へ載せる(数分かかるため)。
+
+    ``exclude`` はまだ動いている録画の相対path接頭辞(``_backup_exclusions``)。写す側は
+    走査・copy・削除の伝播のすべてからこれを外す。"""
+    async with runtime._tracked_job("record_backup", "一次保存のbackup") as job_id:
+        loop = asyncio.get_running_loop()
+
+        def _on_progress(done: int, total: int, current) -> None:
+            pct = int(done * 100 / total) if total else 100
+            label = f"{done:,}/{total:,}件" + (f"  {current}" if current else "")
+            asyncio.run_coroutine_threadsafe(
+                runtime.jobs.progress(job_id, pct, stage=label), loop)
+
+        configured = record_backup_dir_from_db(get_db_path())
+        expected = await asyncio.to_thread(_expected_record_backup_root_id, configured)
+        result = await primary_backup.run_backup(
+            _on_progress, exclude_rels=exclude, expected_root_id=expected)
+        if result["root_id_adopted"]:
+            await asyncio.to_thread(
+                runtime.storage.set_maintenance_value, _RECORD_BACKUP_ROOT_KEY,
+                json.dumps({"dir": configured, "id": result["root_id"]}))
+        summary = {
+            "copied": result["copied"], "copied_bytes": result["copied_bytes"],
+            "skipped": result["skipped"], "failed": result["failed"],
+            "deleted": result["deleted"], "excluded": result["excluded"],
+            "seconds": round(result["seconds"], 1), "stopped": result["stopped"],
+            "remaining": result["remaining"],
+        }
+        if result["stopped"]:
+            # 途中で止めた回。失敗ではないが、次回が続きを写すまで控えは古いままなので、
+            # 人が気付ける行として残す(通知の対象にもなる)。
+            await asyncio.to_thread(
+                runtime.storage.record_ops_event, runtime.logger,
+                "record_backup.stopped",
+                "一次保存のbackupを中断しました: {reason}（残り {remaining:,} 件）".format(
+                    reason=result["stopped"], remaining=result["remaining"]),
+                severity=OPS_WARNING, job_id=job_id,
+                duration_ms=result["seconds"] * 1000.0, detail=summary,
+            )
+            return
+        await asyncio.to_thread(
+            runtime.storage.record_ops_event, runtime.logger,
+            "record_backup.job_completed",
+            "一次保存のbackupが完了しました: 写した {copied:,} 件（{gb:.2f}GB）/ "
+            "失敗 {failed:,} 件".format(
+                copied=result["copied"], gb=result["copied_bytes"] / (1024 ** 3),
+                failed=result["failed"]),
+            severity=OPS_WARNING if result["failed"] else OPS_INFO, job_id=job_id,
+            duration_ms=result["seconds"] * 1000.0, detail=summary,
+        )
+
+
+def _expected_record_backup_root_id(configured: str):
+    """DBに控えた backup先の識別子。控えが無い・別の保存先の物なら None(=採用し直す)。"""
+    raw = runtime.storage.get_maintenance_value(_RECORD_BACKUP_ROOT_KEY)
+    if not raw:
+        return None
+    try:
+        stored = json.loads(raw)
+    except ValueError:
+        runtime.logger.warning(
+            "一次保存のbackup先の識別子の控えを読めないため、backup先の識別子を採用し直します",
+            extra={"event": "record_backup.root_record_unreadable", "ctx": {"raw": raw[:200]}},
+        )
+        return None
+    if not isinstance(stored, dict) or stored.get("dir") != configured:
+        return None
+    return stored.get("id") or None
+
+
+def _backup_enabled_steps() -> list:
+    """この周期で走らせる退避。設定で止めた物・写す先が無い物は数えない ―― 数えると
+    その印が永久に進まず、``since`` が動かなくなる。"""
+    steps = []
+    if get_db_backup_on_recording_finished():
+        steps.append(BACKUP_STEP_DB)
+    steps.append(BACKUP_STEP_SETTINGS)
+    if primary_backup.is_configured():
+        steps.append(BACKUP_STEP_FILES)
+    return steps
+
+
+async def _backup_run_step(step: str, ended_at: float, exclude) -> bool:
+    """退避1つを走らせる。戻り値は「印を進めてよいか」。
+
+    file backupの下限間隔での見送りだけが False を返す。見送りは失敗ではないが済んでも
+    いない ―― 印を進めると、その録画は次の録画が終わるまで控えに入らない。進めなければ
+    間隔が明けた最初の周期で写す。"""
+    if step == BACKUP_STEP_DB:
+        await _backup_db_snapshot(ended_at)
+        return True
+    if step == BACKUP_STEP_SETTINGS:
+        await _backup_settings_export()
+        return True
+    last = await asyncio.to_thread(primary_backup.last_run)
+    interval = get_record_backup_min_interval_minutes() * 60.0
+    since_last = time.time() - float((last or {}).get("started_at") or 0.0)
+    if last and since_last < interval:
+        # 短い配信が続く日に、1本ごとに全体を舐め直さない。見送ったことは記録する ――
+        # 黙ると「backupが走らない」理由を後から追えない。同じ録画については1度だけ。
+        if _backup_skip_logged.get(step) != ended_at:
+            _backup_skip_logged[step] = ended_at
+            runtime.logger.info(
+                "一次保存のbackupを見送りました（前回から %.0f 分・下限 %.0f 分）",
+                since_last / 60.0, interval / 60.0,
+                extra={"event": "backup.skipped",
+                       "ctx": {"since_seconds": since_last, "min_interval_seconds": interval}},
+            )
+        return False
+    await _backup_primary_files(exclude)
+    return True
+
+
+_BACKUP_FAILURE_EVENTS = {
+    BACKUP_STEP_DB: ("maintenance.backup_failed", "配信終了後のDB退避に失敗しました"),
+    BACKUP_STEP_SETTINGS: ("backup.settings_export_failed", "設定値・手入力データのバックアップに失敗しました"),
+    BACKUP_STEP_FILES: ("record_backup.job_failed", "一次保存のbackupに失敗しました"),
+}
+
+
+async def _backup_tick() -> None:
+    """1周期ぶん。落ち着いた録画が在れば、それだけを対象に退避する。
+
+    **全体が静かになるのを待たない。** 待つ形は監視数が増えるほど成立しなくなる(module
+    冒頭の実測)。ここが見るのは「まだ退避していない録画のうち、落ち着いた物が在るか」だけで、
+    他の配信が録画中かどうかは**発火の条件にしない** —— 動いている録画は写す対象から外す
+    ことで、走ってよいかではなく何を写すかの問題にしている。
+
+    3つの退避は**独立して失敗させ、独立して印を進める**。DBのsnapshotが空き不足で落ちても
+    設定値の書き出しは走るべきで、まとめてtryで包むと最初の失敗が残り2つを黙って飛ばす。
+    印が1つだと「3つとも済んでから進める」しかなく、file backupが落ちた周期にDBの
+    snapshot(1.65GB)まで取り直す。失敗した退避は次の周期からbackoffで再試行し、済んだ
+    退避はその録画については二度と走らない。
+
+    失敗はops_eventsへ残す(通知の対象になる)。textのlogだけでは、退避先が外れたまま
+    何週間も失敗し続けていることに誰も気付かない ―― backupが黙って止まるのは、backupの
+    事故のうち最もよくある形である。"""
+    steps = _backup_enabled_steps()
+    marks = {}
+    for step in steps:
+        raw = await asyncio.to_thread(
+            runtime.storage.get_maintenance_value, _BACKUP_MARK_KEYS[step])
+        marks[step] = float(raw) if raw else 0.0
+    since = min(marks.values())
+    rows = await asyncio.to_thread(runtime.storage.recordings_for_backup, since)
+    quiet = get_record_backup_quiet_minutes() * 60.0
+    ready, held = await asyncio.to_thread(
+        _backup_recording_split, rows, quiet, time.time())
+    # 落ち着いた録画のうち、まだ退避していない物。動いている録画(held)はここに数えない ——
+    # 数えると、録画が1本でも走っているあいだ毎周期走り続ける。
+    fresh = [row for row in ready if float(row["ended_at"]) > since]
+    if not fresh:
+        return
+    ended_at = max(float(row["ended_at"]) for row in fresh)
+    # 動いている録画は写す対象から外す。除外は「まだ見ていない」であって「消えた」では
+    # ないので、削除の伝播からも外れる(``primary_backup.run_backup`` の約束)。
+    exclude = _backup_exclusions(held)
+
+    for step in steps:
+        if marks[step] >= ended_at:
+            # この退避はこの録画まで済んでいる(前の周期で他の退避だけが落ちた)。
+            continue
+        now = time.monotonic()
+        if _backup_retry_pending(step, now):
+            continue
+        try:
+            done = await _backup_run_step(step, ended_at, exclude)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            delay = _backup_step_failed(step, now)
+            kind, label = _BACKUP_FAILURE_EVENTS[step]
+            await asyncio.to_thread(
+                runtime.storage.record_ops_event, runtime.logger, kind,
+                f"{label}: {exc}（次は {delay / 60.0:.0f} 分後に再試行）",
+                severity=OPS_ERROR,
+                detail={"error": type(exc).__name__, "ended_at": ended_at,
+                        "failures": _backup_retry[step]["failures"],
+                        "retry_in_seconds": delay},
+                exc_info=True,
+            )
+            continue
+        _backup_retry.pop(step, None)
+        if not done:
+            continue
+        await asyncio.to_thread(
+            runtime.storage.set_maintenance_value, _BACKUP_MARK_KEYS[step],
+            repr(float(ended_at)))
+
+
+async def backup_schedule_status() -> dict:
+    """退避3つの「どこまで済んだか」「あと何本控えているか」「次はいつ試すか」。
+
+    画面のためだけの関数だが、置き場所はここしかない —— 走らせる条件(印・落ち着いた録画の
+    判定・失敗のbackoff・下限間隔)はこのmoduleの中にしか無く、書き写せば周期の条件を直した
+    ときに画面だけが古い判定を出し続ける。**新しい判定は1つも作らない**。``_backup_tick``
+    が使うのと同じ関数を同じ順で呼び、その材料を数えて返すだけである。
+
+    「遅れている」の物差しだけは退避ごとに変える。file backupは下限間隔ぶん待つのが正常な
+    状態で、他と同じ猶予を当てると正常な待機が毎周期その1つだけを赤く見せる。"""
+    enabled = set(_backup_enabled_steps())
+    marks = {}
+    for step, key in _BACKUP_MARK_KEYS.items():
+        raw = await asyncio.to_thread(runtime.storage.get_maintenance_value, key)
+        marks[step] = float(raw) if raw else 0.0
+    # ``since`` の決め方は _backup_tick と同じ。有効な退避の印だけを見る —— 止めてある退避の
+    # 印は進まないので、混ぜると走査の起点が永久に過去へ張り付く。
+    since = min((marks[step] for step in enabled), default=0.0)
+    rows = await asyncio.to_thread(runtime.storage.recordings_for_backup, since)
+    quiet = get_record_backup_quiet_minutes() * 60.0
+    wall = time.time()
+    ready, held = await asyncio.to_thread(_backup_recording_split, rows, quiet, wall)
+    interval = get_record_backup_min_interval_minutes() * 60.0
+    last_files = (await asyncio.to_thread(primary_backup.last_run)
+                  if BACKUP_STEP_FILES in enabled else None)
+    now = time.monotonic()
+    steps = {}
+    for step in _BACKUP_MARK_KEYS:
+        pending = [row for row in ready if float(row["ended_at"]) > marks[step]]
+        oldest = min((float(row["ended_at"]) for row in pending), default=None)
+        retry = _backup_retry.get(step)
+        grace = quiet + BACKUP_TICK_SECONDS * 5
+        if step == BACKUP_STEP_FILES:
+            grace += interval
+        steps[step] = {
+            "enabled": step in enabled,
+            "mark_at": marks[step] or None,
+            "pending": len(pending),
+            "pending_oldest_at": oldest,
+            "grace_seconds": grace,
+            # 止めてある退避は印が進まないので、控えはいくらでも溜まる。それを遅れと呼ぶと
+            # 「止めた」という設定どおりの状態が障害に見える。
+            "overdue": bool(step in enabled and oldest is not None
+                            and wall - oldest > grace),
+            "failures": int(retry["failures"]) if retry else 0,
+            "retry_in_seconds": max(0.0, float(retry["until"]) - now) if retry else 0.0,
+        }
+    return {
+        "tick_seconds": BACKUP_TICK_SECONDS,
+        "quiet_seconds": quiet,
+        "min_interval_seconds": interval,
+        # まだ動いている録画。写す対象から外れているだけで、失敗でも遅れでもない。
+        "holding": len(held),
+        "last_files_run_at": float((last_files or {}).get("started_at") or 0.0) or None,
+        "steps": steps,
+    }
+
+
+async def _backup_loop_bg(after=None):
+    """配信終了を合図にした退避のloop。
+
+    起動直後に1度見るのは、前回の録画が終わった直後にserverが落ちていた場合の取りこぼしを
+    拾うためである(印はDBに在るので、既に退避済みなら何も走らない)。"""
+    if after is not None:
+        try:
+            await after
+        except Exception:
+            # 待っていたtaskの失敗はそちらが記録している。退避は独立して回す。
+            pass
+    while True:
+        try:
+            await _backup_tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            runtime.logger.exception(
+                "配信終了後の退避で予期しない失敗が起きました",
+                extra={"event": "backup.tick_failed", "ctx": {}},
+            )
+        await asyncio.sleep(BACKUP_TICK_SECONDS)
 
 
 async def _capacity_sampler_bg():
@@ -626,6 +1128,10 @@ async def lifespan(app: FastAPI):
     # 復旧が終わってから(``_run_sweep`` 参照)で、以降は設定間隔で繰り返す
     # (``_sweep_loop_bg`` 参照。起動したまま録り続けても新しい録画が置き去りにならない)。
     sweep_task = asyncio.create_task(_sweep_loop_bg(recovery_task))
+    # 配信の終わりを合図にした退避(DBのsnapshot・設定値・一次保存のbackup)。sweepの後に
+    # 置くのは、写す対象がsweepの作る派生物を含むためで、静穏時間はそれらが片付くのを待つ。
+    # 中断録画の復旧を待つのはsweepと同じ理由 —— 復旧が書き換える前の姿を写さない。
+    backup_task = asyncio.create_task(_backup_loop_bg(recovery_task))
     # ffmpeg/ffprobe are resolved from PATH at call time, so a missing binary surfaces
     # only when a recording fails to start. Stating it once at startup turns "no
     # recordings were produced last night" into a one-line answer.
@@ -645,6 +1151,11 @@ async def lifespan(app: FastAPI):
     recovery_task.cancel()
     try:
         await recovery_task
+    except asyncio.CancelledError:
+        pass
+    backup_task.cancel()
+    try:
+        await backup_task
     except asyncio.CancelledError:
         pass
     backfill_task.cancel()

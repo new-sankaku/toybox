@@ -112,8 +112,7 @@ describe("analytics.js の表示計算", () => {
     });
 
     it("計測不能は0や-ではなくその旨を名乗る", () => {
-      expect(win.cvUnmeasured("")).toContain("計測不能");
-      expect(win.cvUnmeasured("start eventが無い")).toContain("start eventが無い");
+      expect(win.cvUnmeasured()).toContain("計測不能");
     });
   });
 
@@ -181,20 +180,11 @@ describe("analytics.js の表示計算", () => {
   });
 
   describe("setNote", () => {
-    // 注記は「1行の結論」と「統計の作法」に分ける。作法は消さず折りたたみへ移す。
-    it("結論は legendline、但し書きは同じsectionの折りたたみへ入れる", () => {
-      win.setNote("an-dwell-note", "結論だけ", "長い作法の説明");
-      const more = page.document.getElementById("an-dwell-note-more");
-      expect(page.document.getElementById("an-dwell-note").innerHTML).toBe("結論だけ");
-      expect(more.querySelector(".an-help-body").innerHTML).toBe("長い作法の説明");
-      expect(more.hidden).toBe(false);
-    });
-
-    it("但し書きが無い節では折りたたみ自体を出さない", () => {
+    // 注記は図の直下の1行だけ。統計の作法を語る折りたたみは画面から外した。
+    it("結論だけを legendline へ入れる", () => {
       win.setNote("an-dwell-note", "結論だけ");
-      const more = page.document.getElementById("an-dwell-note-more");
-      expect(more.hidden).toBe(true);
-      expect(more.open).toBe(false);
+      expect(page.document.getElementById("an-dwell-note").innerHTML).toBe("結論だけ");
+      expect(page.document.getElementById("an-dwell-note-more")).toBe(null);
     });
   });
 
@@ -239,7 +229,7 @@ describe("analytics.js の表示計算", () => {
   });
 
   describe("headingText", () => {
-    // 目次chipのtitleは見出しから作る。<select>を含む①だけ、option文字列まで
+    // 目次chipの番号は見出しから拾う。<select>を含む①だけ、option文字列まで
     // 連結されて「指標: 入室指標: Comment…」になっていた。
     it("見出しのspanは残し、form controlの文字列だけ落とす", () => {
       const h = page.document.createElement("h3");
@@ -259,12 +249,12 @@ describe("analytics.js の表示計算", () => {
       ]);
     });
 
-    it("目次chipは番号だけを出し、titleに選択肢の文字列を含めない", () => {
+    it("目次chipは番号だけを出し、説明をtitleへ隠さない", () => {
       const links = Array.from(page.document.querySelectorAll("#an-index a"));
       expect(links.map((a) => a.textContent)).toEqual([
         "①", "①'", "②", "②'", "③", "③'", "⑤", "⑥", "⑦", "⑨", "⑪", "⑫", "⑭",
       ]);
-      expect(links[0].title).toBe("① 入室が多いのはいつか");
+      expect(links[0].hasAttribute("title")).toBe(false);
     });
   });
 
@@ -276,13 +266,11 @@ describe("analytics.js の表示計算", () => {
     });
   });
 
-  describe("但し書きへのlink", () => {
-    it("畳んだ #an-caveats はlinkをclickした時点で開く", () => {
-      const caveats = page.document.getElementById("an-caveats");
-      caveats.open = false;
-      const link = page.document.querySelector('a[href="#an-caveats"]');
-      link.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
-      expect(caveats.open).toBe(true);
+  // 解説・但し書きの折りたたみは画面から外した。読む物は図と1行の注記だけ。
+  describe("説明文は画面に残さない", () => {
+    it("解説・但し書きの<details>を持たない", () => {
+      expect(page.document.querySelectorAll("details").length).toBe(0);
+      expect(page.document.getElementById("an-caveats")).toBe(null);
     });
   });
 });

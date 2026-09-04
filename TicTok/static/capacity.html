@@ -24,7 +24,7 @@
       <!-- 1枚目: 操作。この画面へ来る動機の大半が「一時保存先が埋まったので動画を移す」
            なので、見通しや内訳より先に置く。 -->
       <div class="a-card a-settingscard" id="places">
-        <h3>動画の保存先 <span class="sub">録画は一時保存先(SSD)に残ります。最終保存先(HDD)へはこの画面から移します(自動では移りません)</span></h3>
+        <h3>動画の保存先</h3>
         <div class="body">
           <div id="cap-flow" class="cap-flow">
             <div class="cap-place" id="cap-place-work">
@@ -37,8 +37,8 @@
               <span class="cap-arrow" aria-hidden="true">▼</span>
               <span class="cap-move-text" id="cap-move-text">-</span>
               <div class="note-actions">
-                <button id="reloc-plan" class="btn" title="移動の対象になる録画を一覧します。この操作ではfileを動かしません。">対象を確認</button>
-                <button id="reloc-apply" class="btn btn-primary hidden" title="一覧した録画を最終保存先へ移します。">最終保存先へ移動</button>
+                <button id="reloc-plan" class="btn">対象を確認</button>
+                <button id="reloc-apply" class="btn btn-primary hidden">最終保存先へ移動</button>
                 <span id="reloc-status" class="form-message"></span>
               </div>
             </div>
@@ -47,10 +47,31 @@
               <span class="l">最終保存先</span>
               <code class="p" id="cap-final-path">-</code>
               <span class="v" id="cap-final-total">-</span>
+              <code class="p" id="cap-final-path2" hidden>-</code>
             </div>
           </div>
 
           <div id="cap-place-note" class="chart-note"></div>
+
+          <!-- 最終保存先が2つあるときだけ出す。2つは振り分け先ではなく相互の控えなので、
+               揃っているかどうかを人が確かめられる口をここに置く。 -->
+          <div id="mirror-box" class="chart-note" hidden>
+            <div id="mirror-summary"></div>
+            <div class="note-actions">
+              <button id="mirror-plan" class="btn">揃っているか確認</button>
+              <button id="mirror-apply" class="btn btn-primary hidden">欠けている分を複製</button>
+              <span id="mirror-status" class="form-message"></span>
+            </div>
+            <div id="mirror-detail" class="hidden">
+              <div class="table-wrap">
+                <table class="result-table">
+                  <thead><tr><th>場所</th><th>複製先</th><th class="num">本数</th><th class="num">容量</th></tr></thead>
+                  <tbody id="mirror-rows"></tbody>
+                </table>
+                <div id="mirror-empty" class="feed-empty" data-label="欠けているfile">—</div>
+              </div>
+            </div>
+          </div>
 
           <!-- 対象一覧は「対象を確認」を押すまで出さない。押した順序(確認→実行)を保つ。 -->
           <div id="reloc-detail" class="hidden">
@@ -60,18 +81,18 @@
                 <thead><tr><th>配信者</th><th class="num">本数</th><th class="num">容量</th></tr></thead>
                 <tbody id="reloc-rows"></tbody>
               </table>
-              <div id="reloc-empty" class="feed-empty" data-label="移動対象">一時保存先に残っている完了録画はありません。</div>
+              <div id="reloc-empty" class="feed-empty" data-label="移動対象">—</div>
             </div>
           </div>
         </div>
       </div>
 
       <div class="a-card a-settingscard">
-        <h3>driveの空きと満杯まで <span class="sub">日次の記録から1日あたりの増減を出し、満杯までを幅で見積もります</span></h3>
+        <h3>driveの空きと満杯まで</h3>
         <div class="body">
           <div class="note-actions">
-            <button id="cap-reload" class="btn" title="この画面の集計を取り直します。folderの走査は行いません。">最新にする</button>
-            <button id="cap-sample" class="btn" title="いまの容量を1件記録します。日次の自動記録と同じ内容です。">容量を今すぐ記録</button>
+            <button id="cap-reload" class="btn">最新にする</button>
+            <button id="cap-sample" class="btn">容量を今すぐ記録</button>
             <span id="cap-status" class="form-message"></span>
           </div>
           <div class="table-wrap">
@@ -81,35 +102,34 @@
               </thead>
               <tbody id="cap-rows"></tbody>
             </table>
-            <div id="cap-empty" class="feed-empty" data-label="容量">まだ記録がありません。</div>
+            <div id="cap-empty" class="feed-empty" data-label="容量">—</div>
           </div>
           <div id="cap-summary" class="chart-note"></div>
-          <div class="chart-note">満杯までは幅で出します。観測期間が短いうちは数値を出しません（観測から出た値ではなく、作った値になるため）。</div>
         </div>
       </div>
 
       <div class="a-card a-settingscard">
-        <h3>使用量の推移 <span class="sub">何がどれだけ増えているか</span></h3>
+        <h3>使用量の推移</h3>
         <div class="body">
           <div class="cap-grid">
             <section class="cap-cell">
-              <h4 class="result-subtitle sm-subtitle">録画の増加実績 <span class="result-sub-note">（録画の記録から遡って算出。driveの空きとは別の系列です）</span></h4>
+              <h4 class="result-subtitle sm-subtitle">録画の増加実績</h4>
               <div class="table-wrap">
                 <table class="result-table">
                   <thead><tr><th>日</th><th class="num">録画</th><th class="num">増加</th></tr></thead>
                   <tbody id="cap-daily"></tbody>
                 </table>
-                <div id="cap-daily-empty" class="feed-empty" data-label="録画の増加実績">録画の記録がありません。</div>
+                <div id="cap-daily-empty" class="feed-empty" data-label="録画の増加実績">—</div>
               </div>
             </section>
 
             <section class="cap-cell">
-              <h4 class="result-subtitle sm-subtitle">後処理の完了率 <span class="result-sub-note">（完了した録画に対する進み。未処理が多いほど今後の出力で増えます）</span></h4>
+              <h4 class="result-subtitle sm-subtitle">後処理の完了率</h4>
               <div class="a-kpibar cap-kpibar" id="cap-completion"></div>
             </section>
 
             <section class="cap-cell">
-              <h4 class="result-subtitle sm-subtitle">Databaseの使用量 <span class="result-sub-note">（動画とは別枠。DB backupは設定画面のDatabaseの保守で作られたものです）</span></h4>
+              <h4 class="result-subtitle sm-subtitle">Databaseの使用量</h4>
               <div class="a-kpibar cap-kpibar" id="cap-dbusage"></div>
               <div id="cap-dbrows" class="chart-note"></div>
             </section>
@@ -119,21 +139,27 @@
 
       <!-- 設定画面から移設。drive全体の空き(上)に対して、こちらは録画folderの中身の内訳。 -->
       <div class="a-card a-settingscard">
-        <h3>録画folderの内訳 <span class="sub">配信者別・種別別に、実際にfolderを走査して集計します</span></h3>
+        <h3>録画folderの内訳</h3>
         <div class="body">
-          <div class="chart-note">数TB規模では走査に数十秒〜数分かかるため、結果は保存され、再走査は指示したときだけ実行します。「作り直せる」種別は消しても録画から再生成できます。<strong>この画面はfileを消しません。</strong>削除は<a href="/settings#retention-preview">設定画面の保持policy</a>です。</div>
           <div class="note-actions">
-            <button id="usage-scan" class="btn btn-primary">容量を再scanする</button>
+            <button id="usage-scan" class="btn btn-primary">再scan</button>
             <span id="usage-status" class="form-message"></span>
           </div>
           <div id="usage-summary" class="chart-note"></div>
+          <!-- 表の前に盤を置く。表は「どれが何GBか」を答えるが、「何が食っていて、どれを
+               消してよいか」は数字を読み比べないと出て来ない。盤はその2つを面積と形で先に
+               答え、表はその裏付けとして下に残す。 -->
+          <div class="cap-board" id="usage-board" hidden>
+            <div class="cap-board-cells" id="usage-board-cells"></div>
+            <div class="cap-board-legend" id="usage-board-legend"></div>
+          </div>
           <div class="table-wrap">
             <table class="result-table">
               <thead><tr><th>種別</th><th class="num">容量</th><th class="num">file数</th><th>作り直せるか</th></tr></thead>
               <tbody id="usage-category-list"></tbody>
             </table>
           </div>
-          <div id="usage-category-empty" class="chart-note hidden" data-label="種別別の内訳">まだ走査していません。</div>
+          <div id="usage-category-empty" class="chart-note hidden" data-label="種別別の内訳">—</div>
           <div class="table-wrap">
             <table class="result-table">
               <!-- 列はserverの種別定義(category_labels)から組む。画面が列を持つと、種別が
@@ -142,7 +168,7 @@
               <tbody id="usage-streamer-list"></tbody>
             </table>
           </div>
-          <div id="usage-streamer-empty" class="chart-note hidden" data-label="配信者別の内訳">まだ走査していません。</div>
+          <div id="usage-streamer-empty" class="chart-note hidden" data-label="配信者別の内訳">—</div>
         </div>
       </div>
     </div>

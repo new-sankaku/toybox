@@ -18,6 +18,7 @@ from tictok.core.collab import COLLAB_WINDOW_VERSION
 from tictok.core.league import display_league_sql
 
 from tictok.store._common import (
+    USER_ALIAS_MAX,
     _BATTLE_KEY_CONTRIB_DIAMONDS,
     _BATTLE_NO_CONTEST_SCORE,
     _EXCLUDE_RESTRICTED,
@@ -41,6 +42,31 @@ _WHALE_TIERS = (
     100,
     1000, 5000, 10000, 20000, 30000, 40000, 50000, 75000, 100000, 200000, 300000,
 )
+
+# メンション一覧の区分。userの区分け(10K以上 / 5K以上 / 1K以上 / 100コイン以上)を
+# 高い側から並べる。境目は_WHALE_TIERSに在る値だけを使う — 同じ画面の「大口」の帯と
+# 境目が違うと、同じ人が片方で1K↑・片方で1K未満に見える。
+# 区分は排他で、1人は1つの区分にしか入らない―― 画面は区分ごとに別の枠とcopyを出すので、
+# 累積にすると同じ人がどの枠にも出て、区分ごとの投稿を作れなくなる。
+# 一番下の区分に届かない人は一覧に載せない(userの区分けに無く、メンションもしないため)。
+# ただし人数とコインは below_count / below_diamonds で必ず返す ―― 黙って消すと
+# 「その週に投げた人数」が画面の一覧の長さと食い違い、どちらが本当か読めなくなる。
+MENTION_TIERS = (10000, 5000, 1000, 100)
+assert all(t in _WHALE_TIERS for t in MENTION_TIERS), MENTION_TIERS
+
+# 投稿へまとめて貼るときに載せる区分の下限。100コインの区分を外すのは、投稿の見出しに
+# 並べる顔ぶれではないためである。境目をServerが持つのは区分そのものと同じ理由で、
+# 画面側に置くと区分を足したときに2か所で別の切り方になる。
+MENTION_POST_MIN = 1000
+assert MENTION_POST_MIN in MENTION_TIERS, MENTION_POST_MIN
+
+# 1日ぶんの貢献を投稿へ貼るときの上位。🥇🥈🥉の並びが形そのものなので、この長さが
+# 「上位何人か」を決める ―― 見出しの数字もここから作り、別々に書かない。
+MENTION_MEDALS = ("🥇", "🥈", "🥉")
+# 日ぶんの一覧で返す顔ぶれの上限。投稿に要るのは上位と「1k⬆️◯名」の数だけだが、画面で
+# 順位の根拠(コイン額)を確かめられるだけの行は返す。数の根拠はgifter_count/post_countが
+# 持つので、ここで切っても人数は狂わない。
+_MENTION_DAY_ROSTER = 10
 
 # 最上段の合計が名乗る下限。「大口」と呼ぶのは1K以上で、その手前の100〜1Kは大口へ育つ前の
 # 層として帯だけ出し、合計には積まない(合計が全帯の和でなくなるのはこのためで、画面側も
@@ -87,11 +113,40 @@ def _coin_label(value: int) -> str:
 # SQL側の式(_PERIOD_SQL)とPython側の_period_keyは同じ境界を出すこと。片方だけ直すと、
 # 期間の一覧と一覧の中身が別の切り方になり、合計が合わない。
 RANKING_GRANULARITIES = ("month", "week", "day")
+# 土曜の朝7時始まりの週。RANKING_GRANULARITIESには入れない — 既存のランキング・人×期間の
+# 一覧は月曜0時始まりの"week"のままで、こちらはメンション一覧専用の切り方である。
+#
+# この粒度だけは日の境目も0時ではない。keyは土曜の日付(YYYY-MM-DD)だが、実際の窓はその日の
+# WEEK_START_HOUR時から次の土曜の同じ時刻まで。keyを日付だけで名乗ると土曜の朝(0〜7時)の分を
+# どちらの週とも読めるので、画面へ返す名乗りには必ず時刻を入れること。
+WEEK_SATURDAY = "week_sat"
+# 土曜7時始まりの週を7つに割った「日」。週と同じ時刻で切るので、7日ぶんを足すと必ず週の
+# 合計になる。RANKING_GRANULARITIESの"day"(0時〜24時)とは別物である ―― 日の境目を0時に
+# すると深夜の配信が2日へ割れるうえ、土曜の未明のGiftが「週は前の週・日は当日」という
+# 別々の箱に入り、日の合計と週の合計が合わなくなる。
+DAY_SHIFTED = "day_shift"
+# 週の切れ目の時刻(ローカル時刻の時)。深夜の配信を週の境目で割らないために朝へ置く。
+# SQL側もPython側もこの値を見る。直接書かないこと — 片方だけ直すと境界が黙ってずれる。
+WEEK_START_HOUR = 7
+# SQLの修飾子へ埋め込む形。paramで渡さないのは、_PERIOD_SQLの利用側がすべて位置指定(?)で
+# 引数を組んでおり、ここだけ名前付きを混ぜるとbindが壊れるためである(値は定数なので安全)。
+_WEEK_START_SHIFT = "'-" + str(WEEK_START_HOUR) + " hours'"
 _PERIOD_SQL = {
     "month": "strftime('%Y-%m', {col}, 'unixepoch', 'localtime')",
     # 週の代表はその週の月曜。'weekday 0' は次の日曜(その日が日曜ならその日)へ送るので、
     # 6日戻すと同じ週の月曜になる。
     "week": "date({col}, 'unixepoch', 'localtime', 'weekday 0', '-6 days')",
+    # 土曜7時始まりの週の代表はその週の土曜の日付。まず7時間戻して「0時始まりの軸」へ寄せて
+    # から、直前の土曜へ戻す。%wは日=0…土=6なので、+1して7で割った余りが「直前の土曜までの
+    # 日数」になる(土→0・日→1・金→6)。'weekday 6' は次の土曜へ送る修飾なので使えない
+    # (土曜がその日に留まらず1週間先へ飛ぶ)。
+    WEEK_SATURDAY: (
+        "date({col}, 'unixepoch', 'localtime', " + _WEEK_START_SHIFT + ", '-' ||"
+        " ((CAST(strftime('%w', {col}, 'unixepoch', 'localtime', "
+        + _WEEK_START_SHIFT + ") AS INTEGER) + 1) % 7) || ' days')"),
+    # 7時始まりの日の代表はその日の日付。7時間戻して「0時始まりの軸」へ寄せるだけで、
+    # 未明(0〜7時)は前日へ落ちる。週(WEEK_SATURDAY)と同じ寄せ方なので境目が揃う。
+    DAY_SHIFTED: "date({col}, 'unixepoch', 'localtime', " + _WEEK_START_SHIFT + ")",
     "day": "date({col}, 'unixepoch', 'localtime')",
 }
 # 期間の一覧に載せる上限と、一覧を組むループの止め値。時刻が壊れた行が1つ混じるだけで
@@ -107,12 +162,21 @@ _MATRIX_ROWS = 40
 
 
 def _period_key(ts: float, granularity: str) -> str:
-    """POSIX秒が属する期間のkey。週は その週の月曜(YYYY-MM-DD)で名乗る。"""
+    """POSIX秒が属する期間のkey。週は その週の月曜(YYYY-MM-DD)で名乗る。
+    土曜7時始まりの週(WEEK_SATURDAY)はその週の土曜の日付で名乗る。7時始まりの日
+    (DAY_SHIFTED)は窓が始まる日の日付で名乗るので、未明(0〜7時)は前日のkeyになる。"""
     d = datetime.fromtimestamp(ts)
     if granularity == "month":
         return d.strftime("%Y-%m")
     if granularity == "week":
         return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+    if granularity == WEEK_SATURDAY:
+        # 先に7時間戻して「0時始まりの軸」へ寄せる。土曜の6時台はこれで前日(金)へ落ち、
+        # 前の週に入る。weekday()は月=0…土=5。-5して7で割った余りが直前の土曜までの日数。
+        shifted = d - timedelta(hours=WEEK_START_HOUR)
+        return (shifted - timedelta(days=(shifted.weekday() - 5) % 7)).strftime("%Y-%m-%d")
+    if granularity == DAY_SHIFTED:
+        return (d - timedelta(hours=WEEK_START_HOUR)).strftime("%Y-%m-%d")
     return d.strftime("%Y-%m-%d")
 
 
@@ -124,8 +188,216 @@ def _period_bounds(key: str, granularity: str) -> tuple:
         end = datetime(year + month // 12, month % 12 + 1, 1)
     else:
         start = datetime.strptime(key, "%Y-%m-%d")
-        end = start + timedelta(days=7 if granularity == "week" else 1)
+        # 土曜始まりの週と7時始まりの日は、日の0時ではなく朝7時から。keyは日付のままに
+        # して、時刻を乗せるのはここだけにする(keyの書式を変えるとSQL側の式と揃わなくなる)。
+        if granularity in (WEEK_SATURDAY, DAY_SHIFTED):
+            start += timedelta(hours=WEEK_START_HOUR)
+        end = start + timedelta(days=7 if granularity.startswith("week") else 1)
     return start.timestamp(), end.timestamp()
+
+
+# 素材を仕分けるfolderの名前(``20260829-20260905``)。日付は窓の始まりと終わりで、
+# 区切りは "-" ―― 利用者が既に手で作ってある綴りである。書式をここへ置くのは、画面側で
+# 日付を組ませると **対象の週と1日ずれた名前のfolder** が静かに増えるからで、名乗り方を
+# 1か所に閉じるのは _week_label と同じ理由による。
+_WEEK_FOLDER_FORMAT = "%Y%m%d"
+
+
+def week_folder_name(key: str) -> str:
+    """土曜7時始まりの週 ``key`` (YYYY-MM-DD)に対応するfolder名。
+
+    終わりの日付は**次の窓が始まる日**(次の土曜)。窓は [start, end) なので、その日の
+    朝7時より前は前の週に入る —— 終わりを1日手前にすると、folder名からは土曜未明の
+    ぶんがどちらの週の物なのか読めなくなる。"""
+    start, end = _period_bounds(key, WEEK_SATURDAY)
+    return (datetime.fromtimestamp(start).strftime(_WEEK_FOLDER_FORMAT) + "-"
+            + datetime.fromtimestamp(end).strftime(_WEEK_FOLDER_FORMAT))
+
+
+def week_folder_choices(count: int, now: float = None) -> list:
+    """作れる週のfolderの候補を**新しい順**に。``[{name, key, label}, ...]``。
+
+    今週を先頭に置くのは、素材を入れるのが直近の週だからである(探して下まで送らせない)。
+    ``label`` は窓の両端を時刻付きで名乗る —— folder名は日付しか持たないので、境目が
+    朝7時であることも、土曜未明のぶんがどちらへ入るのかも、そこからは読めない。
+
+    **画面へ日付を組ませないための口である。** 週の境界(土曜7時)を持つのは
+    :data:`WEEK_START_HOUR` の1か所だけで、ここもそれを通る。"""
+    at = time.time() if now is None else now
+    out: list = []
+    key = _period_key(at, WEEK_SATURDAY)
+    for _ in range(max(0, count)):
+        start, end = _period_bounds(key, WEEK_SATURDAY)
+        out.append({"name": week_folder_name(key), "key": key,
+                    "label": f"{_week_label(start)} 〜 {_week_label(end)}"})
+        key = _period_key(start - 1.0, WEEK_SATURDAY)
+    return out
+
+
+def _week_label(ts: float) -> str:
+    """土曜7時始まりの週の端を名乗る書式。日付だけでは土曜の朝がどちらの週とも読めるので、
+    時刻まで出す。組み立てをここ1か所に置くのは、画面側で組ませると時刻の無い名乗りが
+    混ざるためである。"""
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+
+
+def _post_range_label(start: float, end: float) -> str:
+    """投稿の文言へ貼る週の名乗り(「8月29日〜9月5日」)。時刻と年を落とすのは投稿の見出し
+    だからで、窓そのものの端は start_label / end_label が時刻付きで持つ。組み立てをここへ
+    置くのは_week_labelと同じ理由 ―― 画面側で組ませると名乗りの形が2つに割れる。"""
+    a = datetime.fromtimestamp(start)
+    b = datetime.fromtimestamp(end)
+    return f"{a.month}月{a.day}日〜{b.month}月{b.day}日"
+
+
+def _day_title(ts: float) -> str:
+    """日ぶんの窓の見出し(「9月1日(火)」)。窓が始まる日で名乗る ―― 未明(0〜7時)の分は
+    前日の枠に入るので、終わる日で名乗ると一覧の並びと日付が1日ずれて読める。"""
+    d = datetime.fromtimestamp(ts)
+    return f"{d.month}月{d.day}日({'月火水木金土日'[d.weekday()]})"
+
+
+def _post_name(row: dict) -> str:
+    """貼る文面へ載せる名乗り。省略形(user_aliases)が付いていればそれ、無ければ表示名。
+
+    差し替えを1か所に置くのは、上位3人の文面と顔ぶれの文面で別の名前が出るのを防ぐため
+    である ―― 同じ日の同じ人が、押した口によって違う名前で貼られては確かめようがない。
+    画面の表は表示名のまま出す(順位の根拠なので、省略形だけでは誰のことか判らなくなる)。
+    """
+    return row.get("alias") or row["nickname"]
+
+
+def _mention_day_post(rows: list, post_count: int) -> str:
+    """1日ぶんの貢献をそのまま投稿へ貼る文面。
+
+    上位は名前(省略形が付いていればそれ ―― _post_name)で並べ、**@IDの取れていない人も
+    外さない**。ここは呼びかけ(@)ではなく順位の名乗りなので、貼れない人を落とすと1位が
+    別人の名前に化ける。週のメンション一覧が@ID未取得を外すのとは目的が違う。
+
+    「1k⬆️」の下限はMENTION_POST_MINで、表記は小文字 ―― 画面の区分名(「1K以上」)と大小が
+    違うのは投稿の文面がこの形だからである。数字を文面へ直接書かないのは、下限を動かした
+    ときに投稿の文面だけ古い額のまま残るのを防ぐためである。
+    """
+    if not rows:
+        return ""
+    lines = [f"トップ{len(MENTION_MEDALS)}貢献"]
+    lines.append(" ".join(f"{medal} {_post_name(row)}"
+                          for medal, row in zip(MENTION_MEDALS, rows)))
+    # 0人の行は落とす。「1k⬆️0名」と貼ると、その日に大口が居なかったのか数え忘れたのかが
+    # 貼った先から読めない。
+    if post_count:
+        lines.append(f"{_coin_label(MENTION_POST_MIN).lower()}⬆️{post_count}名")
+    return "\n".join(lines)
+
+
+def _mention_day_roster_post(roster: list) -> str:
+    """顔ぶれ(上位_MENTION_DAY_ROSTER人)をそのまま投稿へ貼る文面。
+
+    メダルではなく番号で並べるのは、印の在る3人より下まで載るからである。額まで入れるのは
+    順位の根拠を貼った先でも読めるようにするためで、並びは画面の表と同じ(番号→名前→コイン)。
+    組み立てをServerへ置くのは_mention_day_postと同じ理由 ―― 画面側で組ませると名乗りの形が
+    2つに割れる。
+    """
+    return "\n".join(f"{row['rank']}. {_post_name(row)}　{row['diamonds']:,}"
+                      for row in roster)
+
+
+def _mention_day(key: str, start: float, end: float, rows: list) -> dict:
+    """日ぶんの一覧1件。順位・メダル・貼る文面まで込みで返す。
+
+    文面をServerが組むのは週のpost_labelと同じ理由 ―― 画面側で組ませると名乗りの形が
+    2つに割れる。日ぶんは行ごとの取捨が無いので、完成した文字列をそのまま返せる。
+    """
+    post_count = sum(1 for row in rows if row["diamonds"] >= MENTION_POST_MIN)
+    roster = [
+        dict(row, rank=i + 1,
+             medal=MENTION_MEDALS[i] if i < len(MENTION_MEDALS) else "")
+        for i, row in enumerate(rows[:_MENTION_DAY_ROSTER])
+    ]
+    return {
+        "key": key,
+        "title": _day_title(start),
+        # 窓の端は週と同じ形(時刻付き)で名乗る。日付だけだと未明の分がどちらの日とも読める。
+        "start_label": _week_label(start),
+        "end_label": _week_label(end),
+        "roster": roster,
+        # 切った件数。画面が「これで全部」と名乗らないために返す。
+        "roster_truncated": max(0, len(rows) - _MENTION_DAY_ROSTER),
+        "gifter_count": len(rows),
+        "diamonds": sum(row["diamonds"] for row in rows),
+        "post_count": post_count,
+        "post_text": _mention_day_post(rows[:len(MENTION_MEDALS)], post_count),
+        # 顔ぶれをそのまま貼る文面。上の3人だけでは足りないときに使う。
+        "roster_text": _mention_day_roster_post(roster),
+    }
+
+
+# 窓で切ったGifter一覧の列とJOIN。身元はusers表(最新)を主に、まだ書かれていない列だけ
+# event記録値で補う ―― streamer_profileのGifter一覧と同じ解決規則である。週ぶんと日ぶんで
+# 同じ断片を使うのは、片方だけ直して「週では名前が出るのに日では(unknown)」という食い違いを
+# 作らないためである。
+_GIFTER_SELECT_SQL = (
+    " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
+    " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
+    " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
+    # 人が付けた省略形(user_aliases)。名前と並べて返し、差し替わるのは貼る文面だけである。
+    # ここでJOINして持つのは、週の一覧と日ぶんで別々に引くと片方だけ古い値になるためである。
+    " COALESCE(a.alias, '') AS alias,"
+    # avatarは event_strings へintern済み。値へJOINしてからMAXを採る。
+    " COALESCE(NULLIF(u.avatar, ''), MAX(av.value)) AS avatar,"
+    " u.fans_level AS fans_level, u.gifter_level AS gifter_level,"
+    " u.gifter_badge AS gifter_badge, u.member_badge AS member_badge,"
+    f" {display_league_sql('u')} AS league,"
+    " SUM(e.diamonds) AS diamonds, SUM(e.gift_count) AS gifts,"
+    " COUNT(DISTINCT e.session_id) AS sessions"
+)
+_GIFTER_FROM_SQL = (
+    " FROM events e JOIN sessions s ON s.id = e.session_id"
+    " LEFT JOIN users u ON u.identity_key = e.identity_key"
+    " LEFT JOIN event_strings av ON av.id = e.user_avatar_id"
+    " LEFT JOIN user_aliases a ON a.identity_key = e.identity_key"
+)
+
+# 同じ人の別アカウント(user_merges)を1人へ畳んだ版。畳んだ先のkeyでusers/user_aliasesへ
+# JOINするので、名前も省略形も主アカウントの物が出る —— サブ側の名乗りで出ると、束ねた
+# はずの人が別の名前で貼られる。束ねが無い人は COALESCE が自分自身のkeyへ落ちるので、
+# 畳まない版とまったく同じ行になる。
+_MERGED_KEY_SQL = "COALESCE(m.primary_key, e.identity_key)"
+_GIFTER_MERGED_SELECT_SQL = (
+    _GIFTER_SELECT_SQL
+    # 畳んだアカウントの数。1なら束ねていない。画面はこれを見て束ねた行だけに印を出す。
+    + ", COUNT(DISTINCT e.identity_key) AS accounts"
+)
+_GIFTER_MERGED_FROM_SQL = (
+    " FROM events e JOIN sessions s ON s.id = e.session_id"
+    " LEFT JOIN user_merges m ON m.member_key = e.identity_key"
+    f" LEFT JOIN users u ON u.identity_key = {_MERGED_KEY_SQL}"
+    " LEFT JOIN event_strings av ON av.id = e.user_avatar_id"
+    f" LEFT JOIN user_aliases a ON a.identity_key = {_MERGED_KEY_SQL}"
+)
+
+
+def _gifter_row(row, accounts: int = 1) -> dict:
+    """_GIFTER_SELECT_SQL の1行をdictへ。空値の受け皿もここ1か所に置く。"""
+    return {
+        "identity_key": row["key"],
+        "user_id": row["user_id"] or "",
+        "unique_id": row["unique_id"] or "",
+        "nickname": row["nickname"] or "(unknown)",
+        # 貼る文面で名前の代わりに出す省略形。無ければ空で、そのときは名前をそのまま貼る。
+        "alias": row["alias"] or "",
+        "avatar": row["avatar"] or "",
+        "fans_level": row["fans_level"] or 0,
+        "gifter_level": row["gifter_level"] or 0,
+        "gifter_badge": row["gifter_badge"] or "",
+        "member_badge": row["member_badge"] or "",
+        "league": row["league"] or "",
+        "diamonds": row["diamonds"] or 0,
+        "gifts": row["gifts"] or 0,
+        "sessions": row["sessions"] or 0,
+        # この行に畳んだアカウントの数。束ねていなければ1。
+        "accounts": accounts,
+    }
 
 
 def _period_dates(key: str, granularity: str) -> tuple:
@@ -171,6 +443,29 @@ def _unknown_identity(identity_key: str) -> dict:
         "nickname": "(unknown)", "avatar": "", "fans_level": 0, "gifter_level": 0,
         "gifter_badge": "", "member_badge": "", "league": "",
     }
+
+
+def _mention_tier_defs() -> list:
+    """メンション一覧の区分。高い順に [下限, 上限(無ければNone), 名前]。
+
+    名前はuserの区分けの言い回しをそのまま使う(「10K以上」「100コイン以上」)。区分は
+    排他なので、画面側は上限も一緒に出して「5K以上」が5K〜10Kであることを読めるようにする。
+    """
+    defs = []
+    for i, low in enumerate(MENTION_TIERS):
+        high = MENTION_TIERS[i - 1] if i > 0 else None
+        label = f"{_coin_label(low)}以上" if low >= 1000 else f"{low}コイン以上"
+        defs.append({"min": low, "max": high, "label": label})
+    return defs
+
+
+def _mention_tier_of(diamonds: int) -> int:
+    """コイン額が入る区分のindex。一番下の区分に届かなければ None。
+    _mention_tier_defsの並びと同じ添字を返す。"""
+    for i, low in enumerate(MENTION_TIERS):
+        if diamonds >= low:
+            return i
+    return None
 
 
 def _whale_tier_defs() -> list:
@@ -447,7 +742,12 @@ class StreamersMixin:
         # 分子・分母をどちらもgift eventから採るのは、比率の両側を同じ物差しで測るため
         # (sessionのstats_jsonとgift eventは確定タイミングが違い、混ぜると比率が歪む)。
         # 未確認の人を「ライバーではない」に丸めると過小評価になるので、判定済みぶんを
-        # 分母にした比率と、その判定済みが全体のどれだけかを別々に返す(実測65ms)。
+        # 分母にした比率と、その判定済みが全体のどれだけかを別々に返す。
+        #
+        # CROSS JOIN は結合順の固定(_SESSION_TOTALS_CTE の注記と同じ)。素のJOINだと planner は
+        # sessions を全走査して session ごとに events を index で引き、行本体(diamonds・
+        # identity_key)を1行ずつ表から取りに行く。gift 側から回すと idx_events_kind_identity
+        # が covering になり表本体を読まない。実測(本番の複製・gift 38,301件): 192ms -> 52ms。
         liver_rows = conn.execute(
             "SELECT COALESCE(NULLIF(s.owner_user_id, ''), s.unique_id) AS okey,"
             " COALESCE(SUM(e.diamonds), 0) AS gift_diamonds,"
@@ -460,7 +760,7 @@ class StreamersMixin:
             "  THEN e.identity_key END) AS checked_gifters,"
             f" COUNT(DISTINCT CASE WHEN {display_league_sql('u')} <> ''"
             "  THEN e.identity_key END) AS liver_gifters"
-            " FROM events e JOIN sessions s ON s.id = e.session_id"
+            " FROM events e CROSS JOIN sessions s ON s.id = e.session_id"
             " LEFT JOIN users u ON u.identity_key = e.identity_key"
             f" WHERE e.kind = 'gift'{_EXCLUDE_RESTRICTED}"
             " GROUP BY okey",
@@ -1447,6 +1747,289 @@ class StreamersMixin:
                 }
         return out
 
+    def _ranking_periods(self, conn, unique_id: str, handles: list, ph: str,
+                         granularity: str) -> tuple:
+        """その配信者の期間keyを古い順に並べ、(一覧, 期間ごとのコイン/Gift数, 落とした件数)。
+
+        一覧はGiftではなく配信の在った範囲から作る。Giftのあった期間だけを並べると、
+        「配信したが誰も投げなかった」期間が一覧から消える。
+        """
+        span = conn.execute(
+            "SELECT MIN(s.started_at) AS first, MAX(COALESCE(s.ended_at, s.started_at)) AS last"
+            f" FROM sessions s WHERE s.unique_id IN ({ph})" + _EXCLUDE_RESTRICTED,
+            tuple(handles),
+        ).fetchone()
+        totals_rows = conn.execute(
+            f"SELECT {_PERIOD_SQL[granularity].format(col='e.time')} AS p,"
+            " SUM(e.diamonds) AS diamonds, SUM(e.gift_count) AS gifts"
+            " FROM events e JOIN sessions s ON s.id = e.session_id"
+            f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
+            " GROUP BY p",
+            tuple(handles),
+        ).fetchall()
+        totals = {r["p"]: (r["diamonds"] or 0, r["gifts"] or 0) for r in totals_rows if r["p"]}
+        edges = list(totals)
+        if span["first"] is not None:
+            # 収集中のsessionはended_atを持たない。Giftが今の期間まで届いているので、
+            # totals側のkeyと併せて端を決める。
+            edges += [_period_key(span["first"], granularity),
+                      _period_key(span["last"], granularity)]
+        if not edges:
+            return [], totals, 0
+        keys, dropped = _period_range(min(edges), max(edges), granularity)
+        if dropped:
+            logger.warning(
+                "期間別ランキングの期間一覧が上限を超えたため古い側を切りました",
+                extra={"event": "ranking_periods_truncated", "unique_id": unique_id,
+                       "granularity": granularity, "dropped": dropped},
+            )
+        return keys, totals, dropped
+
+    def _gift_window_ranking(self, conn, handles: list, ph: str,
+                             start: float, end: float) -> list:
+        """[start, end) にGiftを投げた人をコイン順に。切らずに全件返す(表示側で切る)。"""
+        rows = conn.execute(
+            "SELECT e.identity_key AS key," + _GIFTER_SELECT_SQL + _GIFTER_FROM_SQL
+            + f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
+            " AND e.time >= ? AND e.time < ?"
+            " GROUP BY e.identity_key"
+            " ORDER BY diamonds DESC, gifts DESC",
+            (*handles, start, end),
+        ).fetchall()
+        return [_gifter_row(row) for row in rows if row["key"]]
+
+    def _gift_day_rankings(self, conn, handles: list, ph: str,
+                           start: float, end: float) -> dict:
+        """[start, end) を7時始まりの日で割り、日key -> コイン順のGifter一覧。
+
+        日ごとに窓を張り直さず1本のqueryで採るのは、週の一覧とまったく同じ行から数える
+        ためである ―― 別々に引くと、週の合計と日の合計が食い違ったときにどちらが本当か
+        画面から読めない。
+
+        同じ人の別アカウント(user_merges)はここで1人へ畳む。畳むのは行の束ね方だけで、
+        数えるGift eventは畳む前とまったく同じなので、日のコイン合計は週の合計と一致した
+        ままである(変わるのは人数と順位)。週の一覧を畳まないのは、あちらが@で呼ぶ相手の
+        一覧だからで、アカウントごとに別の@IDが要る。
+        """
+        expr = _PERIOD_SQL[DAY_SHIFTED].format(col="e.time")
+        rows = conn.execute(
+            f"SELECT {expr} AS day, {_MERGED_KEY_SQL} AS key,"
+            + _GIFTER_MERGED_SELECT_SQL + _GIFTER_MERGED_FROM_SQL
+            + f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
+            " AND e.time >= ? AND e.time < ?"
+            " GROUP BY day, key"
+            " ORDER BY day, diamonds DESC, gifts DESC",
+            (*handles, start, end),
+        ).fetchall()
+        by_day: dict = {}
+        for row in rows:
+            if not row["key"] or not row["day"]:
+                continue
+            by_day.setdefault(row["day"], []).append(
+                _gifter_row(row, row["accounts"] or 1))
+        return by_day
+
+    def _mention_days(self, conn, handles: list, ph: str,
+                      start: float, end: float) -> list:
+        """選んだ週を7時始まりの日へ割った一覧。新しい日が先。
+
+        まだ始まっていない日は並べない ―― 0件として出すと「その日は誰も投げなかった」に
+        読める。週の途中まで進んだ現在の週では、経過した日だけが並ぶ。
+        ただしGiftの在る日は時刻に関わらず必ず並べる ―― 「まだ来ていない日」という判断で
+        実際に在るGiftを画面から消してはならない(時計のずれた記録が黙って消える)。
+        経過した日はGiftが無くても残す(配信したが誰も投げなかった日を消さない)。
+        """
+        by_day = self._gift_day_rankings(conn, handles, ph, start, end)
+        now = time.time()
+        items = []
+        key = _period_key(start, DAY_SHIFTED)
+        while True:
+            low, high = _period_bounds(key, DAY_SHIFTED)
+            if low >= end:
+                break
+            rows = by_day.get(key, [])
+            if low < now or rows:
+                items.append(_mention_day(key, low, high, rows))
+            key = _period_key(high, DAY_SHIFTED)
+        items.reverse()
+        return items
+
+    def streamer_mention_week(self, unique_id: str, week: str = "") -> dict:
+        """土曜の朝7時〜次の土曜の朝7時にGiftを投げた人を、ショート動画のメンション用に返す。
+
+        週の境目が既存のランキング(月曜0時始まり)と違うのは、投稿の周期が土曜の朝だから
+        である。同じ画面に境界の異なる「週」が並ぶうえ、こちらは日の境目も0時ではないので、
+        応答は代表keyだけでなく時刻まで入れた名乗り(start_label / end_label)を返す。
+        keyは土曜の日付なので、日付だけを出すと土曜の朝(0〜7時)がどちらの週とも読める。
+
+        Battle窓の解決は含めない。この一覧は配信者を選んだ時点で必ず引かれるので、
+        Battle Gifterまで併せて出すランキングとは別の口にしてある。
+
+        メンションに使えるのは@ID(unique_id)が取れている人だけである。取れていない人も
+        一覧には残す — 落とすと「その区分に居たのはこの人数」という数が実際より小さくなる。
+
+        コイン額の区分(MENTION_TIERS)は排他で、1人は1つの区分にしか入らない。境目を
+        Serverが決めて行へ焼き込むのは、画面側で額から割り出させると区分を足したときに
+        画面とserverで別の切り方になるためである。
+
+        一番下の区分に届かない人は gifters に入れず、below_count / below_diamonds で
+        人数とコインだけ返す。gifter_count はその週に投げた全員のままにしてあるので、
+        画面は2つの数を並べて「一覧に出ていない人が居る」ことを名乗れる。
+
+        days はその週を日(7時〜翌7時)へ割った一覧で、投稿へ貼る文面まで込みで返す。
+        日の境目を週と同じ時刻にしてあるので、7日ぶんのコインは週の合計と必ず一致する。
+        区分ごとの取捨(gifters側の印)はdaysへ効かない —— あちらは@で呼ぶ相手の一覧、
+        こちらは順位の名乗りで、@IDの取れていない人を外すと1位が別人の名前に化ける。
+        """
+        with self._lock:
+            handles = self._owner_handles_locked(unique_id)
+        # 全期間ぶんのGift eventを触るので、書き込み接続で流すとcollectorのevent書き出しが
+        # その間待たされる(streamer_profile / rankingと同じ理由)。
+        conn = self._read_connection()
+        ph = ",".join("?" * len(handles))
+        tiers = _mention_tier_defs()
+        empty = {
+            "week": "", "prev_week": "", "next_week": "",
+            "start_label": "", "end_label": "", "post_label": "",
+            "post_min": MENTION_POST_MIN, "alias_max": USER_ALIAS_MAX,
+            "weeks": [], "gifters": [],
+            "tiers": [dict(t, count=0, mentionable=0, diamonds=0) for t in tiers],
+            "gifter_count": 0, "mentionable_count": 0, "diamonds": 0,
+            "below_count": 0, "below_diamonds": 0, "dropped_weeks": 0,
+            "days": [], "merges": self.list_user_merges(),
+        }
+        keys, totals, dropped = self._ranking_periods(
+            conn, unique_id, handles, ph, WEEK_SATURDAY)
+        if not keys:
+            return empty
+
+        selected = week if week in set(keys) else keys[-1]
+        index = keys.index(selected)
+        start, end = _period_bounds(selected, WEEK_SATURDAY)
+        everyone = self._gift_window_ranking(conn, handles, ph, start, end)
+        # 日ぶんの貢献。同じ窓を日で割るだけなので、7日ぶんのコインは週の合計と必ず一致する。
+        days = self._mention_days(conn, handles, ph, start, end)
+        # 束ねの一覧。日ぶんと同じ応答で返すので、束ねた直後の画面は1回引き直すだけで
+        # 「畳まれた顔ぶれ」と「束ねの中身」の両方が揃う。
+        merges = self.list_user_merges()
+        # 区分ごとの人数は行を数えて出す。行のtierと別に集計すると、境目を直したときに
+        # 枠の見出しと中身が食い違う。
+        counts = [{"count": 0, "mentionable": 0, "diamonds": 0} for _ in tiers]
+        gifters = []
+        below_count = 0
+        below_diamonds = 0
+        for row in everyone:
+            tier = _mention_tier_of(row["diamonds"])
+            if tier is None:
+                below_count += 1
+                below_diamonds += row["diamonds"]
+                continue
+            row["tier"] = tier
+            # 順位は一覧に載る人の中で振り直す。全員通しの順位を残すと、出ていない人の
+            # ぶんだけ番号が飛び、画面の行数と最後の番号が合わない。
+            row["rank"] = len(gifters) + 1
+            gifters.append(row)
+            acc = counts[tier]
+            acc["count"] += 1
+            acc["diamonds"] += row["diamonds"]
+            if row["unique_id"]:
+                acc["mentionable"] += 1
+        return {
+            "week": selected,
+            # 端では空文字。画面はこれを見て前へ・次への移動を止める。
+            "prev_week": keys[index - 1] if index > 0 else "",
+            "next_week": keys[index + 1] if index + 1 < len(keys) else "",
+            # 窓そのものの端を時刻付きで名乗る。endは次の週の開始と同じ時刻(半開区間)で、
+            # 1分引いた値を出さない ―― 「06:59まで」と書くと1分の隙間があるように読める。
+            "start_label": _week_label(start),
+            "end_label": _week_label(end),
+            # まとめcopy用の名乗りと、そこへ載せる区分の下限。画面はこの2つに従うだけで、
+            # 日付も境目も組み立てない。
+            "post_label": _post_range_label(start, end),
+            "post_min": MENTION_POST_MIN,
+            # 省略形の長さの上限。画面の入力欄がここから上限を採るので、両方に数字を
+            # 書かない —— 片方だけ動かすと、入力できたのに保存で弾かれる欄ができる。
+            "alias_max": USER_ALIAS_MAX,
+            # labelは窓の開始を時刻付きで名乗った物。選択肢の文言をServerが持つのは、
+            # keyの日付から画面側で組ませると時刻が落ち、土曜の朝がどちらの週とも読める
+            # 選択肢になるためである。
+            "weeks": [
+                {"key": k, "label": _week_label(_period_bounds(k, WEEK_SATURDAY)[0]),
+                 "diamonds": totals.get(k, (0, 0))[0],
+                 "gifts": totals.get(k, (0, 0))[1]}
+                for k in keys
+            ],
+            "gifters": gifters,
+            "tiers": [dict(t, **c) for t, c in zip(tiers, counts)],
+            # その週に投げた全員。一覧に出るのは区分に入った人だけなので、この2つを
+            # 並べて初めて「出ていない人が居る」ことが読める。
+            "gifter_count": len(everyone),
+            "below_count": below_count,
+            "below_diamonds": below_diamonds,
+            "mentionable_count": sum(1 for g in gifters if g["unique_id"]),
+            "diamonds": totals.get(selected, (0, 0))[0],
+            "dropped_weeks": dropped,
+            # 選んだ週を日(7時〜翌7時)へ割った一覧。新しい日が先で、貼る文面まで込み。
+            # 区分の取捨(gifters側の印)はここへ効かない —— 日ぶんは順位の名乗りなので、
+            # @IDの取れていない人も外さない(外すと1位が別人の名前に化ける)。
+            "days": days,
+            # サブアカウントの束ね(user_merges)。日ぶんの顔ぶれからは束ねた側が消える
+            # ので、外す相手を選べるように名乗りまで込みで返す。配信者にも週にも
+            # 紐付かない(省略形と同じく人に付く)。
+            "merges": merges,
+        }
+
+    def streamer_mention_gifts(self, unique_id: str, week: str,
+                               identity_key: str, limit: int = 500) -> dict:
+        """メンション一覧の1人が、その週に投げたgiftを1件ずつ。新しい順。
+
+        一覧の応答へ畳み込まないのは、1週に数百人×数十件が載るためである(実測で
+        1週329人)。画面が開いた人のぶんだけ引く。
+
+        weekは一覧が返したkey(その週の土曜の日付)。窓の作り方を一覧と共有するので、
+        「一覧のコイン合計」と「ここに並ぶgiftの合計」が必ず一致する。
+        """
+        if not identity_key:
+            return {"week": week, "identity_key": identity_key, "items": [],
+                    "diamonds": 0, "truncated": 0}
+        with self._lock:
+            handles = self._owner_handles_locked(unique_id)
+        conn = self._read_connection()
+        ph = ",".join("?" * len(handles))
+        start, end = _period_bounds(_period_key(time.time(), WEEK_SATURDAY)
+                                    if not week else week, WEEK_SATURDAY)
+        rows = conn.execute(
+            "SELECT e.time AS time, e.gift_name AS gift_name, e.gift_id AS gift_id,"
+            " e.gift_count AS gift_count, e.diamonds AS diamonds,"
+            " e.gift_image AS gift_image"
+            " FROM events e JOIN sessions s ON s.id = e.session_id"
+            f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
+            " AND e.identity_key = ? AND e.time >= ? AND e.time < ?"
+            " ORDER BY e.time DESC",
+            (*handles, identity_key, start, end),
+        ).fetchall()
+        items = [
+            {
+                "time": row["time"],
+                "label": datetime.fromtimestamp(row["time"]).strftime("%m/%d %H:%M"),
+                "name": row["gift_name"] or "",
+                "gift_id": int(row["gift_id"] or 0),
+                "image": row["gift_image"] or "",
+                "count": int(row["gift_count"] or 1),
+                "diamonds": int(row["diamonds"] or 0),
+            }
+            for row in rows[:limit]
+        ]
+        return {
+            "week": week,
+            "identity_key": identity_key,
+            "items": items,
+            # 合計は切る前の全件から出す。切った件数も返して、画面が「これで全部」と
+            # 名乗らないようにする。
+            "diamonds": sum(int(r["diamonds"] or 0) for r in rows),
+            "truncated": max(0, len(rows) - limit),
+        }
+
     def streamer_gifter_ranking(self, unique_id: str, granularity: str = "month",
                                 period: str = "", limit: int = 100) -> dict:
         """配信者1人のGifter / Battle Gifterを、暦で切った期間ごとに並べたランキング。
@@ -1478,89 +2061,20 @@ class StreamersMixin:
             "battles": 0, "diamonds": 0, "dropped_periods": 0,
         }
 
-        # 期間の一覧はGiftではなく配信の在った範囲から作る。Giftのあった期間だけを並べると、
-        # 「配信したが誰も投げなかった」期間が一覧から消える。
-        span = conn.execute(
-            "SELECT MIN(s.started_at) AS first, MAX(COALESCE(s.ended_at, s.started_at)) AS last"
-            f" FROM sessions s WHERE s.unique_id IN ({ph})" + _EXCLUDE_RESTRICTED,
-            tuple(handles),
-        ).fetchone()
-        totals_rows = conn.execute(
-            f"SELECT {_PERIOD_SQL[granularity].format(col='e.time')} AS p,"
-            " SUM(e.diamonds) AS diamonds, SUM(e.gift_count) AS gifts"
-            " FROM events e JOIN sessions s ON s.id = e.session_id"
-            f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
-            " GROUP BY p",
-            tuple(handles),
-        ).fetchall()
-        totals = {r["p"]: (r["diamonds"] or 0, r["gifts"] or 0) for r in totals_rows if r["p"]}
-        edges = list(totals)
-        if span["first"] is not None:
-            # 収集中のsessionはended_atを持たない。Giftが今の期間まで届いているので、
-            # totals側のkeyと併せて端を決める。
-            edges += [_period_key(span["first"], granularity),
-                      _period_key(span["last"], granularity)]
-        if not edges:
-            return empty
-        keys, dropped = _period_range(min(edges), max(edges), granularity)
+        keys, totals, dropped = self._ranking_periods(
+            conn, unique_id, handles, ph, granularity)
         if not keys:
             return empty
-        if dropped:
-            logger.warning(
-                "期間別ランキングの期間一覧が上限を超えたため古い側を切りました",
-                extra={"event": "ranking_periods_truncated", "unique_id": unique_id,
-                       "granularity": granularity, "dropped": dropped},
-            )
 
         selected = period if period in set(keys) else keys[-1]
         index = keys.index(selected)
         prev = keys[index - 1] if index > 0 else ""
 
         def _gift_ranking(key: str) -> list:
-            """その期間にGiftを投げた人をコイン順に。順位差のために全件返す(表示側で切る)。"""
             if not key:
                 return []
             start, end = _period_bounds(key, granularity)
-            rows = conn.execute(
-                "SELECT e.identity_key AS key,"
-                " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
-                " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
-                " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
-                # avatarは event_strings へintern済み。値へJOINしてからMAXを採る。
-                " COALESCE(NULLIF(u.avatar, ''), MAX(av.value)) AS avatar,"
-                " u.fans_level AS fans_level, u.gifter_level AS gifter_level,"
-                " u.gifter_badge AS gifter_badge, u.member_badge AS member_badge,"
-                f" {display_league_sql('u')} AS league,"
-                " SUM(e.diamonds) AS diamonds, SUM(e.gift_count) AS gifts,"
-                " COUNT(DISTINCT e.session_id) AS sessions"
-                " FROM events e JOIN sessions s ON s.id = e.session_id"
-                " LEFT JOIN users u ON u.identity_key = e.identity_key"
-                " LEFT JOIN event_strings av ON av.id = e.user_avatar_id"
-                f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
-                " AND e.time >= ? AND e.time < ?"
-                " GROUP BY e.identity_key"
-                " ORDER BY diamonds DESC, gifts DESC",
-                (*handles, start, end),
-            ).fetchall()
-            return [
-                {
-                    "identity_key": row["key"],
-                    "user_id": row["user_id"] or "",
-                    "unique_id": row["unique_id"] or "",
-                    "nickname": row["nickname"] or "(unknown)",
-                    "avatar": row["avatar"] or "",
-                    "fans_level": row["fans_level"] or 0,
-                    "gifter_level": row["gifter_level"] or 0,
-                    "gifter_badge": row["gifter_badge"] or "",
-                    "member_badge": row["member_badge"] or "",
-                    "league": row["league"] or "",
-                    "diamonds": row["diamonds"] or 0,
-                    "gifts": row["gifts"] or 0,
-                    "sessions": row["sessions"] or 0,
-                }
-                for row in rows
-                if row["key"]
-            ]
+            return self._gift_window_ranking(conn, handles, ph, start, end)
 
         battle_agg, battle_counts = self._battle_gifter_periods(
             conn, handles, ph, granularity, {k for k in (selected, prev) if k})
@@ -1961,10 +2475,16 @@ class StreamersMixin:
         # identityは金額側しか覆わない)。表示属性はusers表が正で、MAXはusers行が無い/空の
         # ときのfallbackにすぎないため、上位50件に絞ってから引いても答えは同じ(実測46→22ms)。
         gifter_rows = conn.execute(
+            # INDEXED BY は planner が idx_events_kind_identity(全event・gift_countを持たない)
+            # を選び、gift 38,301行ぶん表本体へ戻るのを止めるため。gift限定の covering index
+            # (maintenance の idx_events_gift_identity)は ANALYZE 済みでも選ばれなかった。
+            # 実測(本番の複製): 187ms -> 6ms、結果は同一。index は起動時の migration が必ず
+            # 作るので、無ければ黙って遅くなるのではなく query が失敗する(それでよい)。
             "WITH top AS ("
             " SELECT identity_key AS key, SUM(gift_count) AS gifts,"
             " SUM(diamonds) AS diamonds, COUNT(DISTINCT session_id) AS sessions"
-            " FROM events WHERE kind = 'gift' GROUP BY identity_key"
+            " FROM events INDEXED BY idx_events_gift_identity"
+            " WHERE kind = 'gift' GROUP BY identity_key"
             " ORDER BY diamonds DESC, gifts DESC LIMIT 50)"
             " SELECT t.key AS key,"
             " COALESCE(NULLIF(u.user_id, ''), (SELECT MAX(user_id) FROM events"

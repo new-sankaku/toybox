@@ -34,12 +34,20 @@ JOB_DOMAIN_LABELS = {
     "short": "short一括生成",
     "stt": "文字起こし",
     "laugh": "笑い声分析",
+    # TikTok本体のhighlightを録画へ音の指紋で突き合わせる(doc/HIGHLIGHT_MATCH.md)。
+    "highlight_match": "highlightの突き合わせ",
+    # 照合済みhighlightのgift付きgift演出を高額順に繋いだ1本(tictok.media.highlight_export)。
+    "highlight_export": "highlightの書き出し",
     "semantic": "意味検索index",
     "storage": "容量scan",
     # file移動を「容量scan」として並べていたため、種別を根拠に読むと実体を取り違えた。
     "relocate": "最終保存先へ移動",
     "retention": "保持policy",
     "maintenance": "DB保守",
+    # 一次保存先(SSD)の中身をbackup先へ写す。移送(relocate)と違い元は残す。
+    "record_backup": "録画ファイルのバックアップ",
+    # 2系統の最終保存先を突き合わせて、片方に欠けているfileを埋める。
+    "mirror_resync": "最終保存先の再同期",
 }
 
 # session一括・配信者一括を1行へ畳んだときのdomain。実行の単位ではない(=ops_eventsのkindに
@@ -69,10 +77,11 @@ _JOB_ACTION_LABELS = {
 
 # DB保守。kindは maintenance.{操作}_failed / maintenance.{完了名} の2系統ある。
 _MAINTENANCE_LABELS = {
-    "backup": "DBの退避",
+    "backup": "DBバックアップ",
     "integrity_check": "DBの整合性check",
     "wal_checkpoint": "WALの書き戻し",
     "vacuum": "DBのVACUUM",
+    "unfreeze": "古い世代の自動削除を再開",
 }
 
 _STATIC_KIND_LABELS = {
@@ -97,14 +106,26 @@ _STATIC_KIND_LABELS = {
     "media_queue.group_finished": "一括処理の終了",
     "media_queue.job_interrupted": "再起動でjobが中断",
     "capacity.forecast_low": "空き容量の見通し警告",
-    "storage.relocated": "最終保存先への退避",
+    "storage.relocated": "最終保存先への移送",
+    "storage.mirror_unavailable": "最終保存先の片系統が使えない",
+    "storage.mirror_resynced": "最終保存先の再同期",
+    "storage.mirror_diverged": "最終保存先の2系統に食い違い",
+    "backup.settings_exported": "設定値のバックアップ",
+    "backup.settings_export_failed": "設定値のバックアップに失敗",
+    "backup.tables_exported": "手入力データのバックアップ",
+    "backup.tables_export_failed": "手入力データのバックアップに失敗",
+    "backup.skipped": "バックアップの見送り",
+    "record_backup.stopped": "録画ファイルのバックアップを中断",
+    "maintenance.row_guard_tripped": "DBの行数の急減を検知",
+    "maintenance.prune_frozen": "古い世代の自動削除を凍結",
+    "maintenance.prune_unfrozen": "古い世代の自動削除を再開",
     "storage.scan_completed": "使用量scanの完了",
     "storage.recording_files_deleted": "録画fileの削除",
     "retention.previewed": "保持rulesの試算",
     "retention.applied": "保持rulesの適用",
     "retention.protection_changed": "保護setting変更",
     "retention.derived_removed": "派生fileの削除",
-    "maintenance.backup_completed": "DBの退避完了",
+    "maintenance.backup_completed": "DBバックアップ完了",
     "maintenance.integrity_checked": "DBの整合性check",
     "maintenance.wal_checkpointed": "WALの書き戻し",
     "maintenance.vacuumed": "DBのVACUUM完了",

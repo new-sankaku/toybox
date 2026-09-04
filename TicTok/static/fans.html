@@ -23,7 +23,7 @@
     <div class="a-kpibar" id="fan-kpi"></div>
 
     <div class="x-toolbar">
-      <input id="fan-search" type="text" aria-label="表示名 / @ID で絞込" placeholder="🔎 表示名 / @ID で絞込" autocomplete="off" />
+      <input id="fan-search" type="text" aria-label="絞込" placeholder="🔎 表示名 / @ID で絞込" autocomplete="off" />
       <label class="x-field"><span>並替</span>
         <select id="fan-sort">
           <option value="diamonds">コイン 多い順</option>
@@ -46,7 +46,7 @@
     <div id="fan-note" class="chart-note"></div>
 
     <section class="result-block">
-      <h3 class="result-subtitle">■ Fan台帳 <span class="result-sub-note">（giftを送った視聴者。行をクリックで明細）</span></h3>
+      <h3 class="result-subtitle">■ Fan台帳</h3>
       <div class="table-wrap">
         <table class="result-table">
           <thead><tr>
@@ -56,11 +56,11 @@
           <tbody id="fan-rows"></tbody>
         </table>
       </div>
-      <div id="fan-empty" class="a-empty" data-label="Fan台帳">該当する視聴者がいません。</div>
+      <div id="fan-empty" class="a-empty" data-label="Fan台帳">該当なし</div>
     </section>
 
     <div class="a-footer">
-      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot" aria-live="polite">Server接続中…</span>
+      <span id="ws-indicator-foot" class="dot">●</span>
       <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
     </div>
   </div>
@@ -70,7 +70,7 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="fan-modal-title">
       <div class="modal-head">
         <h2 id="fan-modal-title">視聴者の明細</h2>
-        <button id="fan-modal-close" class="modal-close">閉じる ✕</button>
+        <button id="fan-modal-close" class="modal-close" aria-label="閉じる">✕</button>
       </div>
       <div class="modal-body">
         <div id="fan-modal-ident"></div>
@@ -85,7 +85,7 @@
               <tbody id="fan-modal-streamers"></tbody>
             </table>
           </div>
-          <div id="fan-modal-streamers-empty" class="feed-empty" data-label="配信者別の明細">記録がありません。</div>
+          <div id="fan-modal-streamers-empty" class="feed-empty" data-label="配信者別の明細">記録なし</div>
         </section>
 
         <section class="result-block">
@@ -96,7 +96,7 @@
               <tbody id="fan-modal-sessions"></tbody>
             </table>
           </div>
-          <div id="fan-modal-sessions-empty" class="feed-empty" data-label="Session別の明細">記録がありません。</div>
+          <div id="fan-modal-sessions-empty" class="feed-empty" data-label="Session別の明細">記録なし</div>
         </section>
       </div>
     </div>

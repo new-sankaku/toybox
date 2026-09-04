@@ -130,15 +130,55 @@ CLIPS_DIRNAME = "_clips"
 # 成果物とpngが同じdirに積み上がると、file名の規約(``_shot``)を知らない限りどちらも探せない。
 STILLS_DIRNAME = "_screenshots"
 
-# 成果物の置き場のdir名。一覧・移動・容量・片付けは**必ずこの両方**を見る。片方だけを見る
-# 経路があると、そこからだけ静止画が消える(画面に並ばない・最終保存先へ随伴しない)。
-ARTIFACT_DIRNAMES = (CLIPS_DIRNAME, STILLS_DIRNAME)
+# TikTok本体から落としたhighlight(LIVE replayの切り抜き)の置き場。配信者ごとに分けるが、
+# 中身は「録画の外から来た素材」なので録画folder(ts/mp4)とは別系統に置く。
+HIGHLIGHT_DIRNAME = "highlights"
+# 利用者が実際に使っている置き場のfolder名。**綴りはこのままにする** —— 実在するfolderの
+# 名前であり、こちらの都合で直すと利用者が置いたfileを1本も見つけられなくなる。
+# 正規の置き場(``HIGHLIGHT_DIRNAME``)へ移せと言う前に、在るものを在る場所で読む。
+HIGHLIGHT_LEGACY_DIRNAME = "LiveHightlite"
+# highlightを繋いだ成果物(gifterごとに1本)の置き場。**綴りはこのままにする** ——
+# 利用者が名指しした名前であり、素材の置き場(``LiveHightlite``)の隣に並ぶことに意味がある。
+# 素材と成果物を同じdirへ混ぜない: 素材はTikTokのvideo id、成果物は日付+コイン+表示名という
+# 別々の名前の規約を持ち、混ざるとどちらを見ても目的の物へ辿り着けない。
+MERGED_HIGHLIGHT_DIRNAME = "LiveHightlite_マージ済み"
+
+# 成果物の置き場のdir名。一覧・移動・容量・片付けは**必ずこの全部**を見る。1つでも見落とす
+# 経路があると、そこからだけ成果物が消える(画面に並ばない・最終保存先へ随伴しない)。
+#
+# highlightを繋いだ1本(``MERGED_HIGHLIGHT_DIRNAME``)もここに入る。素材のhighlightは**外から
+# 来た物**なので置き場を分けてあるが(``HIGHLIGHT_DIRNAME`` はここに入れない)、繋いだ1本は
+# 人がこのserverで作らせた成果物で、``_clips`` の切り出しと同じ種類の物である。入れないと
+# ``/api/clips`` の一覧にも「最終保存先へ移動」にも出ず、容量では種別が「その他」に落ちる
+# —— 数十本のmp4が、どの画面からも辿れないまま溜まることになる。
+#
+# 代償は、file名の規約(``parse_clip_name``)がこの出力の名前を読めないことである。一覧には
+# 範囲もラベルも無い行として並ぶが、それは ``clips`` が元から持っている扱いで(読めない名前は
+# 推測せず素性なしのまま並べる)、辿れないより遥かに良い。
+ARTIFACT_DIRNAMES = (CLIPS_DIRNAME, STILLS_DIRNAME, MERGED_HIGHLIGHT_DIRNAME)
+
+# テロップpresetの見本画像(``record.telop_preview``)。root直下の共有cacheで、録画とは無関係。
+# 名前をここに置くのは、``NON_STREAMER_DIRS`` がこのmoduleに在り、telop_preview側が
+# layoutをimportする向きだからである(逆向きにするとimportが循環する)。
+TELOP_PREVIEW_DIRNAME = "telop_previews"
+
+# 設定値の退避(``core.settings_export``)。一次保存先と全ての最終保存先の直下に置く。
+CONFIG_DIRNAME = "_config"
 
 # root直下に置かれる、配信者folderではないdir。成果物のdir名が入っているのは、配信者を読み
 # 取れないstemから出た成果物の受け皿(下記 ``clips_dir``)と、配信者folderの下へ移す前の
 # 旧規約(``<root>/_clips/<配信者>/``)の実体が root直下にも在り得るためである。
+#
+# **root直下へ新しいfolderを作るときは必ずここへ足すこと。** 落ちると2つ壊れる: 容量の内訳が
+# そのfolderを配信者1人として数え(``record.disk_scan``)、``scripts/purge_streamers.py`` が
+# 監視外の配信者folderとして削除の対象に入れる。実際 ``telop_previews`` は追加を落としていて、
+# 両方に当てはまっていた(2026-09-02 修正)。
+#
+# ``HIGHLIGHT_DIRNAME`` はここに**入れない**。highlightの置き場は配信者folderの下だけで、
+# root直下に ``highlights`` を作る経路はもう無い(:func:`highlight_dir`)。載せたままにすると、
+# root直下も置き場の1つだと読める —— 実際には誰も書かず誰も読まない場所である。
 NON_STREAMER_DIRS = {".sidecars", "avatars", "emotes", "gift_icons", "_backup",
-                     *ARTIFACT_DIRNAMES}
+                     TELOP_PREVIEW_DIRNAME, CONFIG_DIRNAME, *ARTIFACT_DIRNAMES}
 
 
 def _artifact_dir(root, streamer, dirname: str) -> Path:
@@ -221,6 +261,10 @@ def record_root_of(path) -> Path:
 
 
 _record_roots: list | None = None
+
+# ``record_roots()`` が返すrootの名前。並びは同じで、先頭がwork。画面へ実pathを渡さずに
+# 「どちらの保存先か」を名乗るための鍵で、``tictok.api.routes.clips`` のROOT_KEYSと同じ値。
+RECORD_ROOT_KEYS = ("work", "final")
 
 
 def record_roots() -> list:
@@ -388,3 +432,149 @@ def emote_pool_dir() -> Path:
 def gift_icon_pool_dir() -> Path:
     """capture時に保存したgift iconのpool。"""
     return pool_root() / GIFT_ICON_POOL_DIRNAME
+
+
+def highlight_dir(streamer) -> Path:
+    """TikTok本体のhighlightを**置く**先(``<work root>/<配信者>/highlights``)。
+
+    rootをwork root固定にするのは :func:`clip_output_dir` と同じ理由である。highlightは
+    録画1本に属さない(1本のhighlightがどの録画のどこかは、突き合わせて初めて判る)ので、
+    録画の所在では置き場を決められない。配信者だけが投入時に判っている手がかりになる。
+
+    配信者folderの下に置くのは :func:`_artifact_dir` と同じ理由で、配信者ごとの片付け ——
+    folderごと消す・別driveへ移す・容量を見る —— が、録画と素材で別の場所を指さずに済む
+    からである。素材(``LiveHightlite``)も成果物(``LiveHightlite_マージ済み``)も同じ配信者
+    folderの下に並ぶので、1人ぶんを丸ごと扱う操作が置き場の数を知らずに済む。
+
+    **配信者が無ければ失敗させる。** 以前は :func:`_artifact_dir` の分岐で root直下
+    (``<work root>/highlights``)へ落ちていたが、そこは廃止した置き場である。黙って落とすと、
+    配信者を失った呼び出しが「誰も読まない場所」を指したまま進み、素材が見つからない理由が
+    pathにしか現れない —— 切り出し(:func:`clips_dir`)が root直下へ落ちてよいのは、そこが
+    今も走査される置き場だからで、highlightには当てはまらない。"""
+    if not streamer:
+        raise ValueError("highlightの置き場は配信者ごとです（配信者が空です）。")
+    return _artifact_dir(pool_root(), streamer, HIGHLIGHT_DIRNAME)
+
+
+def merged_highlight_dir(streamer) -> Path:
+    """highlightを繋いだ成果物を**作る**先(``<work root>/<配信者>/LiveHightlite_マージ済み``)。
+
+    rootをwork root固定にするのは :func:`clip_output_dir` と同じ理由である。**読む側**の
+    :func:`highlight_dirs` が両rootを辿るのと対になっていて、作る側は場所が1つでなければ
+    「自分が作った物がどこに在るか」を人が辿れない。
+
+    素材(``LiveHightlite``)と同じ配信者folderの隣に並ぶが、dirは分ける。名前の規約が
+    別物(素材はTikTokのvideo id、成果物は日付+コイン+表示名)なので、混ぜるとどちらを
+    探していても目的の物に辿り着けない ―― ``_clips`` と ``_screenshots`` を分けたのと
+    同じ判断である。"""
+    return work_root() / streamer / MERGED_HIGHLIGHT_DIRNAME if streamer else \
+        work_root() / MERGED_HIGHLIGHT_DIRNAME
+
+
+def highlight_dirs(streamer) -> list:
+    """その配信者のhighlightを**探す**置き場を、実在するものだけ順に返す。
+
+    置き場は**配信者folderの下の2つだけ**で、順序は「正規の置き場 → 利用者の現行の置き場」:
+
+    1. ``<root>/<配信者>/highlights``       … 今後の正規の置き場(:func:`highlight_dir`)
+    2. ``<root>/<配信者>/LiveHightlite``    … 利用者が実際に使っている置き場
+
+    どちらも work / final の**両rootを辿る**(:func:`record_roots`)。highlightは録画に随伴して
+    最終保存先へ移り得るし、片方だけを見る経路は「在るのに見つからない」を静かに作る。
+
+    ``<work root>/highlights/<配信者>`` (root直下)は**辿らない**。以前はそこも見ていたが、
+    置き場を配信者folderの下へ一本化する判断が出たので外した。root直下の実体はPOCが作った
+    合成素材だけで、実物のhighlightは1本も無い ―― 走査に残すと、その合成素材が台帳に並んで
+    「TikTokから来た物」のふりをする。
+
+    同じ置き場を2度返さない。final rootを持たない構成では ``record_roots`` が1つしか
+    返さないので、そこで自然に畳まれる。
+
+    **見つけた場所は呼び出し側が必ず持ち回ること。** 置き場が複数ある以上、一覧に並んだ
+    fileがどこの物かを画面が名乗れなければ、利用者は自分が置いたfileへ戻れない
+    (``tictok.api.routes.clips`` のmodule docstringと同じ約束)。"""
+    found: list = []
+    for dirname in (HIGHLIGHT_DIRNAME, HIGHLIGHT_LEGACY_DIRNAME):
+        for root in record_roots():
+            candidate = Path(root) / streamer / dirname
+            if candidate.is_dir() and candidate not in found:
+                found.append(candidate)
+    return found
+
+
+def highlight_subdirs(base) -> list:
+    """置き場(:func:`highlight_dirs` の1つ)の下のfolderを、実在するものだけ深さ順・名前順で。
+
+    利用者は置き場の下へ週ごとのfolder(``20260829-20260905`` など)を作って素材を仕分ける。
+    走査はそこまで辿り(:meth:`tictok.store.highlights.Storage.scan_highlights`)、一覧は
+    folderで畳んで出す。
+
+    **1本も入っていないfolderも返す。** ここは「置き場に何が在るか」を答える場所で、
+    どれを出すかは呼び手の判断である(一覧は中身も子孫も無い棚を出さない) —— ここで
+    間引くと、呼び手はもう「在るのに空だ」と言えなくなる。
+    """
+    base = Path(base)
+    if not base.is_dir():
+        return []
+    return sorted((path for path in base.rglob("*") if path.is_dir()),
+                  key=lambda path: path.relative_to(base).parts)
+
+
+def source_dir_of(path, root_key=None) -> str:
+    """台帳が持つ「どこで見つけたか」の名乗り。record rootからの相対
+    (``<配信者>/highlights`` / ``<配信者>/LiveHightlite/20260829-20260905`` 等)。
+
+    folder名だけ(``highlights``)にしないのは、正規の置き場と旧規約の置き場が同じ名前で
+    意味が違うためである(``<root>/<配信者>/highlights`` と ``<root>/highlights/<配信者>``)。
+    rootの外に在るなら相対にできないので絶対pathをそのまま名乗る。
+
+    **走査(台帳の行)も一覧(folderの名乗り)もここを通す。** 別々に組むと、同じfolderが
+    2通りの文字列で現れて、画面がfolderごとに畳めなくなる(行と空folderが別の棚に並ぶ)。
+    """
+    if root_key is None:
+        root_key = root_key_of(path)
+    if root_key is None:
+        return str(path)
+    for key, root in zip(RECORD_ROOT_KEYS, record_roots()):
+        if key != root_key:
+            continue
+        try:
+            return Path(path).resolve().relative_to(Path(root).resolve()).as_posix()
+        except ValueError:
+            return str(path)
+    return str(path)
+
+
+def highlight_streamers() -> list:
+    """highlightの置き場を1つでも持つ配信者(名前順)。
+
+    走査の入口が「配信者を指定しない」場合に、どの配信者を見ればよいかを決める。root直下を
+    総なめにするのではなく、**置き場が在る配信者だけ**を返す —— rootには数TBの録画が同居して
+    おり、探索の母集団を広げる理由が無い。"""
+    names: set = set()
+    for root in record_roots():
+        root = Path(root)
+        if not root.is_dir():
+            continue
+        for entry in sorted(root.iterdir()):
+            if not entry.is_dir() or entry.name in NON_STREAMER_DIRS:
+                continue
+            if any((entry / dirname).is_dir()
+                   for dirname in (HIGHLIGHT_DIRNAME, HIGHLIGHT_LEGACY_DIRNAME)):
+                names.add(entry.name)
+    return sorted(names)
+
+
+def root_key_of(path):
+    """``path`` が どの record root の下に在るか('work' / 'final')。外なら None。
+
+    画面へ返す名前(``<配信者>/<置き場>/<file名>``)はrootからの相対で組むので、rootを1つに
+    決められないとfileの在り処が名乗れない。並びは ``record_roots()`` と同じ(先頭がwork)。"""
+    resolved = Path(path).resolve()
+    for key, root in zip(RECORD_ROOT_KEYS, record_roots()):
+        try:
+            resolved.relative_to(Path(root).resolve())
+        except ValueError:
+            continue
+        return key
+    return None

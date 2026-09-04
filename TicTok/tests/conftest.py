@@ -267,3 +267,25 @@ def gift_builder(event_builder):
 @pytest.fixture
 def frozen_now():
     return time.time()
+
+
+def popen_via(fake_exec):
+    """``asyncio.create_subprocess_exec`` の偽装を ``ffprobe.run_sync`` のPopenにも届ける。
+
+    ffprobeはevent loopを止めないためthread上のPopenで走る(``core.ffprobe.run`` 参照)。
+    ffmpegとffprobeを1つの偽装で答えている試験は、同じ偽装をPopen側にも張ること:
+    ``monkeypatch.setattr(subprocess, "Popen", popen_via(fake_exec))``。
+    worker threadにはloopが無いので、偽装の協程は ``asyncio.run`` で回す。"""
+    import asyncio
+    import types
+
+    def popen(cmd, **kwargs):
+        inner = asyncio.run(fake_exec(*cmd, **kwargs))
+
+        def communicate(timeout=None):
+            return asyncio.run(inner.communicate())
+
+        return types.SimpleNamespace(communicate=communicate, kill=inner.kill,
+                                     returncode=inner.returncode)
+
+    return popen

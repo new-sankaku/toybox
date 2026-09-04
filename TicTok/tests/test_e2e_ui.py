@@ -28,7 +28,7 @@ from tictok.paths import PROJECT_ROOT
 
 pytestmark = pytest.mark.slow
 
-# nav (static/common.js の NAV_ITEMS) と同じ順序・同じ12画面。
+# nav (static/common.js の NAV_ITEMS) と同じ順序・同じ14画面。
 # nav の文言と <title> は別物なので混ぜない(/streamers は nav「配信者」/ title「配信者分析」)。
 PAGES = [
     ("/", "index.html"),
@@ -36,12 +36,14 @@ PAGES = [
     ("/history", "history.html"),
     ("/streamers", "streamers.html"),
     ("/videos", "videos.html"),
+    ("/story", "story.html"),
     ("/capacity", "capacity.html"),
     ("/fans", "fans.html"),
     ("/analytics", "analytics.html"),
     ("/jobs", "jobs.html"),
     ("/assets", "assets.html"),
     ("/ops", "ops.html"),
+    ("/backup", "backup.html"),
     ("/settings", "settings.html"),
 ]
 
@@ -205,7 +207,7 @@ async def page(browser):
 
 @pytest.mark.parametrize("path,html", PAGES, ids=[p.strip("/") or "index" for p, _ in PAGES])
 async def test_page_renders_without_js_error(ui_server, page, path, html):
-    """12画面がJS errorなしで描画され、navが全画面ぶん出る。"""
+    """13画面がJS errorなしで描画され、navが全画面ぶん出る。"""
     await page.goto(ui_server + path, wait_until="networkidle")
     # route が別画面のHTMLを返していないこと。
     assert (await page.title()) == _title_of(html)
@@ -263,7 +265,7 @@ async def test_jump_overlay_opens_and_closes(ui_server, page):
     )
     note = await page.text_content(".jump-note")
     assert "取得できませんでした" not in note, note
-    assert "絞り込めます" in note, note
+    assert "検索対象:" in note, note
 
     await page.keyboard.press("Escape")
     await page.wait_for_selector(".jump-overlay", state="hidden", timeout=5000)

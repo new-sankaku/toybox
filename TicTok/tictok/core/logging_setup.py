@@ -340,6 +340,35 @@ class DuplicateSuppressFilter(logging.Filter):
         return items
 
 
+class ProactorResetFilter(logging.Filter):
+    """Demote the Windows socket-teardown reset that asyncio reports as an ERROR.
+
+    CPython 3.10's _call_connection_lost calls socket.shutdown() with no guard, so a
+    peer that already sent RST raises WinError 10054 after the request is complete.
+    Serving video makes this routine: every player seek aborts an in-flight range
+    request. The record is lowered to DEBUG rather than dropped, so it stays
+    reachable when the logging profile is turned up.
+
+    Deliberately narrow. The shutdown sits in a finally block, so a failure there
+    replaces an exception raised by connection_lost itself; a chained __context__
+    means a real error is underneath and the record is left at ERROR.
+    """
+
+    _WINSOCK_PEER_GONE = frozenset((10053, 10054, 10058))
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info[1] if record.exc_info else None
+        if not isinstance(exc, OSError) or exc.__context__ is not None:
+            return True
+        if getattr(exc, "winerror", None) not in self._WINSOCK_PEER_GONE:
+            return True
+        if "_call_connection_lost" not in record.getMessage():
+            return True
+        record.levelno = logging.DEBUG
+        record.levelname = logging.getLevelName(logging.DEBUG)
+        return True
+
+
 # ------------------------------------------------------------------ formatting
 
 _TEXT_FORMAT = "%(asctime)s %(levelname)s %(name)s%(correlation)s %(message)s"
@@ -464,6 +493,18 @@ def _apply_quiet_loggers(root_level: int) -> None:
         logging.getLogger(name.strip()).setLevel(_resolve_level(level_name.strip(), "WARNING"))
 
 
+def _apply_proactor_reset_filter() -> None:
+    """Attach the demotion to the asyncio logger itself, not to root's handlers: a
+    logger-level filter runs once in Logger.handle, before the record propagates,
+    so no other record pays for the check."""
+    if not config.get_log_demote_proactor_reset():
+        return
+    logger = logging.getLogger("asyncio")
+    if any(isinstance(f, ProactorResetFilter) for f in logger.filters):
+        return
+    logger.addFilter(ProactorResetFilter())
+
+
 def _build_file_handler(path: Path, formatter: logging.Formatter, level: int):
     handler = GzipRotatingFileHandler(
         str(path),
@@ -544,6 +585,7 @@ def setup_logging(*, profile: str = "server", name: str = "tictok",
                 root.addHandler(handler)
 
         _apply_quiet_loggers(root_level)
+        _apply_proactor_reset_filter()
         _configured = True
         atexit.register(shutdown_logging)
 

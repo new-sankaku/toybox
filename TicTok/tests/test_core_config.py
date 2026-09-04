@@ -336,6 +336,88 @@ def test_record_dir_from_db_tolerates_missing_db_and_missing_table(tmp_path, mon
     assert config.record_dir_from_db(str(garbage)) == str(tmp_path / "from_env")
 
 
+# ---------------- config.get_highlight_match_day_stages ----------------
+#
+# 照合の候補にする録画を何日ぶん遡るかは、1つの値ではなく**段**である(狭い順に試し、1本も
+# 当たらなければ次の段へ広げる)。実装は tictok/media/highlight_match.py の match_highlight。
+
+
+def _stages_db(path, value=None):
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+    if value is not None:
+        conn.execute("INSERT INTO settings VALUES ('highlight_match_day_stages', ?)", (value,))
+    conn.commit()
+    conn.close()
+
+
+def test_day_stages_are_sorted_narrow_first_and_deduped():
+    """並びは狭い順へ揃える。広い方から試すと1段目で当たってしまい、段の意味が消える。
+    同じ日数が2つ在っても落とす —— 同じ窓を2度走らせても結果は変わらない。"""
+    assert config._parse_day_stages("30,14,14", "test") == (14.0, 30.0)
+    assert config._parse_day_stages(" 7 、 14 , 30 ", "test") == (7.0, 14.0, 30.0)
+    assert config._parse_day_stages("1.5", "test") == (1.5,)
+
+
+@pytest.mark.parametrize("raw", ["14,abc", "abc", "0", "-1", "14,0", "14,-3", "inf", "nan"])
+def test_day_stages_reject_garbage_instead_of_falling_back(raw):
+    """**黙って既定へ落とさない。** 落とすと、設定したつもりの窓と実際に走る窓が食い違い、
+    「当たらない」の理由が設定の書き間違いだったことに誰も気付けなくなる。"""
+    with pytest.raises(config.ConfigError):
+        config._parse_day_stages(raw, "test")
+
+
+@pytest.mark.parametrize("raw", ["", "   ", " , , ", "、"])
+def test_day_stages_empty_falls_back_to_the_default(raw):
+    """空は「書いていない」であって書き間違いではない。ここだけは既定へ落ちる。"""
+    assert config._parse_day_stages(raw, "test") \
+        == config.HIGHLIGHT_MATCH_DAY_STAGES_DEFAULT
+
+
+def test_day_stages_prefer_the_db_setting(tmp_path, monkeypatch):
+    """解決順は DB設定 > 環境変数 > 既定(record_dir_from_db と同じ)。設定画面で変えた値が
+    serverの再起動を待たずに効くようにするためである。"""
+    monkeypatch.setenv("TICTOK_HIGHLIGHT_MATCH_DAY_STAGES", "3,5")
+    db = tmp_path / "stages.db"
+    _stages_db(db, "  30,14  ")
+    monkeypatch.setenv("TICTOK_DB_PATH", str(db))
+    assert config.get_highlight_match_day_stages() == (14.0, 30.0)
+
+
+@pytest.mark.parametrize("stored", [None, "", "   "])
+def test_day_stages_fall_back_to_the_env_when_the_db_is_unset(tmp_path, monkeypatch, stored):
+    monkeypatch.setenv("TICTOK_HIGHLIGHT_MATCH_DAY_STAGES", "30,7")
+    db = tmp_path / f"stages_{stored!r}.db"
+    _stages_db(db, stored)
+    monkeypatch.setenv("TICTOK_DB_PATH", str(db))
+    assert config.get_highlight_match_day_stages() == (7.0, 30.0)
+
+
+def test_day_stages_fall_back_to_the_documented_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("TICTOK_HIGHLIGHT_MATCH_DAY_STAGES", raising=False)
+    db = tmp_path / "stages_none.db"
+    _stages_db(db)
+    monkeypatch.setenv("TICTOK_DB_PATH", str(db))
+    assert config.get_highlight_match_day_stages() == (14.0, 30.0)
+    assert config.get_highlight_match_day_stages() \
+        == config.HIGHLIGHT_MATCH_DAY_STAGES_DEFAULT
+
+
+@pytest.mark.parametrize("source", ["db", "env"])
+def test_day_stages_getter_does_not_swallow_a_bad_value(tmp_path, monkeypatch, source):
+    """不正値は getter を通しても既定へ落ちない。落ちる実装だと、設定画面の書き間違いが
+    「なぜか広げても当たらない」という形でしか現れない。"""
+    db = tmp_path / f"stages_bad_{source}.db"
+    _stages_db(db, "14,abc" if source == "db" else None)
+    monkeypatch.setenv("TICTOK_DB_PATH", str(db))
+    if source == "env":
+        monkeypatch.setenv("TICTOK_HIGHLIGHT_MATCH_DAY_STAGES", "14,abc")
+    else:
+        monkeypatch.delenv("TICTOK_HIGHLIGHT_MATCH_DAY_STAGES", raising=False)
+    with pytest.raises(config.ConfigError):
+        config.get_highlight_match_day_stages()
+
+
 # ---------------- layout: stem parsing ----------------
 
 
@@ -519,6 +601,17 @@ def test_every_setting_def_is_structurally_complete():
             assert isinstance(definition["default"], str), key
         else:
             assert definition["min"] <= definition["default"] <= definition["max"], key
+
+
+def test_setting_notes_stay_short_enough_to_read_in_the_list():
+    """noteは一覧の1行。長文は詰め込まず、detail(hoverで出る)へ回す。
+
+    設定は155項目あり、noteが数行に折り返すと1項目で画面の何割かを占める。読ませたい
+    のは「この値を変えると何が起きるか」だけで、既定値の根拠はdetailの側にある。"""
+    for key, definition in SETTING_DEFS.items():
+        assert len(definition["note"]) <= 70, (key, len(definition["note"]))
+        if "detail" in definition:
+            assert len(definition["detail"]) > len(definition["note"]), key
 
 
 def test_setting_options_stay_inside_the_declared_range():
@@ -960,3 +1053,90 @@ def test_caches_stay_bounded_after_clear(fsfacts):
         fsfacts._fs_bulk_cache[f"key-{index}"] = (0.0, {})
 
     assert len(fsfacts._fs_bulk_cache) <= cap
+
+
+# ---------------- backup: 保存先の解決と root直下のfolder ----------------
+
+
+def test_dotenv_key_names_returns_names_without_values(tmp_path, monkeypatch):
+    """退避へ載せるのはkey名だけ。値を載せるとdrive1台の紛失が鍵の漏洩になる。"""
+    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
+    (tmp_path / ".env").write_text(
+        "\n".join(["# comment", "", 'TICTOK_EULER_API_KEY="super-secret"',
+                   "TICTOK_STT_DEVICE=cuda"]),
+        encoding="utf-8",
+    )
+
+    names = config.dotenv_key_names()
+
+    assert names == ["TICTOK_EULER_API_KEY", "TICTOK_STT_DEVICE"]
+    assert not any("super-secret" in name for name in names)
+
+
+def test_dotenv_key_names_without_file_is_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
+
+    assert config.dotenv_key_names() == []
+
+
+def test_shared_root_dirs_are_not_read_as_streamers():
+    """root直下の共有dirは全て ``NON_STREAMER_DIRS`` に載ること。
+
+    落ちると2つ壊れる: 容量の内訳がそのfolderを配信者1人として数え(``record.disk_scan``)、
+    ``scripts/purge_streamers.py`` が監視外の配信者folderとして削除の候補に入れる。実際に
+    ``telop_previews`` が落ちていて両方に当てはまっていた(2026-09-02)。"""
+    from tictok.record import telop_preview
+
+    assert telop_preview.PREVIEW_DIRNAME in layout.NON_STREAMER_DIRS
+    assert layout.CONFIG_DIRNAME in layout.NON_STREAMER_DIRS
+
+
+def _kv_settings_db(path, rows):
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+    conn.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", rows)
+    conn.commit()
+    conn.close()
+    return str(path)
+
+
+def test_secondary_record_dirs_keep_setting_order(tmp_path):
+    """2系統はmirrorなので、設定された順にそのまま返す(片方を選ばない)。"""
+    db = _kv_settings_db(tmp_path / "t.db",
+                         [("record_dir_final", "K:/one"),
+                          ("record_dir_final2", "J:/two")])
+
+    assert config.secondary_record_dirs_from_db(db) == ["K:/one", "J:/two"]
+
+
+def test_secondary_record_dirs_skip_the_unset_slot(tmp_path):
+    """1系統目だけ設定されている現状で、2系統目の空欄が混ざらないこと。"""
+    db = _kv_settings_db(tmp_path / "t.db", [("record_dir_final", "K:/one")])
+
+    assert config.secondary_record_dirs_from_db(db) == ["K:/one"]
+
+
+def test_secondary_record_dirs_without_settings_is_empty(tmp_path, monkeypatch):
+    monkeypatch.delenv("TICTOK_RECORD_DIR_FINAL", raising=False)
+    monkeypatch.delenv("TICTOK_RECORD_DIR_FINAL2", raising=False)
+
+    assert config.secondary_record_dirs_from_db(str(tmp_path / "missing.db")) == []
+
+
+def test_db_backup_dir_prefers_setting_over_env(tmp_path, monkeypatch):
+    """DB本体と退避を別driveへ置けること。設定 > 環境変数 > DBの隣。"""
+    db = _kv_settings_db(tmp_path / "t.db", [("db_backup_dir", "H:/snap")])
+    monkeypatch.setenv("TICTOK_DB_PATH", db)
+    monkeypatch.setenv("TICTOK_DB_BACKUP_DIR", "E:/from_env")
+
+    assert config.get_db_backup_dir() == "H:/snap"
+
+
+def test_db_backup_dir_falls_back_to_the_db_folder(tmp_path, monkeypatch):
+    """設定を持たないDB(test sandbox)の退避が、live の backups/ を汚さないこと。"""
+    db = tmp_path / "sandbox.db"
+    sqlite3.connect(str(db)).close()
+    monkeypatch.setenv("TICTOK_DB_PATH", str(db))
+    monkeypatch.delenv("TICTOK_DB_BACKUP_DIR", raising=False)
+
+    assert config.get_db_backup_dir() == str((tmp_path / "backups").resolve())

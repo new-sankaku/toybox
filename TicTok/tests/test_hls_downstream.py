@@ -13,6 +13,7 @@ mp4は原本ではなく派生物になったので、mp4を消した録画で�
 import json
 import shutil
 import subprocess
+from tests.conftest import popen_via
 import types
 
 import numpy as np
@@ -95,6 +96,7 @@ def capture_exec(monkeypatch, module, captured, stdout=b""):
                                      kill=lambda: None)
 
     monkeypatch.setattr(module.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(subprocess, "Popen", popen_via(fake_exec))
     return captured
 
 
@@ -155,6 +157,7 @@ def patch_sprite(monkeypatch, captured, duration=600.0, found=((160, 120),)):
                                      kill=lambda: None)
 
     monkeypatch.setattr(th.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(subprocess, "Popen", popen_via(fake_exec))
     return captured
 
 

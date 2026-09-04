@@ -57,6 +57,8 @@ const expandedGroups = new Set();
 // 何秒かかったか・どこで落ちたかを辿る先が無かった。既定で畳むのは、一覧の主目的が
 // 「いま何が動いているか」で、全行を段階listで埋めるとその見通しが失われるため。
 const expandedStages = new Set();
+// 実行中のjobは既定で開いているので、「畳んだ」の方を覚える。
+const collapsedStages = new Set();
 let gpu = null;
 // 文字起こしの台帳(kind=stt)をstate別に数えた値。この一覧はlimitで切れるので、件数だけは
 // 全体を名乗れるようにする(GPU現況と一覧の食い違いを説明するために読む)。
@@ -216,7 +218,6 @@ function syncSortHeaders() {
 function bindSortHeaders() {
   document.querySelectorAll("#job-table th[data-sort]").forEach((th) => {
     th.tabIndex = 0;
-    th.title = "この列で並べ替えます（押すたび 降順→昇順→既定 と切り替わります）。";
     th.addEventListener("click", () => applySort(th.dataset.sort));
     th.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
@@ -258,13 +259,24 @@ function stageSeconds(job, stages, index) {
   return Math.max(0, next - start);
 }
 
-// 段階の経過。失敗・中断したjobでは最後の行が「そこで落ちた段階」になる。
+// 段階の経過を、通った順に横へ並べた鎖で出す。縦に積むと段階の数だけ行が伸び、
+// 「どこまで来たか」を読むのに目が縦へ往復する。横に並べれば、通った所と今いる所が
+// 1本の並びとして一度に読める。
+//
+// 段階は「通った所」しか記録に無い(先の段階は起きるまで台帳に載らない)。そのため
+// 鎖は右端が開いたままで、この先いくつ残っているかは描かない ―― 残りの段数を描くと、
+// 記録に無い事を画面が知っているように見える。
+// 段の間の線が流れるのは実行中の1本だけで、これは「今ここが動いている」という意味。
+// 速さは持たせない(段ごとの処理速度をserverが返していないので、速さを付けると
+// 出所の無い数字を動きで語る事になる)。
 function stageList(job) {
   const stages = job.stages || [];
-  const list = document.createElement("ol");
-  list.className = "job-stages";
+  const chain = document.createElement("ol");
+  chain.className = "job-chain";
   stages.forEach((stage, index) => {
     const item = document.createElement("li");
+    const box = document.createElement("span");
+    box.className = "jc-box";
     const label = document.createElement("span");
     label.className = "s-label";
     label.textContent = stage.label;
@@ -282,10 +294,11 @@ function stageList(job) {
       item.className = "s-current";
       time.title = "この段階の途中です（経過時間）。";
     }
-    item.append(label, time);
-    list.appendChild(item);
+    box.append(label, time);
+    item.appendChild(box);
+    chain.appendChild(item);
   });
-  return list;
+  return chain;
 }
 
 function progressCell(job) {
@@ -304,16 +317,22 @@ function progressCell(job) {
   }
   const stages = job.stages || [];
   if (!stages.length) return cell;
-  const open = expandedStages.has(job.job_id);
+  // 実行中のjobだけは初めから開く。「今どこにいるか」は開いてから読む物ではない。
+  // 畳んだ事は別に覚える(実行中を開いた状態が既定なので、開いた印では畳めない)。
+  const open = job.state === "running"
+    ? !collapsedStages.has(job.job_id)
+    : expandedStages.has(job.job_id);
   const toggle = document.createElement("button");
   toggle.className = "btn btn-small job-stage-toggle";
   toggle.textContent = `${open ? "▼" : "▶"} 経過 ${stages.length}段階`;
-  toggle.title = "このjobが通った段階と、段階ごとの所要時間を開閉します。"
-    + "失敗・中断したjobでは、最後の行がそこで止まった段階です。";
   toggle.setAttribute("aria-expanded", open ? "true" : "false");
   toggle.addEventListener("click", () => {
-    if (open) expandedStages.delete(job.job_id);
-    else expandedStages.add(job.job_id);
+    const set = job.state === "running" ? collapsedStages : expandedStages;
+    // 実行中は「畳んだ」を覚え、それ以外は「開いた」を覚える。持つ意味が逆なので、
+    // 開いているかどうかで足し引きの向きも入れ替わる。
+    const remember = job.state === "running" ? open : !open;
+    if (remember) set.add(job.job_id);
+    else set.delete(job.job_id);
     render();
   });
   cell.appendChild(toggle);
@@ -334,7 +353,6 @@ function targetCell(row) {
     const toggle = document.createElement("button");
     toggle.className = "btn btn-small job-toggle";
     toggle.textContent = `${open ? "▼" : "▶"} 明細 ${row.members}件`;
-    toggle.title = "この一括出力に含まれる録画ごとのjobを開閉します。";
     toggle.setAttribute("aria-expanded", open ? "true" : "false");
     toggle.addEventListener("click", () => {
       if (open) expandedGroups.delete(row.job.job_id);
@@ -374,8 +392,6 @@ function elapsedCell(job) {
   const span = document.createElement("span");
   span.className = "job-wait";
   span.textContent = `待機 ${fmtDuration(waiting)}`;
-  span.title = "まだ実行が始まっていないjobです。投入してからの順番待ちの長さで、"
-    + "実行にかかった時間ではありません。";
   return span;
 }
 
@@ -477,16 +493,12 @@ function actionsCell(job) {
     const cancel = document.createElement("button");
     cancel.className = "btn btn-small";
     cancel.textContent = "取り消し";
-    // 実行中を止める相手は種別で違う(焼き込みはffmpeg、文字起こしは復号process)ので、
-    // 特定の道具の名前は出さない。
-    cancel.title = "待機中のjobはqueueから外します。実行中のjobは処理を止めて途中のfileを片付けるため、状態が変わるまで少し時間がかかります。";
     // group行の取り消しは1本ではなくgroupの未終了ぶん全部に効く。配信者まるごとの一括は
     // 数百本になるので、待機中でも件数を言わずに消してはいけない。
     const confirmText = job.total > 1
-      ? `「${job.title}」の未終了のjobをまとめて取り消しますか？（全${fmtNum(job.total)}本）`
-        + (job.state === "running" ? " 実行中の1本は途中までの出力を破棄します。" : "")
+      ? `「${job.title}」の未終了 ${fmtNum(job.total)}本を取り消しますか？`
       : (job.state === "running"
-        ? `実行中の「${job.title}」を取り消しますか？途中までの出力は破棄されます。` : "");
+        ? `実行中の「${job.title}」を取り消しますか？` : "");
     cancel.addEventListener("click", () => sendJobAction("cancel", job, confirmText));
     wrap.appendChild(cancel);
     return wrap;
@@ -498,8 +510,6 @@ function actionsCell(job) {
     const resume = document.createElement("button");
     resume.className = "btn btn-small";
     resume.textContent = "失敗ぶんを再投入";
-    resume.title = "この一括投入のうち、失敗・中断した録画だけをqueueへ戻して続きから処理します。"
-      + "完了済みの録画はやり直しません。";
     resume.addEventListener("click", () => sendJobAction("retry", job, ""));
     wrap.appendChild(resume);
     return wrap;
@@ -507,14 +517,11 @@ function actionsCell(job) {
   const retry = document.createElement("button");
   retry.className = "btn btn-small";
   retry.textContent = "再実行";
-  retry.title = "この録画をもう一度処理します。失敗・中断・取り消しならこの行がそのまま待機へ戻り、"
-    + "完了済みなら新しいjobとして投入し直します。";
   // 完了済みからのretryは同じ行の再開ではなく新規投入で、GPUを長時間占有する。隣の
   // 「取り消し」には確認があるのに、始める側が無警告なのは誤爆のcostが釣り合わない。
   // 失敗・中断・取り消しからの再開は同じ行が待機へ戻るだけなので、従来どおり無確認。
   const retryConfirm = job.state === "completed"
-    ? `完了済みの「${job.title}」をもう一度処理しますか？新しいjobとして投入され、`
-      + "既存の出力は上書きされます。GPUを長時間占有します。"
+    ? `完了済みの「${job.title}」を再実行しますか？出力は上書きされます。`
     : "";
   retry.addEventListener("click", () => sendJobAction("retry", job, retryConfirm,
     { title: "完了済みの再実行", confirmLabel: "再実行する", danger: false }));
@@ -550,8 +557,8 @@ function renderEmptyState(visible) {
   // 状態・種別はserverが台帳全体から絞っているので「該当なし」と言い切ってよい。ただし
   // limitで切れている場合だけは、見えていない行の存在を先に名乗る。
   setListMessage(emptyEl, jobTotal > jobLimit
-    ? `直近${fmtNum(jobLimit)}件の中に条件に一致するjobはありません（台帳の該当は${fmtNum(jobTotal)}件）。`
-    : "条件に一致するjobがありません。filterを変更してください。");
+    ? `直近${fmtNum(jobLimit)}件に該当なし（台帳 ${fmtNum(jobTotal)}件）`
+    : "条件に一致するjobがありません。");
 }
 
 // limitで切れているとき、一覧を「これが全部」と読ませない。
@@ -562,9 +569,7 @@ function renderLimitNote() {
     el.textContent = "";
     return;
   }
-  el.textContent = `※ 直近${fmtNum(jobLimit)}件のみ表示（該当 ${fmtNum(jobTotal)}件）`;
-  el.title = `この条件に一致するjobは台帳に${fmtNum(jobTotal)}件ありますが、新しい${fmtNum(jobLimit)}件だけを読み込んでいます。`
-    + "これより古いjobはこの一覧に出ません。状態・種別で絞ると、古いjobもserver側から拾い直します。";
+  el.textContent = `直近${fmtNum(jobLimit)}件 / 該当 ${fmtNum(jobTotal)}件`;
 }
 
 // 状態filterで失敗・中断を落としているとき、その存在をこの画面が名乗る。navのtabは
@@ -583,9 +588,7 @@ function renderFailedNote() {
   if (!failed) return;
   const link = document.createElement("a");
   link.href = "/jobs?state=failed";
-  link.textContent = `※ 失敗・中断が${fmtNum(failed)}件（この一覧には出ていません）`;
-  link.title = "直近のjob履歴にある失敗・中断の件数です。"
-    + "今の状態filter「実行中・待機中」では表に出ません。押すと「失敗・中断のみ」で開き直します。";
+  link.textContent = `失敗・中断 ${fmtNum(failed)}件`;
   el.appendChild(link);
 }
 
@@ -645,11 +648,11 @@ function renderGpu() {
     return;
   }
   const active = gpu.active && gpu.active.length ? gpu.active.join(" / ") : "なし";
-  const parts = [`GPU: 実行中 ${active}（同時実行上限 ${gpu.limit} / 順番待ち ${gpu.waiting}）`];
+  const parts = [`GPU ${active} / 上限 ${gpu.limit} / 待ち ${gpu.waiting}`];
   const outside = outsideLedger();
   if (outside.length) {
     const names = outside.map(kindLabel).join(" / ");
-    parts.push(`※ ${names}は下の一覧に出ない別queueで実行中です。`);
+    parts.push(`別queue: ${names}`);
   }
   el.textContent = parts.join(" ");
 
@@ -663,8 +666,7 @@ function renderGpu() {
     sttEl.innerHTML = "";
     const link = document.createElement("a");
     link.href = "/jobs?kind=stt";
-    link.textContent = `文字起こしqueue: 実行中 ${running} / 待機中 ${pending}`;
-    link.title = "押すとこの一覧を種別「文字起こし」で絞り込みます（取り消し・再実行もここで行えます）。";
+    link.textContent = `文字起こし 実行中 ${running} / 待機 ${pending}`;
     sttEl.appendChild(link);
   }
 }
@@ -756,8 +758,7 @@ document.getElementById("job-cancel-all").addEventListener("click", async (event
   const kind = document.getElementById("job-flt-kind").value || "all";
   const scope = kind === "all" ? "全種別" : kindLabel(kind);
   const ok = await confirmDialog(
-    `${scope}の待機中・実行中のjobをすべて取り消します。`
-    + "実行中の1本もその場で止まり、そこまでの処理は破棄されます。",
+    `${scope}の待機中・実行中のjobをすべて取り消します。`,
     { title: "未終了jobの取り消し", confirmLabel: "まとめて取り消す", danger: true },
   );
   if (!ok) return;
@@ -768,7 +769,7 @@ document.getElementById("job-cancel-all").addEventListener("click", async (event
     // 0件でも黙らない。「押したのに何も起きない」と「取り消せるものが無かった」は別。
     showToast(result.cancelled
       ? `${fmtNum(result.cancelled)}件のjobを取り消しました。`
-      : "取り消せるjobはありませんでした（待機中・実行中が0件です）。");
+      : "取り消せるjobはありませんでした。");
   } catch (err) {
     showError(err, "jobの一括取り消し");
   } finally {

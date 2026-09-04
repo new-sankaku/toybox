@@ -122,18 +122,10 @@ function safeRender(label, fn, data) {
   }
 }
 
-// 注記は「1行の結論」と「統計の作法・但し書き」に分けて置く。作法まで常時表示すると
-// 17section合計で約3,900字が図と図の間に挟まり、次の図まで届かなくなる。文章は消さず
-// 同じsectionの折りたたみ(<noteId>-more)へ移し、結論だけを図の直下に残す。
-function setNote(noteId, line, detail) {
+// 注記は図の直下の1行だけ。
+function setNote(noteId, line) {
   const el = document.getElementById(noteId);
   if (el) el.innerHTML = line;
-  const more = document.getElementById(`${noteId}-more`);
-  if (!more) return;
-  const body = more.querySelector(".an-help-body");
-  if (body) body.innerHTML = detail || "";
-  more.hidden = !detail;
-  if (!detail) more.open = false;
 }
 
 // 表の描画。数値列は header と値の両方へ .num を付ける(片側だけだと項目と値が縦に
@@ -264,7 +256,7 @@ function renderTimeIndex(data) {
   const hiddenRows = slotsData.length - visible.length;
 
   setNote("an-ti-note",
-    `指標: <b>${metricLabel}</b> ／ 20分×曜日、各配信の平均を1.0とした倍率`
+    `指標: <b>${metricLabel}</b> ／ 20分×曜日・平均=1.0`
     + ` &nbsp;観測 ${fmtNum(data.n_observations)}件 / 配信 ${fmtNum(data.n_sessions)}本`
     + (hiddenRows ? ` &nbsp;<span class="an-muted">観測のない ${fmtNum(hiddenRows)}行は非表示</span>` : "")
     + ` &nbsp;<span class="an-hm-legend"><i>平均より少ない</i>`
@@ -298,15 +290,10 @@ function renderJoinContext(data) {
     `Battle中 ${fmtNum(b.joins)}件 (${rate(b)}件/分) ／ `
     + `コラボ中 ${fmtNum(c.joins)}件 (${rate(c)}件/分) ／ `
     + `平時 ${fmtNum(n.joins)}件 (${rate(n)}件/分)。`;
-  let detail = "";
   if (b.per_min && n.per_min) {
     msg += ` <b>Battle中は平時の ${(b.per_min / n.per_min).toFixed(1)}倍</b>の速さで入室。`;
-    detail += `この倍率は「盛り上がる時間帯にバトルをする」影響を含む参考値です。時間帯を補正したバトル自体の効果は<a href="#an-s3d">③'</a>を参照してください。`;
   }
-  if ((data.n_collabs || 0) === 0) {
-    msg += ` <span class="an-warn">コラボ窓はまだ検出なし（収集は有効・コラボ配信の終了後に集計）。</span>`;
-  }
-  setNote("an-context-note", msg, detail);
+  setNote("an-context-note", msg);
   const labels = ["Battle中", "コラボ中", "平時"];
   const vals = [b.per_min, c.per_min, n.per_min];
   if (contextChart) {
@@ -324,7 +311,7 @@ function renderJoinContext(data) {
       maintainAspectRatio: false,
       animation: false,
       scales: {
-        x: { beginAtZero: true, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "入室速度(件/分)", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
+        x: { beginAtZero: true, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "件/分", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
         y: { ticks: nierTicks(), grid: { display: false } },
       },
       plugins: { legend: { display: false }, tooltip: { ...nierTooltip() } },
@@ -377,8 +364,8 @@ function renderPeri(canvasId, chart, data, hex) {
       animation: false,
       parsing: false,
       scales: {
-        x: { type: "linear", ticks: { ...nierTicks(), callback: (v) => (v > 0 ? "+" : "") + v + "s" }, grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "基準時点からの秒（0=発生の瞬間）", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
-        y: { ticks: nierTicks(), grid: { color: NIER_GRID_COLOR }, title: vAxisTitle("入室数の増減（平常比）") },
+        x: { type: "linear", ticks: { ...nierTicks(), callback: (v) => (v > 0 ? "+" : "") + v + "s" }, grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "秒", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
+        y: { ticks: nierTicks(), grid: { color: NIER_GRID_COLOR }, title: vAxisTitle("入室の増減") },
       },
       plugins: {
         legend: { display: false },
@@ -410,11 +397,9 @@ function renderShare(data) {
   let msg =
     `入室はシェア後ピークで <b>${peakPct(data)}</b>（${data.peak.lag >= 0 ? "+" : ""}${data.peak.lag}s）。`;
   if (data.pre_rise) {
-    msg += ` <span class="an-warn">立ち上がりがシェアより前から始まるため、シェアが原因か結果かは断定できません。</span>`;
+    msg += ` <span class="an-warn">シェアより前から上昇（因果不明）</span>`;
   }
-  setNote("an-share-note", msg,
-    `シェア ${fmtNum(data.n_events)}回を集計（比較用 ${fmtNum(data.n_placebo)}件）。`
-    + `ピーク%は全期間の平均入室レート比です。`);
+  setNote("an-share-note", msg);
 }
 
 // ---- ③' バトル→入室(比較帯つき event-study) ----
@@ -424,8 +409,6 @@ function renderBattle(data) {
     return;
   }
   battleChart = renderPeri("an-battle-chart", battleChart, data, cssToken("--series-4"));
-  const ratio = ((data.ratio_metrics || {}).metrics || {}).joins || {};
-  const ratioPct = ratio.median != null ? `${ratio.median >= 1 ? "+" : ""}${((ratio.median - 1) * 100).toFixed(1)}%` : "—";
   // 有意判定は「開始後(lag>0)」かつ「増加」のbinのみ。開始前の上振れは効果でなく
   // 交絡/先行入室であり、含めると効果ゼロでも「明確な入室増あり」と誤断言してしまう。
   const lags = data.lags || [];
@@ -436,11 +419,9 @@ function renderBattle(data) {
     ? ` 開始後に比較帯を超える明確な入室増あり。`
     : ` <b>比較帯の内側</b>で、入室の明確な増加は見られません。`;
   if (data.pre_rise) {
-    msg += ` <span class="an-warn">立ち上がりがバトル開始より前から始まっており、「盛り上がりが先・バトルが後」の可能性があります。バトルが原因とは断定できません。</span>`;
+    msg += ` <span class="an-warn">バトル開始より前から上昇（因果不明）</span>`;
   }
-  setNote("an-battle-note", msg,
-    `バトル ${fmtNum(data.n_events)}回を集計（比較用 ${fmtNum(data.n_placebo)}件）。ピーク%は全期間の平均入室レート比です。`
-    + ` 参考: 単純な倍率では入室 ${ratioPct} ですが、盛り上がった時間帯の影響を含むため過大です。`);
+  setNote("an-battle-note", msg);
 }
 
 // 各coin帯の棒へ「Y件中X件 rate%」を直接描く。棒端の外側に置き、右端に収まらない場合は
@@ -490,18 +471,12 @@ function renderGloveCrit(data) {
   const overall = data.overall_rate == null ? "—" : `${data.overall_rate.toFixed(1)}%`;
   if (!data.total_gifts) {
     setNote("an-glove-note",
-      `自陣(監視配信者)へ届いたグローブ窓中の判定済ギフトはまだありません`
-      + `（グローブ窓 ${fmtNum(data.n_windows)}回）。`
-      + `この指標は<b>今後のバトル収集から蓄積</b>されます。`);
+      `判定済ギフト 0件（グローブ窓 ${fmtNum(data.n_windows)}回）。`);
     return;
   }
   const oc = data.overall_ci;
   setNote("an-glove-note",
-    `判定済ギフト ${fmtNum(data.total_gifts)}件中 ${fmtNum(data.total_crits)}件が5倍。全体 <b>${overall}</b>${oc ? `（95%CI ${oc[0]}〜${oc[1]}%）` : ""}。`,
-    `グローブ窓 ${fmtNum(data.n_windows)}回を集計。`
-    + (data.undecided ? ` 判定不能(5倍か通常か確定できず)で分母から除外 ${fmtNum(data.undecided)}件。` : "")
-    + (data.unresolved ? ` 単価不明で除外 ${fmtNum(data.unresolved)}件。` : "")
-    + (data.range_out ? ` コイン帯範囲外 ${fmtNum(data.range_out)}件。` : ""));
+    `判定済ギフト ${fmtNum(data.total_gifts)}件中 ${fmtNum(data.total_crits)}件が5倍。全体 <b>${overall}</b>${oc ? `（95%CI ${oc[0]}〜${oc[1]}%）` : ""}。`);
 
   if (gloveChart) {
     gloveChart.data.labels = labels;
@@ -522,8 +497,8 @@ function renderGloveCrit(data) {
       maintainAspectRatio: false,
       animation: false,
       scales: {
-        x: { beginAtZero: true, ticks: { ...nierTicks(), callback: (v) => `${v}%` }, grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "発動率% (5倍が乗った割合)", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
-        y: { type: "category", ticks: nierTicks(), grid: { display: false }, title: vAxisTitle("ギフト単価(coin)") },
+        x: { beginAtZero: true, ticks: { ...nierTicks(), callback: (v) => `${v}%` }, grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "発動率%", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
+        y: { type: "category", ticks: nierTicks(), grid: { display: false }, title: vAxisTitle("🪙/件") },
       },
       plugins: {
         legend: { display: false },
@@ -551,10 +526,7 @@ function renderRetention(data) {
   const lift = o.lift_per_join;
   const liftTxt = lift == null ? "-" : `${lift >= 0 ? "+" : ""}${lift.toFixed(2)}`;
   setNote("an-retention-note",
-    `配信 ${fmtNum(data.n_sessions || 0)}本・入室 ${fmtNum(o.joins)}件。<b>1入室あたり同接 ${liftTxt}人の押し上げ</b>。`,
-    `押し上げは入室のない時間の自然な増減を差し引いた推定です。`
-    + `入室は同一人物の再入室・TikTok側の間引きを含む概算、同接は匿名視聴者を含むため、厳密な定着率ではありません。`
-    + ` 時刻別のグラフは入室の速さ(棒・件/分)と平均同接(線)です。`);
+    `配信 ${fmtNum(data.n_sessions || 0)}本・入室 ${fmtNum(o.joins)}件。<b>1入室あたり同接 ${liftTxt}人の押し上げ</b>。`);
 
   const byHour = data.by_hour || [];
   const labels = byHour.map((h) => String(h.hour));
@@ -583,18 +555,8 @@ function renderRetention(data) {
 }
 
 // ---- ⑫ 滞在時間と入れ替わり(Little則) ----
-// 推定できなかった窓は0や近似値で埋めず、理由別の件数として出す。埋めた値は実測と
-// 見分けが付かず、定常でない区間へLittle則を当てた結果が実測のように読まれてしまう。
-const DWELL_REJECT_LABELS = {
-  unstable: "来場の速さが窓内で動いていた",
-  drift: "同接の水準が窓内で動いていた",
-  cover: "観測に穴が多い",
-  noarr: "来場が少なく速さを出せない",
-  short: "窓の長さが足りない",
-  gap: "観測が大きく途切れた",
-  reset: "累積カウンタが巻き戻った",
-};
-
+// 推定できなかった窓は0や近似値で埋めない。埋めた値は実測と見分けが付かず、定常でない
+// 区間へLittle則を当てた結果が実測のように読まれてしまう。
 function dwellSeconds(v) {
   if (v == null) return "-";
   return v < 90 ? `${v.toFixed(0)}秒` : `${(v / 60).toFixed(1)}分`;
@@ -609,13 +571,13 @@ function renderDwell(data) {
   const kpi = document.getElementById("an-dwell-kpi");
   const cells = o
     ? [
-      ["平均滞在(中央値)", dwellSeconds(o.dwell_seconds)],
-      ["1時間あたりの入れ替わり", `${fmtNum(o.turnover_per_hour)}回`],
-      ["配信ごとのばらつき", `${dwellSeconds(o.p25)}〜${dwellSeconds(o.p75)}`],
-      ["推定できた配信", `${fmtNum(o.n_sessions)}本`],
-      ["推定に使えた窓", `${fmtNum(data.windows || 0)} / ${fmtNum(data.candidates || 0)}`],
+      ["滞在(中央値)", dwellSeconds(o.dwell_seconds)],
+      ["入れ替わり/時", `${fmtNum(o.turnover_per_hour)}回`],
+      ["ばらつき", `${dwellSeconds(o.p25)}〜${dwellSeconds(o.p75)}`],
+      ["推定済", `${fmtNum(o.n_sessions)}本`],
+      ["採用窓", `${fmtNum(data.windows || 0)} / ${fmtNum(data.candidates || 0)}`],
     ]
-    : [["平均滞在(中央値)", "推定不能"]];
+    : [["滞在(中央値)", "推定不能"]];
   kpi.innerHTML = cells
     .map(([k, v]) => `<div class="a-chip"><span class="l">${anEscape(k)}</span><span class="v">${anEscape(v)}</span></div>`)
     .join("");
@@ -647,7 +609,7 @@ function renderDwell(data) {
         animation: false,
         scales: {
           x: { ticks: { ...nierTicks(), autoSkip: false, maxTicksLimit: 24 }, grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "時刻", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
-          y: { beginAtZero: true, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR }, title: vAxisTitle("滞在時間(秒)") },
+          y: { beginAtZero: true, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR }, title: vAxisTitle("秒") },
         },
         plugins: {
           legend: { display: false },
@@ -664,8 +626,7 @@ function renderDwell(data) {
     dwellHourChart.$counts = counts;
   }
 
-  // 単位はheaderに書かず、下の注記へまとめる。headerが長いほど列幅の下限が上がり、
-  // 8列の表が横scrollへ落ちる(.result-table thはnowrap)。
+  // headerが長いほど列幅の下限が上がり、8列の表が横scrollへ落ちる(.result-table thはnowrap)。
   const streamers = data.streamers || [];
   anTable("an-dwell-streamers",
     ["配信者", "配信数", "滞在(中央値)", "平均±95%CI", "入れ替わり/時", "同接", "速い窓", "居座り窓"],
@@ -683,34 +644,10 @@ function renderDwell(data) {
       ];
     }),
     [1, 2, 3, 4, 5, 6, 7],
-    "推定に足りる配信がまだありません。");
+    "—");
 
-  const rejects = data.rejects || {};
-  const rejectText = Object.keys(DWELL_REJECT_LABELS)
-    .filter((k) => rejects[k])
-    .map((k) => `${DWELL_REJECT_LABELS[k]} ${fmtNum(rejects[k])}`)
-    .join(" / ") || "なし";
-  const cross = data.cross_check || {};
-  const eng = data.engagement || {};
-  const line = `対象 ${fmtNum(data.n_sessions || 0)}本のうち<b>推定できたのは ${fmtNum(data.n_estimated || 0)}本</b>。`
-    + ` 表の滞在・平均は秒/分、同接は人、速い窓・居座り窓はその配信者の窓に占める割合です。`;
-  let detail = `5分窓 ${fmtNum(data.candidates || 0)}個中 ${fmtNum(data.windows || 0)}個を採用し、`
-    + `<b>残りは推定不能</b>として除外しました（内訳: ${anEscape(rejectText)}）。`
-    + ` 時刻別のグラフで<b>薄い棒は窓が${fmtNum(minWindows)}個未満</b>の参考値です（深夜帯は観測そのものが少なく、数本の配信で決まります）。`;
-  if (data.crude_dwell_seconds != null) {
-    detail += ` 窓を切らずに配信まるごとで計算した粗い値は ${dwellSeconds(data.crude_dwell_seconds)}（${fmtNum(data.crude_n || 0)}本）で、上の推定と同程度です。`;
-  }
-  if (cross.ratio != null) {
-    // 来場カウンタの正体は非公開のため、独立に届く入室eventとの比を必ず添える。
-    detail += ` 来場カウンタの伸びに対する入室eventの比は中央値 ${cross.ratio.toFixed(2)}（配信間で ${cross.p10.toFixed(2)}〜${cross.p90.toFixed(2)}・${fmtNum(cross.n || 0)}本）。`
-      + `比が配信をまたいで揃っているため到着の代理として扱えますが、入室eventを基準に取り直せば滞在時間は約${((1 / cross.ratio - 1) * 100).toFixed(0)}%長く出ます。絶対秒に幅があるのはこのためです。`;
-  }
-  if (eng.rho != null) {
-    detail += eng.significant
-      ? ` 妥当性check: 滞在が長いと推定された配信ほど視聴時間あたりのコメントも多い傾向（同接を統制した偏順位相関 ρ=${eng.rho.toFixed(2)}・n=${fmtNum(eng.n)}・有意）。`
-      : ` <span class="an-warn">妥当性check: 視聴時間あたりのコメントとの関連は ρ=${eng.rho.toFixed(2)}（n=${fmtNum(eng.n)}）で有意ではありません。滞在時間の推定が別の指標から裏付けられてはいない点に留意してください。</span>`;
-  }
-  setNote("an-dwell-note", line, detail);
+  setNote("an-dwell-note",
+    `対象 ${fmtNum(data.n_sessions || 0)}本のうち<b>推定できたのは ${fmtNum(data.n_estimated || 0)}本</b>。`);
 }
 
 function actSeconds(v) {
@@ -727,14 +664,13 @@ function actPct(v, digits = 1) {
 function renderActivation(data) {
   const wl = (data.series || {}).wl || {};
   const nl = (data.series || {}).nl || {};
-  const cov = data.coverage;
 
   const cells = [
-    ["対象(入室が記録された人)", `${fmtNum(data.n_persons || 0)}人`],
-    ["反応した割合(いいね含む)", actPct(wl.activated_ratio)],
-    ["反応した割合(いいね除く)", actPct(nl.activated_ratio)],
-    ["素通り(いいね含む)", actPct(wl.activated_ratio == null ? null : 1 - wl.activated_ratio)],
-    ["反応した人の中央値", actSeconds(wl.median_latency)],
+    ["対象", `${fmtNum(data.n_persons || 0)}人`],
+    ["反応率(いいね込)", actPct(wl.activated_ratio)],
+    ["反応率(いいね除)", actPct(nl.activated_ratio)],
+    ["素通り", actPct(wl.activated_ratio == null ? null : 1 - wl.activated_ratio)],
+    ["反応の中央値", actSeconds(wl.median_latency)],
   ];
   document.getElementById("an-act-kpi").innerHTML = cells
     .map(([k, v]) => `<div class="a-chip"><span class="l">${anEscape(k)}</span><span class="v">${v}</span></div>`)
@@ -769,13 +705,13 @@ function renderActivation(data) {
             type: "logarithmic",
             ticks: { ...nierTicks(), callback: (v) => actSeconds(v) },
             grid: { color: NIER_GRID_COLOR },
-            title: { display: true, text: "入室してからの経過時間(対数軸)", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } },
+            title: { display: true, text: "経過（対数）", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } },
           },
           y: {
             beginAtZero: true,
             ticks: { ...nierTicks(), callback: (v) => `${v}%` },
             grid: { color: NIER_GRID_COLOR },
-            title: vAxisTitle("反応した割合(累積)"),
+            title: vAxisTitle("累積"),
           },
         },
         plugins: {
@@ -802,33 +738,13 @@ function renderActivation(data) {
       ];
     }),
     [1, 2, 3, 4],
-    "反応を追える入室がまだありません。");
+    "—");
 
-  const line = `対象 ${fmtNum(data.n_sessions || 0)}配信・${fmtNum(data.n_persons || 0)}人。`
+  setNote("an-act-note",
+    `対象 ${fmtNum(data.n_sessions || 0)}配信・${fmtNum(data.n_persons || 0)}人。`
     + (wl.median_latency != null
       ? ` 反応した人の中央値は <b>${actSeconds(wl.median_latency)}</b>（いいねを除くと ${actSeconds(nl.median_latency)}）。`
-      : "")
-    + (cov ? ` <span class="an-warn">この割合は「入室が記録された人」だけの値です。</span>` : "");
-  let detail = `1人が同じ配信に入り直した場合は1人として数えます。`
-    + `信頼区間は配信を単位にした再抽出 ${fmtNum(data.bootstrap || 0)}回から求めています。`;
-  if (wl.median_latency != null) {
-    detail += ` 反応する人は<b>早い段階で反応します</b>。最終的な反応の大半は入室から1分以内に起きています。`
-      + `なお<b>全体の中央値は存在しません</b>（9割が最後まで反応しないため、曲線が50%に届きません）。`;
-  }
-  if (cov) {
-    // 母集団の欠けは、この指標の最大の弱点なので必ず数値で出す。
-    detail += `<br />実際に反応があった ${fmtNum(cov.actors)}人のうち、入室eventが残っているのは`
-      + ` <b>${fmtNum(cov.actors_with_join)}人（${actPct(cov.ratio)}）</b>で、残り ${fmtNum(cov.missing)}人は`
-      + `反応しているのに入室が記録されていません。`;
-    if (cov.gifter_ratio != null) {
-      detail += ` しかも<b>ギフトを送った人に限ると入室が残っているのは ${actPct(cov.gifter_ratio)}</b>`
-        + `（${fmtNum(cov.gifters_with_join)}/${fmtNum(cov.gifters)}人）にとどまり、`
-        + `<b>取りこぼしは熱心な視聴者ほど多い</b>ことが分かります。`;
-    }
-    detail += ` つまり母集団から熱心な層が抜けているため、上の反応率は<b>下限</b>、`
-      + `素通り率は<b>上限</b>として読んでください。視聴者全体の反応率はこれより高いはずです。`;
-  }
-  setNote("an-act-note", line, detail);
+      : ""));
 }
 
 // ---- ⑥ 集中度(Lorenz曲線) ----
@@ -838,10 +754,8 @@ function renderConcentration(data) {
 }
 function renderLorenz(key, canvasId, noteId, topId, unit, c, color) {
   if (!c) return;
-  // Gini(母集団式)の上限は人数nに依存して(n-1)/n。少人数だと1に届かないため上限を併記する。
-  const giniMax = c.n_users > 1 ? (c.n_users - 1) / c.n_users : 0;
   document.getElementById(noteId).innerHTML =
-    `<b>${unit}</b>: 貢献 ${fmtNum(c.n_users)}人（無言の視聴者は含まない） / Gini <b>${c.gini.toFixed(3)}</b>（0=均等、この人数での上限は約${giniMax.toFixed(2)}）`;
+    `<b>${unit}</b>: 貢献 ${fmtNum(c.n_users)}人 / Gini <b>${c.gini.toFixed(3)}</b>`;
   const top = c.top || [];
   document.getElementById(topId).innerHTML = top
     .map((t) => `<div class="a-chip"><span class="l">上位${t.pct}%(${fmtNum(t.users)}人)</span><span class="v">${(t.share * 100).toFixed(1)}%</span></div>`)
@@ -865,7 +779,7 @@ function renderLorenz(key, canvasId, noteId, topId, unit, c, color) {
       maintainAspectRatio: false,
       animation: false,
       scales: {
-        x: { type: "linear", min: 0, max: 1, ticks: { ...nierTicks(), callback: (v) => Math.round(v * 100) + "%" }, grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "人数(下位から累積)", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
+        x: { type: "linear", min: 0, max: 1, ticks: { ...nierTicks(), callback: (v) => Math.round(v * 100) + "%" }, grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "人数（累積）", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
         y: { min: 0, max: 1, ticks: { ...nierTicks(), callback: (v) => Math.round(v * 100) + "%" }, grid: { color: NIER_GRID_COLOR }, title: vAxisTitle(`${unit}累積シェア`) },
       },
       plugins: {
@@ -922,14 +836,8 @@ function organicChartFor(canvasId, existing, bySlot) {
 
 function renderOrganic(data) {
   const t = data.totals || {};
-  const pct = (x) => `${((x || 0) * 100).toFixed(1)}%`;
   setNote("an-organic-note",
-    `全入室 ${fmtNum(t.raw || 0)}件 → ノイズ除去後 <b>${fmtNum(Math.round(t.organic || 0))}件</b>相当（配信 ${fmtNum(data.n_sessions || 0)}本）。`
-    + `<span class="an-hm-legend"><i>生の入室</i><span class="an-hm-bar"></span><i>ノイズ除去後</i></span>`,
-    `重みの内訳: 再訪した人 <b>${pct(data.returning_ratio)}</b> ／ 入室後に反応した人 <b>${pct(data.engaged_ratio)}</b>`
-    + ` ／ シェア直後の流入 <b>${pct(data.share_window_ratio)}</b>`
-    + (data.stick_rate != null ? ` ／ 定着率 <b>${pct(data.stick_rate)}</b>` : "")
-    + `。重みは常に1以下のため、ノイズ除去後の線はどの時間帯も生の線より低く出ます。`);
+    `全入室 ${fmtNum(t.raw || 0)}件 → ノイズ除去後 <b>${fmtNum(Math.round(t.organic || 0))}件</b>相当（配信 ${fmtNum(data.n_sessions || 0)}本）。`);
 
   document.getElementById("an-organic-wd-head").textContent =
     `平日（月〜金）· 入室 ${fmtNum(data.weekday_raw || 0)}件`;
@@ -1077,37 +985,25 @@ function fillEntryTable(id, header, rows, emptyText) {
 
 function renderEntrySource(data) {
   const joins = data.joins || {};
-  const engaged = data.engaged || {};
   const follow = joins.follow || {};
   fillEntryTable(
     "an-entry-src", "流入元",
     (joins.sources || []).map((r) => ({
       label: entrySourceLabel(r.key), title: r.key, count: r.count, ratio: r.ratio,
     })),
-    "流入元が届いた入室はまだありません。",
+    "—",
   );
   fillEntryTable(
     "an-entry-follow", "関係",
     (follow.breakdown || []).map((r) => ({
       label: FOLLOW_LABELS[r.key] || r.key, count: r.count, ratio: r.ratio,
     })),
-    "フォロー関係が届いた入室はまだありません。",
+    "—",
   );
   const cov = (v) => (v == null ? "-" : `${(v * 100).toFixed(1)}%`);
-  const roles = engaged.roles || {};
-  const roleText = (key, label) => {
-    const r = roles[key] || {};
-    if (!r.measured) return "";
-    return ` ${label} ${fmtNum(r.count)}件(${entryRatio(r.ratio)})`;
-  };
   setNote("an-entry-note",
     `入室 ${fmtNum(joins.total || 0)}件中 <b>流入元が届いたのは ${fmtNum(joins.measured || 0)}件（取得率 ${cov(joins.coverage)}）</b>`
-    + `、フォロー関係は ${fmtNum(follow.measured || 0)}件（取得率 ${cov(follow.coverage)}）。`,
-    `配信 ${fmtNum(data.n_sessions || 0)}本のうち ${fmtNum(data.n_sessions_measured || 0)}本で値を取得。`
-    + ` コメント/Gift ${fmtNum(engaged.total || 0)}件中 ${fmtNum(engaged.measured || 0)}件（取得率 ${cov(engaged.coverage)}）で配信者との関係を取得。`
-    + roleText("sub", "うちサブスク") + roleText("mod", "モデレータ") + roleText("gg", "ギフト経験者")
-    + ` 構成比の分母は値が届いた分のみです。届かなかった分（この機能より前に収集した入室）は構成比に含めていません。`
-    + `流入元の表示名はTikTokが送る生値からの推定和訳で、生値は行にマウスを乗せると確認できます。`);
+    + `、フォロー関係は ${fmtNum(follow.measured || 0)}件（取得率 ${cov(follow.coverage)}）。`);
 }
 
 // ---- ⑦ 入室の質(新規/常連) ----
@@ -1118,10 +1014,7 @@ function renderQuality(data) {
   const rets = byHour.map((h) => h.returning);
   const ratio = byHour.map((h) => (h.total > 0 ? h.new_ratio * 100 : null));
   setNote("an-quality-note",
-    `入室 ${fmtNum(data.total)}人中、新規は ${fmtNum(data.new)}人（<b>新規率 ${((data.new_ratio || 0) * 100).toFixed(1)}%</b>・配信 ${fmtNum(data.n_sessions || 0)}本）。`,
-    `人数は時間帯ごとのユニーク人数で、同一時間帯の再入室は1人と数えます。`
-    + (data.excluded ? ` 識別できない入室 ${fmtNum(data.excluded)}件は除外しています。` : "")
-    + ` 「新規」はこの監視で初めて観測した人。監視を始めた直後は以前からの常連も新規に数えられて高めに出ます。他の監視配信者で観測済みの人は常連扱いです。`);
+    `入室 ${fmtNum(data.total)}人中、新規は ${fmtNum(data.new)}人（<b>新規率 ${((data.new_ratio || 0) * 100).toFixed(1)}%</b>・配信 ${fmtNum(data.n_sessions || 0)}本）。`);
 
   if (qualityChart) {
     qualityChart.update(labels, [[news, rets], ratio]);
@@ -1149,8 +1042,8 @@ function renderQuality(data) {
 }
 
 // ---- ⑪ 収集カバレッジ ----
-function cvUnmeasured(text) {
-  return `<span class="an-warn">計測不能</span>${text ? ` <span class="an-muted">${text}</span>` : ""}`;
+function cvUnmeasured() {
+  return `<span class="an-warn">計測不能</span>`;
 }
 
 function cvSeconds(v) {
@@ -1175,39 +1068,30 @@ function renderCoverage(data) {
   const rows = [
     ["切断の記録がある配信",
       `${fmtNum(inst.measured || 0)}本 / ${fmtNum(data.n_sessions || 0)}本`,
-      fmtNum(inst.measured || 0),
-      "切断の記録を始める前の配信は、欠測を測る材料そのものがありません。"],
+      fmtNum(inst.measured || 0)],
     ["収集開始の遅れ（配信開始→接続）",
-      delay.n ? `中央値 ${cvSeconds(delay.median)}（最大 ${cvSeconds(delay.max)}）` : cvUnmeasured("配信そのものの開始時刻が取れた配信がまだありません。"),
-      fmtNum(delay.n || 0),
-      "配信側が返す開始時刻と、実際に接続できた時刻の差。この間の入室・ギフトは記録にありません。"],
+      delay.n ? `中央値 ${cvSeconds(delay.median)}（最大 ${cvSeconds(delay.max)}）` : cvUnmeasured(),
+      fmtNum(delay.n || 0)],
     ["切断でつながっていなかった時間",
-      gaps.n_sessions ? `1配信あたり中央値 ${cvSeconds(gapSec.median)}（配信時間の ${gapRatio.median == null ? "-" : gapRatio.median.toFixed(1)}%・最大 ${cvSeconds(gapSec.max)}）` : cvUnmeasured("切断の記録がある配信がまだありません。"),
-      fmtNum(gaps.n_sessions || 0),
-      `再接続で閉じた切断 ${fmtNum(gaps.count || 0)}回（うち異常切断 ${fmtNum(gaps.unplanned || 0)}回）。切断したまま配信が終わった回（${fmtNum(gaps.open_end || 0)}回）は欠測に数えていません。`],
+      gaps.n_sessions ? `1配信あたり中央値 ${cvSeconds(gapSec.median)}（配信時間の ${gapRatio.median == null ? "-" : gapRatio.median.toFixed(1)}%・最大 ${cvSeconds(gapSec.max)}）` : cvUnmeasured(),
+      fmtNum(gaps.n_sessions || 0)],
     ["同接の取得間隔",
-      sMed.n ? `中央値 ${cvSeconds(sMed.median)}・p95 ${cvSeconds(sP95.median)}（最悪 ${cvSeconds(sampling.worst)}）` : cvUnmeasured("同接のサンプルが足りません。"),
-      fmtNum(sampling.n_sessions || 0),
-      "配信ごとに求めた間隔の中央値／p95を、さらに配信間で中央値にした値です。"],
+      sMed.n ? `中央値 ${cvSeconds(sMed.median)}・p95 ${cvSeconds(sP95.median)}（最悪 ${cvSeconds(sampling.worst)}）` : cvUnmeasured(),
+      fmtNum(sampling.n_sessions || 0)],
     ["録画できていた割合",
-      recRatio.n ? `中央値 ${recRatio.median == null ? "-" : recRatio.median.toFixed(1)}%（全区間録画 ${fmtNum(rec.full || 0)}本・録画なし ${fmtNum(rec.none || 0)}本）` : cvUnmeasured("尺の確定した録画がまだありません。"),
-      fmtNum(rec.n_sessions || 0),
-      rec.unmeasured_sessions ? `録画の尺が確定していない配信 ${fmtNum(rec.unmeasured_sessions)}本は対象外です。` : ""],
+      recRatio.n ? `中央値 ${recRatio.median == null ? "-" : recRatio.median.toFixed(1)}%（全区間録画 ${fmtNum(rec.full || 0)}本・録画なし ${fmtNum(rec.none || 0)}本）` : cvUnmeasured(),
+      fmtNum(rec.n_sessions || 0)],
     ["文字起こし済みの録画",
-      stt.recordings ? `${fmtNum(stt.transcribed || 0)}本 / ${fmtNum(stt.recordings)}本（${stt.ratio == null ? "-" : (stt.ratio * 100).toFixed(1)}%）` : cvUnmeasured("完了した録画がまだありません。"),
-      fmtNum(stt.recordings || 0),
-      "完了した録画のみが対象です。"],
+      stt.recordings ? `${fmtNum(stt.transcribed || 0)}本 / ${fmtNum(stt.recordings)}本（${stt.ratio == null ? "-" : (stt.ratio * 100).toFixed(1)}%）` : cvUnmeasured(),
+      fmtNum(stt.recordings || 0)],
   ];
-  anTable("an-coverage", ["指標", "値", "対象(本)", "注記"],
-    rows.map(([label, value, n, note]) => [
-      anEscape(label), value, n, { html: anEscape(note || ""), cls: "an-muted" },
-    ]),
+  anTable("an-coverage", ["指標", "値", "対象(本)"],
+    rows.map(([label, value, n]) => [anEscape(label), value, n]),
     [2],
-    "集計できた配信がまだありません。");
+    "—");
   setNote("an-coverage-note",
     `対象 ${fmtNum(data.n_sessions || 0)}本（終了済み ${fmtNum(data.n_sessions_ended || 0)}本）。`
-    + ` <b>切断の欠測を測れるのは ${fmtNum(inst.measured || 0)}本のみ</b>で、残り ${fmtNum(inst.unmeasured || 0)}本は計測不能です。`,
-    `計測不能の配信を「欠測0秒」として混ぜていないため、この表の欠測時間は全体の下限ではなく、測れた配信だけの実測値です。`);
+    + ` <b>切断の欠測を測れるのは ${fmtNum(inst.measured || 0)}本のみ</b>で、残り ${fmtNum(inst.unmeasured || 0)}本は計測不能です。`);
 }
 
 // ---- ロード ----
@@ -1266,7 +1150,7 @@ function requestSection(section, q, signal) {
       if (sectionGen.get(section.key) !== gen) return true;
       if (safeRender(section.key, section.render, data)) return true;
       if (section.note) {
-        setNote(section.note, `<span class="an-warn">描画に失敗しました。グラフは前回の表示が残っている場合があります。</span>`);
+        setNote(section.note, `<span class="an-warn">描画に失敗（表示は前回のまま）</span>`);
       }
       return false;
     })
@@ -1278,7 +1162,7 @@ function requestSection(section, q, signal) {
       // 失敗したpanelは前回描画が残る(stale)ため、note側で明示する。期間切替後に
       // 前の期間のグラフを今の期間の結果と誤認させない。
       if (section.note) {
-        setNote(section.note, `<span class="an-warn">取得に失敗しました。グラフは前回の表示が残っている場合があります。</span>`);
+        setNote(section.note, `<span class="an-warn">取得に失敗（表示は前回のまま）</span>`);
       }
       return false;
     });
@@ -1306,9 +1190,7 @@ function loadAll() {
       // 「取得失敗 N件」は画面上端の小さなspanで、押した後にそこへ視線を戻す理由がない。
       // 前の期間のグラフが残ったまま新しい期間の結果として読まれるので、1度だけ名乗る。
       if (done === total && failed) {
-        showToast(
-          `${fmtNum(failed)}件のsectionを更新できませんでした。図は前回の表示が残っている場合があります（該当sectionの注記に印があります）。`,
-          "error", { title: "全体解析の更新" });
+        showToast(`${fmtNum(failed)}件のsectionを更新できません`, "error", { title: "全体解析の更新" });
       }
     });
   });
@@ -1325,9 +1207,8 @@ function loadTimeIndex() {
 // (手書きの目次は追加・削除で必ずずれる)。
 const HEADING_CONTROL_TAGS = /^(SELECT|OPTION|INPUT|BUTTON|LABEL)$/;
 
-// 見出しの文字。<select>を含むとoption文字列(「入室」「コメント」…)まで連結され、
-// chipのtitleが選択肢の羅列になる。form controlだけを外し、見出しの一部であるspan
-// (①の指標名)は残す。
+// 見出しの文字。<select>を含むとoption文字列(「入室」「コメント」…)まで連結されるため、
+// form controlだけを外し、見出しの一部であるspan(①の指標名)は残す。
 function headingText(heading) {
   return Array.from(heading.childNodes)
     .filter((node) => node.nodeType === 3
@@ -1351,26 +1232,9 @@ function buildSectionIndex() {
     const link = document.createElement("a");
     link.href = `#${section.id}`;
     link.textContent = mark;
-    link.title = text.replace(/^\s*■\s*/, "").trim();
     nav.appendChild(link);
   });
 }
-
-// 但し書き(#an-caveats)は畳んである。本文のlinkで飛ぶと閉じたsummary 1行に着地して
-// 「何も無い」ように見えるため、飛ぶ前に開く。
-function openDetailsTarget(hash) {
-  if (!hash || hash.length < 2) return;
-  const target = document.getElementById(hash.slice(1));
-  if (target && target.tagName === "DETAILS") target.open = true;
-}
-
-document.addEventListener("click", (event) => {
-  const el = event.target;
-  const link = el && el.closest ? el.closest("a[href^='#']") : null;
-  if (!link) return;
-  openDetailsTarget(link.getAttribute("href"));
-});
-window.addEventListener("hashchange", () => openDetailsTarget(location.hash));
 
 // ---- 期間・表示controlの永続化 ----
 // 期間はURL(?days=)とlocalStorageの両方に残す。URLは貼ったlinkが同じ期間で開くため、
@@ -1409,7 +1273,6 @@ bindPref(elPeriod, PERIOD_KEY, () => {
 });
 initPeriod();
 buildSectionIndex();
-openDetailsTarget(location.hash);
 
 // ①の指標はrequestのparameter(SECTIONS.extra)なので、loadAll()より前に戻し終える。
 bindPref(elTiMetric, TI_METRIC_KEY, loadTimeIndex);

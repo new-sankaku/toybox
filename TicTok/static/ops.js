@@ -13,7 +13,6 @@ const SEVERITY_LABELS = {
 };
 
 let nextPage = null;
-let detailMaxChars = 0;
 // 表に出ている一番新しい行と、それを描いたときの条件。新着の数え合わせに使う。
 // 0件の一覧でもidはnullのまま条件だけ控える(「まだ読んでいない」と「読んだが0件だった」は
 // 別物で、後者では次に入った記録がすべて新着になる)。
@@ -76,7 +75,6 @@ function targetNode(event) {
       const link = document.createElement("a");
       link.href = `/history?session=${event.session_id}`;
       link.textContent = label;
-      link.title = "履歴画面でこのsessionの詳細を開きます。";
       parts.push(link);
     } else {
       parts.push(document.createTextNode(`${label}（削除済み）`));
@@ -131,9 +129,7 @@ function detailNode(event) {
   if (event.detail && event.detail.truncated_chars) {
     const note = document.createElement("div");
     note.className = "chart-note";
-    note.textContent =
-      `詳細は保存時に ${fmtNum(detailMaxChars)} 文字で切られています（残り ${fmtNum(event.detail.truncated_chars)} 文字）。`
-      + ` 全文は logs folder のtext log（ops_id: ${event.ops_id}）を参照してください。`;
+    note.textContent = `切り詰め +${fmtNum(event.detail.truncated_chars)} 文字`;
     wrap.appendChild(note);
   }
   const ids = document.createElement("div");
@@ -147,8 +143,7 @@ function detailNode(event) {
     const only = document.createElement("button");
     only.type = "button";
     only.className = "btn btn-compact";
-    only.textContent = "このjobの記録だけ表示";
-    only.title = "job IDの条件にこのIDを入れて、この画面で絞り込みます。";
+    only.textContent = "このjobだけ";
     only.addEventListener("click", () => {
       document.getElementById("flt-job").value = event.job_id;
       loadEvents(false);
@@ -157,7 +152,6 @@ function detailNode(event) {
     const link = document.createElement("a");
     link.href = `/jobs?job=${encodeURIComponent(event.job_id)}`;
     link.textContent = "Job画面で開く";
-    link.title = "このjobの進捗・結果をJob画面で見ます。";
     ids.append(link);
   }
   wrap.appendChild(ids);
@@ -237,7 +231,7 @@ async function loadEvents(append) {
     if (append) {
       // 既に読めている行は残っているので、失敗しているのは続きの取得だけ。
       // 「さらに読み込む」は再試行の導線として残す。
-      statusEl.textContent = "続きを取得できませんでした（この先に記録が無いという意味ではありません）。";
+      statusEl.textContent = "続きを取得できませんでした。";
       statusEl.title = errorDetailText(err);
     } else {
       // 表示中の行は前のfilterの結果。今のfilterのものとして残すと、取得できていない
@@ -250,7 +244,6 @@ async function loadEvents(append) {
     }
     return;
   }
-  detailMaxChars = data.detail_max_chars || 0;
   // 一覧のkindは保持期間ぶん(候補より広い)あり得るので、こちらの表も取り込んでおく。
   if (data.kind_labels) kindLabels = data.kind_labels;
   nextPage = data.next;
@@ -333,11 +326,11 @@ async function loadSummary() {
     // この画面を開くたびに同じrequestが2本並ぶ。
     const data = await fetchOpsSummary();
     const counts = data.counts || {};
-    el.textContent = `直近${Math.round(data.window_hours)}時間: error ${fmtNum(counts.error)}`
-      + ` / warning ${fmtNum(counts.warning)} / info ${fmtNum(counts.info)}`;
+    el.textContent = `${Math.round(data.window_hours)}h error ${fmtNum(counts.error)}`
+      + ` / warn ${fmtNum(counts.warning)} / info ${fmtNum(counts.info)}`;
     el.removeAttribute("title");
   } catch (err) {
-    el.textContent = "件数を取得できませんでした（0件という意味ではありません）。";
+    el.textContent = "件数を取得できませんでした。";
     el.title = errorDetailText(err);
   }
 }
@@ -426,13 +419,13 @@ async function loadPerf() {
   }
   const lag = data.loop_lag || {};
   const parts = [
-    `計測開始から ${fmtDuration(data.window_seconds)}`,
+    `計測 ${fmtDuration(data.window_seconds)}`,
     `${fmtNum(data.request_count)} request / 合計 ${fmtMs(data.total_ms)}`,
     // loopの遅れはrouteに紐付かない。1本のcoroutineがloopを握ると全画面が同時に遅く
     // なるので、route表とは別に出す。
-    `event loopの最大停止 ${fmtMs(lag.max_ms)}（警告 ${fmtNum(lag.warned)}回）`,
+    `loop停止 max ${fmtMs(lag.max_ms)} / 警告 ${fmtNum(lag.warned)}`,
   ];
-  if (!data.enabled) parts.unshift("計測は無効です（TICTOK_PERF_ENABLED）");
+  if (!data.enabled) parts.unshift("計測は無効");
   if ((data.inflight || []).length) parts.push(`処理中 ${fmtNum(data.inflight.length)}件`);
   note.textContent = parts.join(" / ");
   // renderTableRowsは表示/非表示しか触らないので、loading文言のまま0件になるのを戻す。

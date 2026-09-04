@@ -30,6 +30,7 @@ lockは5本。所有者はすべてこのclassで、取得順は self._lock -> s
 import itertools
 import logging
 import os
+import queue
 import sqlite3
 import threading
 import time
@@ -37,7 +38,7 @@ from pathlib import Path
 from typing import Optional
 
 from tictok import battle_migration, glove_migration, timemap_migration
-from tictok.core import perf
+from tictok.core import dbmaint, perf
 from tictok.core.config import get_db_read_pool_size, get_journal_enabled, get_log_dir
 
 from tictok.store._common import (
@@ -103,6 +104,7 @@ from tictok.store.transcripts import TranscriptsMixin
 from tictok.store.media_jobs import MediaJobsMixin
 from tictok.store.settings_store import SettingsMixin
 from tictok.store.clip_presets import ClipPresetsMixin
+from tictok.store.highlights import HighlightsMixin
 
 # 分割前の tictok.storage が公開していた名前。importしている側(server / collector /
 # core.notify / test)を書き換えずに済ませるため、ここから再exportし続ける。
@@ -172,6 +174,7 @@ class Storage(
     MediaJobsMixin,
     SettingsMixin,
     ClipPresetsMixin,
+    HighlightsMixin,
 ):
     """単一のDB窓口。分割の理由・lockの所有と取得順はmodule docstringを参照。"""
 
@@ -185,6 +188,10 @@ class Storage(
         # request contextの外(collector・録画・起動sweep)では計測は素通りする。
         self._conn = sqlite3.connect(db_path, check_same_thread=False,
                                      factory=perf.TimedConnection)
+        # 表・索引を落とすSQLを既定で拒否する。外部process(sqlite3.exe等)からの誤操作は
+        # これでは防げない —— 守れるのはこのcodebase自身のbugとmigrationの誤りだけである。
+        # 落としてよい区間は ``dbmaint.allow_schema_drops()`` で明示的に開く(下の _migrate)。
+        dbmaint.attach_drop_guard(self._conn)
         self._conn.perf_phase = "db.write_conn"
         self._conn.row_factory = sqlite3.Row
         self._lock = perf.TimedLock("db.write_wait")
@@ -222,6 +229,12 @@ class Storage(
         self._journal_lock = threading.Lock()
         self._journal_fh = None
         self._journal_day = None
+        # journalの追記は専用thread(_journal_loop)。呼び出し側は行をqueueへ渡すだけなので、
+        # diskが応答しない間もevent loopは止まらない(理由と実測は ingest._journal_append)。
+        self._journal_queue: "queue.SimpleQueue" = queue.SimpleQueue()
+        self._journal_pending = 0
+        self._journal_idle = threading.Condition()
+        self._journal_thread: Optional[threading.Thread] = None
         # ops_events(Layer2)。ops_idはprocess起動ごとのtokenと連番で組み、再起動をまたいでも
         # 衝突しない。DB書き込みが失敗してもLayer1のlogにはこのidが載るので、行が無いこと自体を
         # 後から追跡できる。itertools.countの__next__はCPythonでatomicなので追加lockは不要。
@@ -307,6 +320,11 @@ class Storage(
             target=self._writer_loop, name="storage-writer", daemon=True
         )
         self._writer.start()
+        if self._journal_enabled:
+            self._journal_thread = threading.Thread(
+                target=self._journal_loop, name="storage-journal", daemon=True
+            )
+            self._journal_thread.start()
         _init_ms = round((time.perf_counter() - _init_started) * 1000.0, 1)
         logger.info(
             "storageを初期化しました（db=%s, %.1fs）", db_path, _init_ms / 1000.0,
@@ -370,6 +388,7 @@ class Storage(
                 extra={"event": "storage.final_drain_failed",
                        "ctx": self._sqlite_error_ctx(exc)},
             )
+        self._stop_journal_thread()
         self._close_journal()
         # ops_eventsの書き込み失敗は本流を止めないので、ここで累計を必ず1行出す。閾値を設けて
         # 「少なければ黙る」設計にすると、失敗が数件で終わった時に1行も残らず穴になる。

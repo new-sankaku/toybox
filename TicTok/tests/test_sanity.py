@@ -31,7 +31,9 @@ def test_add_event_needs_flush_before_it_is_readable(
     session_id = make_session(unique_id="alice")
     tmp_db.add_event(session_id, gift_builder(gift_name="Galaxy", diamonds=1000))
 
-    # 耐久journalは即書きだが、本番ではなくsandboxへ落ちていること。
+    # 耐久journalは専用threadが書く(event loopをdiskで止めないため)。書き切りを待ってから、
+    # 本番ではなくsandboxへ落ちていることを確かめる。
+    assert tmp_db.wait_journal_idle(), "journal thread did not drain"
     assert list((env_guard / "journal").glob("*")), "journal was not redirected into the sandbox"
 
     tmp_db.flush()

@@ -143,13 +143,13 @@ describe("videos.js の無言早送り", () => {
       plan([{ start: 10, end: 20 }]);
       win.renderPaceNote();
       expect(doc.getElementById("pace-note").textContent).toContain("6x");
-      expect(doc.getElementById("pace-note").textContent).toContain("倍速");
+      expect(doc.getElementById("pace-note").textContent).toContain("倍");
     });
 
     it("声の区間が取れなければ、0件ではなく理由を名乗る", () => {
       plan([], { speech_spans: 0 });
       win.renderPaceNote();
-      expect(doc.getElementById("pace-note").textContent).toContain("声の区間");
+      expect(doc.getElementById("pace-note").textContent).toContain("声なし");
     });
 
     it("計画が届く前は解析中だと名乗る(初回は音声を読むので待つ)", () => {
@@ -162,7 +162,7 @@ describe("videos.js の無言早送り", () => {
     it("反応が未解析なら、そう名乗る(速く流れる笑い・叫びがある)", () => {
       plan([{ start: 10, end: 20 }], { has_reactions: false });
       win.renderPaceNote();
-      expect(doc.getElementById("pace-note").textContent).toContain("反応は未解析");
+      expect(doc.getElementById("pace-note").textContent).toContain("反応未解析");
     });
   });
 });

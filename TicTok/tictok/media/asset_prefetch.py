@@ -25,7 +25,7 @@ import logging
 import time
 from typing import Optional
 
-from tictok.media.avatar_pool import avatar_key
+from tictok.media.avatar_pool import _avatar_identity, _url_res_hint, avatar_key
 
 logger = logging.getLogger("tictok.asset_prefetch")
 
@@ -41,6 +41,8 @@ _RETRY_DELAY_SECONDS = 1.0
 
 # queue溢れの報告間隔(秒)。溢れるときは毎eventで溢れるので、1件1行だとlogが埋まる。
 _DROP_REPORT_INTERVAL_SECONDS = 60.0
+# 「取得済み」として覚えるassetの上限(件)。1件は数十byteなので5万件でも数MBに収まる。
+_KNOWN_LIMIT = 50000
 
 
 class _RateGate:
@@ -91,6 +93,12 @@ class AssetPrefetcher:
         self._pending: set = set()
         self._counts = {"submitted": 0, "done": 0, "failed": 0, "dropped": 0, "deduped": 0}
         self._last_drop_report = 0.0
+        # 「もうpoolに在る」と確かめ済みのasset。(kind, key) -> avatarは(識別子, 解像度)、
+        # 他はTrue。submit側の「既にcache済みか」の判定はこれだけを見て、diskには触らない。
+        # 以前はeventごとにpoolのstat(+meta読み)をevent loop上で行っていて、diskが応答
+        # しない間(Windows Updateの復元ポイント作成)はcommentの処理でloopが止まった。
+        # 初見のassetはqueueへ積み、worker側(thread)でdiskを見て、結果をここへ覚える。
+        self._known: dict = {}
 
     def start(self) -> None:
         """workerを起こす。event loopの中から呼ぶこと(serverのlifespan)。"""
@@ -134,7 +142,7 @@ class AssetPrefetcher:
         if self._gift_icons is None or not gift_id or not url:
             return
         gift_id = int(gift_id)
-        if self._gift_icons.has(gift_id):
+        if self._known.get((KIND_GIFT_ICON, str(gift_id))):
             return
         self._submit(KIND_GIFT_ICON, str(gift_id), gift_id, url)
 
@@ -145,11 +153,15 @@ class AssetPrefetcher:
         小さなmeta読みだけで、同一userの再送・再署名URLをここで落とすためhot pathでも安い。"""
         if self._avatar_pool is None or not user_key or not url:
             return
-        if not self._avatar_pool.needs_update(user_key, url):
-            return
         # dedup keyは保存先file名(avatar_key)に揃える。unique_idとnicknameが混ざって
         # 届いても、同じ人物のavatarが二重に積まれない。
-        self._submit(KIND_AVATAR, avatar_key(user_key), user_key, url)
+        key = avatar_key(user_key)
+        known = self._known.get((KIND_AVATAR, key))
+        # 同じavatar(識別子が同じ)で、覚えている解像度以下の再送・再署名URLはdiskを見ずに
+        # 落とす。別のavatarや高解像度版はpool側の判定(needs_update)へ回す。
+        if known is not None and known[0] == _avatar_identity(url) and _url_res_hint(url) <= known[1]:
+            return
+        self._submit(KIND_AVATAR, key, user_key, url)
 
     def submit_emotes(self, raw) -> None:
         """commentの ``emotes`` payload(JSON文字列またはlist)からemote画像を積む。"""
@@ -173,7 +185,11 @@ class AssetPrefetcher:
             url = emote.get("url") or ""
             # 既にdiskに在るもの、file名に使えないid、許可外hostのURLはqueueに載せない。
             # 後ろ2つは何度試しても結果が変わらないので、slotも再試行も使わせない。
-            if not self._emote_pool.should_fetch(emote_id, url):
+            # idとURLの検証(diskを見ない)はここで、cacheの有無(stat)はworker側の
+            # persist -> should_fetch が見る。ここで見るのは覚えている「取得済み」だけ。
+            if not self._emote_pool.is_fetchable(emote_id, url):
+                continue
+            if self._known.get((KIND_EMOTE, emote_id)):
                 continue
             self._submit(KIND_EMOTE, emote_id, emote_id, url)
 
@@ -191,6 +207,21 @@ class AssetPrefetcher:
             return
         self._pending.add(dedup_key)
         self._counts["submitted"] += 1
+
+    def _remember(self, kind: str, target, url: str) -> None:
+        """poolに在ると確かめたassetを覚える(submit側の判定用)。上限を超えたら全部忘れる —
+        忘れても次の投入がworkerで確かめ直すだけで、取り逃しは起きない。"""
+        if len(self._known) >= _KNOWN_LIMIT:
+            self._known.clear()
+        if kind == KIND_AVATAR:
+            key = (KIND_AVATAR, avatar_key(target))
+            res = _url_res_hint(url)
+            previous = self._known.get(key)
+            if previous is not None and previous[0] == _avatar_identity(url):
+                res = max(res, previous[1])
+            self._known[key] = (_avatar_identity(url), res)
+        else:
+            self._known[(kind, str(target))] = True
 
     def _report_drop(self, kind: str) -> None:
         """溢れの報告。溢れる状況では毎eventで起きるので間隔を空けて出す。"""
@@ -241,6 +272,7 @@ class AssetPrefetcher:
                 ok = await self._emote_pool.persist(target, url)
             if ok:
                 self._counts["done"] += 1
+                self._remember(kind, target, url)
                 return
             if attempt < attempts:
                 await asyncio.sleep(_RETRY_DELAY_SECONDS * attempt)

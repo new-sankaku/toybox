@@ -20,12 +20,12 @@
     </div>
 
     <div class="x-toolbar">
-      <input id="as-q" type="text" aria-label="名前 / ID で絞込" placeholder="🔎 名前 / ID で絞込" autocomplete="off" />
+      <input id="as-q" type="text" aria-label="絞込" placeholder="🔎 名前 / ID で絞込" autocomplete="off" />
       <!-- 配信者の絞込を受けるかどうかも種別ごとに違い、それを名乗るのはserver(summaryの
            filters)。受けない種別へ渡すとserverは400を返すので、受けない種別ではcontrolごと
            伏せて渡さない。選択肢はsummaryのstreamersから作る。 -->
       <label class="x-field hidden" id="as-streamer-field"><span>配信者</span>
-        <select id="as-streamer" title="選んだ配信者に紐づく素材だけを出します。件数・容量の集計(帯の右)は種別の全体で、この絞込は反映されません。"></select>
+        <select id="as-streamer"></select>
       </label>
       <!-- 選べる並び順は種別ごとに違い、その一覧はserverが持つ(summaryのsorts)。
            画面が対応表を持つと、種別が増えた時に黙って古いままになる。 -->
@@ -33,27 +33,27 @@
         <select id="as-sort"></select>
       </label>
       <label class="x-field hidden" id="as-order-field"><span>向き</span>
-        <select id="as-order" title="名前はA→Zが昇順、容量・日時・数値は小さい/古い/少ない方が昇順です。">
+        <select id="as-order">
           <option value="desc">降順</option>
           <option value="asc">昇順</option>
         </select>
       </label>
       <label class="x-field"><span>表示</span>
         <select id="as-limit">
-          <option value="100">100件ずつ</option>
-          <option value="200">200件ずつ</option>
-          <option value="500">500件ずつ</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+          <option value="500">500</option>
         </select>
       </label>
-      <button id="as-select-all" class="btn btn-small" type="button">表示中をすべて選択</button>
-      <button id="as-clear" class="btn btn-small" type="button">選択を解除</button>
+      <button id="as-select-all" class="btn btn-small" type="button">全選択</button>
+      <button id="as-clear" class="btn btn-small" type="button">解除</button>
       <button id="as-zip-selected" class="btn btn-small" type="button">選択をZIP</button>
       <!-- 検索での絞込は載らない(発券は種別とidしか受けない)。押した後に出る確認へ、
            serverが数えた件数と容量、絞込が効かないことを名乗る。 -->
-      <button id="as-zip-all" class="btn btn-small" type="button">この種別を全件ZIP</button>
+      <button id="as-zip-all" class="btn btn-small" type="button">全件ZIP</button>
       <!-- 件数・容量はDBのsnapshotで、この画面を開いても数え直さない。数え直すのはこの
            button だけ(容量内訳の「容量を再scanする」と同じ扱い)。 -->
-      <button id="as-rescan" class="btn btn-small" type="button" title="この種別の素材を数え直し、件数と容量の集計を取り直します。">この種別を再集計</button>
+      <button id="as-rescan" class="btn btn-small" type="button">再集計</button>
       <span id="as-busy" class="form-message" aria-live="polite"></span>
       <span class="sp"></span>
       <span id="as-summary" class="chart-note"></span>
@@ -63,15 +63,15 @@
       <aside class="as-kinds" id="as-kinds" aria-label="素材の種別"></aside>
 
       <div class="a-card a-card-fill as-main">
-        <h3><span id="as-title">素材</span> <span class="sub" id="as-scope">収集時にdiskへ溜めた画像だけを出します（TikTokへ取りに行くことはしません）。件数と容量は集計時点の値で、各行の「未取得」は今この場で確かめた結果です。</span></h3>
+        <h3><span id="as-title">素材</span></h3>
         <div class="body">
           <!-- 語なしで開いた大きな種別の案内。一覧の上に出す — 下へ置くと、先頭100枚を
                scrollし切った人にしか届かない。文言が入るまで行を作らない(:empty)。 -->
           <div id="as-note" class="as-note"></div>
           <div class="as-grid" id="as-grid"></div>
-          <div id="as-empty" class="feed-empty" data-label="素材一覧">素材はありません。</div>
+          <div id="as-empty" class="feed-empty" data-label="素材一覧">素材なし</div>
           <div class="as-more">
-            <button id="as-more" class="btn btn-small hidden" type="button">さらに読み込む</button>
+            <button id="as-more" class="btn btn-small hidden" type="button">続き</button>
             <span id="as-more-note" class="chart-note"></span>
           </div>
         </div>

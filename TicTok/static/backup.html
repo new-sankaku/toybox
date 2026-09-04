@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok LIVE Monitor — バックアップ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="app-dashboard">
+
+  <div class="app-shell">
+    <h1 class="visually-hidden">バックアップ</h1>
+    <div class="a-topbar">
+      <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+      <nav class="a-nav"></nav>
+      <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status" aria-live="polite">Server接続中…</span></div>
+    </div>
+
+    <div class="a-content">
+
+      <div class="bk-alarm" id="bk-alarm" role="status" aria-live="assertive" hidden></div>
+
+      <div class="a-card a-settingscard">
+        <h3>バックアップ <span class="sub" id="bk-stamp"></span></h3>
+        <div class="body">
+          <div class="bk-hero">
+            <div class="bk-shield" id="bk-shield" role="img" aria-live="polite"></div>
+            <div class="bk-flow">
+              <div class="bk-heads" aria-hidden="true">
+                <span>元</span><span></span><span>保存先</span>
+              </div>
+              <div class="bk-tree" id="bk-map" aria-live="polite"></div>
+            </div>
+          </div>
+          <div id="bk-empty" class="feed-empty" data-label="バックアップ">読み込み中…</div>
+        </div>
+      </div>
+
+      <div class="bk-cols">
+
+        <div class="a-card a-settingscard">
+          <h3>DB世代 <span class="sub" id="bk-gen-stamp"></span></h3>
+          <div class="body">
+            <div class="bk-gen" id="bk-gen"></div>
+            <div class="bk-genlist" id="bk-genlist"></div>
+          </div>
+        </div>
+
+        <div class="a-card a-settingscard">
+          <h3>ミラー <span class="sub" id="bk-mirror-stamp"></span></h3>
+          <div class="body">
+            <div class="bk-mirror" id="bk-mirror"></div>
+            <div class="note-actions">
+              <button id="bk-compare" class="btn btn-compact">照合</button>
+              <span id="bk-compare-status" class="bk-note"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="a-card a-settingscard">
+          <h3>DB保護</h3>
+          <div class="body">
+            <div class="bk-guards" id="bk-guards"></div>
+            <div class="note-actions">
+              <button id="bk-unfreeze" class="btn btn-primary" hidden>自動削除を再開</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/backup.js"></script>
+</body>
+</html>

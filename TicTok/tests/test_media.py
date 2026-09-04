@@ -572,6 +572,9 @@ async def test_capture_still_fails_when_no_frame_was_written(monkeypatch, make_r
 _CLIP_GOP = 2.0
 
 
+from tests.conftest import popen_via as _popen_via
+
+
 def _patch_clip_ffmpeg(monkeypatch, captured, duration=None, landed=None):
     """ffmpegを差し替える。copy経路はTS中間を1つ経由する2段なので、両方のcommandを記録する。
 
@@ -601,6 +604,7 @@ def _patch_clip_ffmpeg(monkeypatch, captured, duration=None, landed=None):
         return types.SimpleNamespace(returncode=0, communicate=communicate, kill=lambda: None)
 
     monkeypatch.setattr(clipper.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(subprocess, "Popen", _popen_via(fake_exec))
 
     async def fake_duration(path):
         return duration
@@ -1556,6 +1560,7 @@ def _patch_keyframe_probe(monkeypatch, stdout=b"", returncode=0, captured=None):
                                      kill=lambda: None)
 
     monkeypatch.setattr(th.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(subprocess, "Popen", _popen_via(fake_exec))
 
 
 async def test_max_keyframe_gap_ignores_the_window_boundaries(monkeypatch,

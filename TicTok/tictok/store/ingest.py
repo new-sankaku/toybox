@@ -14,13 +14,15 @@ lock契約:
     _log_backlog / _drop_orphan_rows / _write_batch_locked / _write_isolating_locked
     / _insert_rows_isolating / _upsert_users_locked / _rollback_and_requeue
   _rollback_and_requeue は末尾で self._buf_lock を取る(_lock 保持中なので取得順は保たれる)。
-  _journal_append / _journal_handle_locked / _close_journal は self._journal_lock 系で、
+  _journal_append はqueueへ渡すだけで、書くのは _journal_loop(専用thread)。file handleは
+  _journal_handle_locked / _close_journal が self._journal_lock 系で、
   self._lock とは独立(どちらの向きにも入れ子にしていない)。
   add_event 系は self._buf_lock だけを取り、self._lock は取らない。
 """
 import gzip
 import json
 import logging
+import queue
 import sqlite3
 import time
 from pathlib import Path
@@ -51,10 +53,38 @@ from tictok.store._common import (
     logger,
 )
 
+# journal専用threadへ「終了」を告げる番人。行(str)と区別できれば何でもよい。
+_JOURNAL_STOP = object()
+
 
 # journalの件数cacheの版。行の読み方(_iter_journal_rows)を変えて件数が動きうるときに
 # 上げる。上げるとcacheは丸ごと無効になり、次の起動が頭から数え直す。
-_COUNT_CACHE_VERSION = 1
+# 2: sessionの印('s' / 'd')をcacheへ持つようにした。
+_COUNT_CACHE_VERSION = 2
+
+# journalのsession印('s')の行の形。create_sessionがINSERTした直後の値で、復元でsession行
+# ごと蘇らせるときの材料になる。**列は必ず末尾へ足すこと**(events行と同じ理由)。
+_SESSION_MARK_COLUMNS = ("id", "unique_id", "started_at", "bucket_seconds", "conn_instrumentation")
+
+
+def _mark_from_cache(value) -> tuple:
+    """件数cacheに書いた印を戻す。"s" は行のlist、"d" は null で置いてある。"""
+    if value is None:
+        return ("d",)
+    row = tuple(value)
+    if len(row) < 4:
+        raise ValueError("session mark too short")
+    return ("s", row)
+
+
+def _same_session(row, mark: tuple) -> bool:
+    """DBのsession行とjournalの作成の印が同じ配信を指すか。started_atはREALなので、
+    JSONを往復した値との比較は丸めの幅を持たせる。"""
+    try:
+        return (row["unique_id"] == mark[1]
+                and abs(float(row["started_at"]) - float(mark[2])) < 1e-3)
+    except (TypeError, ValueError):
+        return False
 
 
 class IngestMixin:
@@ -443,9 +473,18 @@ class IngestMixin:
     # ----- 耐久journal(取り込み時点でdiskへ追記する最終防波堤) --------------------------
 
     def _journal_append(self, kind: str, row: tuple) -> None:
-        """1 event/viewer行を日次ローテートのNDJSONへ追記する。batched writerとは独立の経路で、
-        best-effort(失敗しても本流は止めない)。flush()はOS page cacheまで(fsyncはしない、
-        battle_rawと同水準)。プロセスクラッシュは耐えるが電源断は非対象。"""
+        """1行を日次ローテートのNDJSONへ追記する。kindは 'e'(event) / 'v'(viewer) /
+        's'(sessionの作成、行は _SESSION_MARK_COLUMNS) / 'd'(sessionの削除、行は (id,))。
+        batched writerとは独立の経路で、best-effort(失敗しても本流は止めない)。flush()は
+        OS page cacheまで(fsyncはしない、battle_rawと同水準)。プロセスクラッシュは耐えるが
+        電源断は非対象。
+
+        書くのは専用thread(``_journal_loop``)で、ここはJSON化してqueueへ渡すだけ。以前は
+        呼び出し元(event loop)がその場でwrite+flushしていた。平常時は8μsだが、Windows
+        Updateが復元ポイントを作る間はC:のfile操作が十数秒返らず、その間event loopごと
+        止まってlive接続が切れ、録画が別fileへ分断されていた(2026-09-03の監査)。失う窓は
+        「diskが凍っている最中にprocessが死ぬ」同時発生に限られ、専用threadは平常時μ秒で
+        書き切るので、write途中でkillされる従来の窓と実質同じである。"""
         if not self._journal_enabled:
             return
         try:
@@ -456,17 +495,69 @@ class IngestMixin:
                 extra={"event": "storage.journal_serialize_failed", "ctx": {"kind": kind}},
             )
             return
+        with self._journal_idle:
+            self._journal_pending += 1
+        self._journal_queue.put(line)
+
+    def _journal_loop(self) -> None:
+        """journal専用thread。queueの行を届いた順に書く。溜まっていれば1回のwriteで
+        書き切る(diskの復帰直後は数千行が並ぶ)。"""
+        while True:
+            first = self._journal_queue.get()
+            if first is _JOURNAL_STOP:
+                return
+            lines = [first]
+            stop = False
+            while True:
+                try:
+                    item = self._journal_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if item is _JOURNAL_STOP:
+                    stop = True
+                    break
+                lines.append(item)
+            self._journal_write(lines)
+            with self._journal_idle:
+                self._journal_pending -= len(lines)
+                if self._journal_pending <= 0:
+                    self._journal_idle.notify_all()
+            if stop:
+                return
+
+    def _journal_write(self, lines: list) -> None:
         with self._journal_lock:
             try:
                 fh = self._journal_handle_locked()
-                fh.write(line + "\n")
+                fh.write("".join(line + "\n" for line in lines))
                 fh.flush()
             except Exception:
                 logger.exception(
-                    "event journalへ追記できませんでした",
+                    "event journalへ追記できませんでした（%d 行）", len(lines),
                     extra={"event": "storage.journal_append_failed",
-                           "ctx": {"kind": kind, "journal_day": self._journal_day}},
+                           "ctx": {"rows": len(lines), "journal_day": self._journal_day}},
                 )
+
+    def wait_journal_idle(self, timeout: float = 5.0) -> bool:
+        """queueに残る行を専用threadが書き切るまで待つ。close()と、journalの内容を読む側
+        (test・復元)が使う。diskが応答しない間は待ち続けないようtimeout付き。"""
+        with self._journal_idle:
+            return self._journal_idle.wait_for(
+                lambda: self._journal_pending <= 0, timeout=timeout)
+
+    def _stop_journal_thread(self) -> None:
+        thread = getattr(self, "_journal_thread", None)
+        if thread is None:
+            return
+        self._journal_queue.put(_JOURNAL_STOP)
+        thread.join(timeout=5.0)
+        if thread.is_alive():
+            logger.warning(
+                "journal threadが5秒以内に止まりませんでした（queueに %d 行）",
+                self._journal_pending,
+                extra={"event": "storage.journal_stop_timeout",
+                       "ctx": {"pending": self._journal_pending}},
+            )
 
     def _journal_handle_locked(self):
         day = time.strftime("%Y%m%d", time.localtime())
@@ -497,11 +588,21 @@ class IngestMixin:
         """起動時: journalの各sessionについて、DBに欠けているevent/viewerを復元する。
         batched writerの停滞やクラッシュ・再起動でbuffer滞留分が失われても、取り込み時に
         journalへ残っているので後から埋め戻せる。安全のため:
-          - session行が無い(=削除済み/未作成)ならresurrectしない(削除の意思を尊重)。
+          - session行が無いsessionは、journalに作成の印('s')があり、その後に削除の印('d')が
+            無いときだけ行ごと蘇らせる(印の無い旧journal・削除済みは蘇らせない = 削除の
+            意思を尊重)。蘇った行は 'connecting' のままなので、直後の cleanup_stale_sessions
+            が中断sessionと同じ手順で確定する。
+          - session行が在っても、journalの印と unique_id / started_at が違えば別の配信で
+            ある(古いsnapshotへ戻した後にidが再利用された形)。触らずに警告する。
           - DBがjournalと同数以上なら何もしない。
           - journalがDBを『全項目で上回る』時のみ、当該sessionのevent/viewerをidempotentに
             全置換して復元する(count混在=不整合はskipしてwarn、誤clobber回避)。
         置換後はstats_json/buckets/analytics cacheをeventから再構成する。
+
+        復元の前に sessions のAUTOINCREMENT連番をjournalに現れる最大idまで進める
+        (_advance_session_sequence_locked)。古いsnapshotへ戻すと連番も戻り、次の配信が
+        journalに残る失われた配信と同じidを取る。そのままだと次の起動でjournalの件数が
+        DBを上回り、**別配信者のeventがその配信へ混ざる**(実測済み)。
 
         journalは2 passで読む。1 pass目(_count_journal_rows)はsession別の件数だけを数え、
         2 pass目(_collect_journal_rows)は復元が要るsessionの行だけを組み立てる。復元の
@@ -509,13 +610,16 @@ class IngestMixin:
         で保持期間ぶんの記録を行に開く理由が無い(実測でjournalは568MB/15日ぶん)。
         pruneは最後のまま動かさない: 先に回すと、保持期間を過ぎたfileが、この起動で
         復元に寄与しないまま消える(本来復元できたeventを失う経路になる)。"""
-        summary = {"sessions": 0, "events": 0, "viewers": 0}
+        summary = {"sessions": 0, "events": 0, "viewers": 0, "resurrected": 0}
         if not self._journal_enabled:
             return summary
         # 2つのpassは同じfile集合を読む(間にpruneを挟まない)。
         paths = self._journal_files()
-        event_counts, viewer_counts = self._count_journal_rows(paths)
-        candidates = self._journal_restore_candidates(event_counts, viewer_counts)
+        event_counts, viewer_counts, marks = self._count_journal_rows(paths)
+        with self._lock:
+            self._advance_session_sequence_locked(
+                max([0, *event_counts, *viewer_counts, *marks]))
+        candidates = self._journal_restore_candidates(event_counts, viewer_counts, marks)
         if not candidates:
             self._prune_journal()
             return summary
@@ -526,13 +630,35 @@ class IngestMixin:
             for sid in sorted(candidates):
                 j_events = events_by_sid.get(sid, [])
                 j_viewers = viewers_by_sid.get(sid, [])
+                mark = marks.get(sid)
                 # 判断はDELETEと同じlock区間で取り直す。候補選びは「行を組み立てる価値が
                 # あるか」を件数で見ただけで、その後にDBが動いていない保証は無い。
                 exists = self._conn.execute(
-                    "SELECT bucket_seconds FROM sessions WHERE id = ?", (sid,)
+                    "SELECT unique_id, started_at, bucket_seconds FROM sessions WHERE id = ?",
+                    (sid,)
                 ).fetchone()
                 if exists is None:
-                    continue  # 削除済み/未作成: resurrectしない
+                    if mark is None or mark[0] != "s":
+                        continue  # 印の無い旧journal / 削除済み: resurrectしない
+                    exists = self._resurrect_session_locked(mark[1])
+                    if exists is None:
+                        continue
+                    summary["resurrected"] += 1
+                elif mark is not None and mark[0] == "s" and not _same_session(exists, mark[1]):
+                    # 同じidだが別の配信。古いsnapshotへ戻した後にこの版より前の起動が
+                    # idを再利用した形で、journalの行を入れると別配信者のeventが混ざる。
+                    logger.warning(
+                        "journalからの復元でsession %d をskipしました: journalの印(%s / %s)と"
+                        "DBの行(%s / %s)が別の配信です。人の確認が必要です",
+                        sid, mark[1][1], mark[1][2], exists["unique_id"], exists["started_at"],
+                        extra={"event": "storage.journal_session_mismatch",
+                               "ctx": {"restore_session_id": sid,
+                                       "journal_unique_id": mark[1][1],
+                                       "journal_started_at": mark[1][2],
+                                       "db_unique_id": exists["unique_id"],
+                                       "db_started_at": exists["started_at"]}},
+                    )
+                    continue
                 db_ev = self._conn.execute(
                     "SELECT COUNT(*) c FROM events WHERE session_id = ?", (sid,)
                 ).fetchone()["c"]
@@ -599,7 +725,72 @@ class IngestMixin:
         self._prune_journal()
         return summary
 
-    def _journal_restore_candidates(self, event_counts: dict, viewer_counts: dict) -> set:
+    def _advance_session_sequence_locked(self, journal_max_id: int) -> None:
+        """sessions のAUTOINCREMENT連番を、journalに現れる最大idより手前へ戻さない。
+
+        連番は sqlite_sequence に在り、DBのsnapshotと一緒に戻る。journalはsnapshotより
+        新しいので、戻った連番のまま次の配信を作ると、journalに残る失われた配信と同じ
+        idになる。self._lock保持前提。"""
+        if journal_max_id <= 0:
+            return
+        row = self._conn.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'sessions'").fetchone()
+        current = int(row["seq"]) if row is not None else 0
+        if current >= journal_max_id:
+            return
+        if row is None:
+            self._conn.execute(
+                "INSERT INTO sqlite_sequence (name, seq) VALUES ('sessions', ?)",
+                (journal_max_id,))
+        else:
+            self._conn.execute(
+                "UPDATE sqlite_sequence SET seq = ? WHERE name = 'sessions'",
+                (journal_max_id,))
+        self._conn.commit()
+        logger.warning(
+            "sessionの連番(%d)がjournalの最大id(%d)より手前に戻っていたので進めました"
+            "（DBを古いsnapshotへ戻した形。戻さないと次の配信が失われた配信のidを再利用します）",
+            current, journal_max_id,
+            extra={"event": "storage.session_sequence_advanced",
+                   "ctx": {"db_seq": current, "journal_max_id": journal_max_id}},
+        )
+
+    def _resurrect_session_locked(self, mark: tuple):
+        """journalの作成の印からsession行を作り直す。self._lock保持前提。
+
+        statusは create_session と同じ 'connecting' で置く。直後に走る
+        cleanup_stale_sessions が、中断sessionと同じ手順(最後のeventの時刻で確定・
+        stats・bucket)で畳むので、ここで確定の形を別に持たない。戻り値は置換の判断に
+        使う行(bucket_seconds)。"""
+        sid, unique_id, started_at, bucket_seconds = mark[:4]
+        conn_instrumentation = mark[4] if len(mark) > 4 else None
+        try:
+            self._conn.execute(
+                "INSERT INTO sessions (id, unique_id, status, started_at, bucket_seconds,"
+                " conn_instrumentation) VALUES (?, ?, 'connecting', ?, ?, ?)",
+                (sid, unique_id, started_at, bucket_seconds, conn_instrumentation),
+            )
+        except sqlite3.Error:
+            logger.exception(
+                "session %d をjournalの印から作り直せませんでした", sid,
+                extra={"event": "storage.journal_resurrect_failed",
+                       "ctx": {"restore_session_id": sid, "unique_id": unique_id}},
+            )
+            self._conn.rollback()
+            return None
+        logger.warning(
+            "session %d（%s / %s）の行がDBに無かったのでjournalの印から作り直しました",
+            sid, unique_id, started_at,
+            extra={"event": "storage.journal_session_resurrected",
+                   "ctx": {"restore_session_id": sid, "unique_id": unique_id,
+                           "started_at": started_at}},
+        )
+        return self._conn.execute(
+            "SELECT unique_id, started_at, bucket_seconds FROM sessions WHERE id = ?", (sid,)
+        ).fetchone()
+
+    def _journal_restore_candidates(self, event_counts: dict, viewer_counts: dict,
+                                    marks: dict) -> set:
         """行を組み立てる価値があるsessionのidを、件数だけで絞り込む。
 
         ここは「2 pass目を走らせるか」を決める門であって、復元の可否ではない。実際に
@@ -613,7 +804,10 @@ class IngestMixin:
                 if self._conn.execute(
                     "SELECT 1 FROM sessions WHERE id = ?", (sid,)
                 ).fetchone() is None:
-                    continue  # 削除済み/未作成: resurrectしない
+                    mark = marks.get(sid)
+                    if mark is not None and mark[0] == "s":
+                        candidates.add(sid)  # 行ごと蘇らせる
+                    continue  # 印の無い旧journal / 削除済み: resurrectしない
                 db_ev = self._conn.execute(
                     "SELECT COUNT(*) c FROM events WHERE session_id = ?", (sid,)
                 ).fetchone()["c"]
@@ -634,7 +828,8 @@ class IngestMixin:
 
     def _iter_journal_rows(self, path: Path, log_anomalies: bool = True,
                            start_offset: int = 0, progress: Optional[list] = None):
-        """journal file 1本を ``(kind, session_id, row)`` で流す。kindは 'e' / 'v'。
+        """journal file 1本を ``(kind, session_id, row)`` で流す。kindは 'e' / 'v' /
+        's'(sessionの作成) / 'd'(sessionの削除)。
 
         **行の読み方をここ1箇所にしか置かないことがこのmethodの目的である。** 復元するか
         否かは件数を数えるpass(_count_journal_rows)が決め、実際にDELETE→全置換するのは
@@ -692,6 +887,12 @@ class IngestMixin:
                         yield "e", sid, row
                     elif rec.get("t") == "v":
                         yield "v", sid, row
+                    elif rec.get("t") == "s":
+                        if len(row) < 4:
+                            continue  # 形が違う印は無かったことにする(蘇らせる材料が無い)
+                        yield "s", sid, row
+                    elif rec.get("t") == "d":
+                        yield "d", sid, row
         except Exception:
             logger.exception(
                 "journal file %s を読めませんでした", path,
@@ -710,7 +911,10 @@ class IngestMixin:
             )
 
     def _count_journal_rows(self, paths: list) -> tuple:
-        """session別の件数だけを数える(``(events, viewers)`` の2 dict)。
+        """session別の件数と、sessionの印を集める(``(events, viewers, marks)``)。
+
+        marksは ``{session_id: ("s", 印の行) | ("d",)}`` で、fileの並び・行の並びで**後の
+        印が勝つ**(作ってから消したら "d"、消したidをこの版より前が再利用していたら "s")。
 
         行そのものは持たない。復元が要るかどうかはDBの行数との比較だけで決まるので、
         通常の起動 — 復元が1件も要らない起動 — で保持期間ぶんの記録をmemoryへ載せる
@@ -729,6 +933,7 @@ class IngestMixin:
         entries: dict = {}
         events: dict = {}
         viewers: dict = {}
+        marks: dict = {}
         for path in paths:
             size = path.stat().st_size
             prev = cache.get(path.name)
@@ -743,18 +948,26 @@ class IngestMixin:
                 usable = prev["offset"] <= size
             else:
                 usable = prev["size"] == size
-            counts = {"e": dict(prev["e"]), "v": dict(prev["v"])} if usable else {"e": {}, "v": {}}
+            if usable:
+                counts = {"e": dict(prev["e"]), "v": dict(prev["v"]), "m": dict(prev["m"])}
+            else:
+                counts = {"e": {}, "v": {}, "m": {}}
             start = prev["offset"] if usable else 0
             progress = [start, True]
             if not usable or (resumable and start < size):
-                for kind, sid, _row in self._iter_journal_rows(
+                for kind, sid, row in self._iter_journal_rows(
                     path, start_offset=start, progress=progress
                 ):
-                    bucket = counts[kind]
-                    bucket[sid] = bucket.get(sid, 0) + 1
+                    if kind == "s":
+                        counts["m"][sid] = ("s", tuple(row))
+                    elif kind == "d":
+                        counts["m"][sid] = ("d",)
+                    else:
+                        bucket = counts[kind]
+                        bucket[sid] = bucket.get(sid, 0) + 1
             if progress[1]:
                 entries[path.name] = {"offset": progress[0], "size": size,
-                                      "e": counts["e"], "v": counts["v"]}
+                                      "e": counts["e"], "v": counts["v"], "m": counts["m"]}
             # progress[1]がFalse = 書きかけの行が末尾に在る。その行は数に入れてあるが位置
             # には含められないので、このfileはcacheへ残さない(次回は頭から数える)。cacheの
             # 有無で件数が変わらないことの方が、1 fileぶんの走査より重い。
@@ -762,14 +975,16 @@ class IngestMixin:
                 events[sid] = events.get(sid, 0) + n
             for sid, n in counts["v"].items():
                 viewers[sid] = viewers.get(sid, 0) + n
+            marks.update(counts["m"])
         self._save_count_cache(entries)
-        return events, viewers
+        return events, viewers, marks
 
     def _count_cache_path(self) -> Path:
         return Path(get_journal_dir()) / "count_cache.json"
 
     def _load_count_cache(self) -> dict:
-        """file名 -> {"offset": int, "size": int, "e": {sid: n}, "v": {sid: n}} を返す。
+        """file名 -> {"offset": int, "size": int, "e": {sid: n}, "v": {sid: n},
+        "m": {sid: ("s", 行) | ("d",)}} を返す。
 
         読めない・版が違う・形が違うなら空を返す(=全部数え直す)。cacheはjournalそのもの
         から作り直せる派生物なので、疑わしければ捨てる方を既定にしてある。
@@ -795,6 +1010,7 @@ class IngestMixin:
                     # JSONのkeyは文字列になるのでsession_idへ戻す。
                     "e": {int(k): int(v) for k, v in entry["e"].items()},
                     "v": {int(k): int(v) for k, v in entry["v"].items()},
+                    "m": {int(k): _mark_from_cache(v) for k, v in entry["m"].items()},
                 }
             except Exception:
                 return {}
@@ -810,7 +1026,9 @@ class IngestMixin:
             "files": {
                 name: {"offset": entry["offset"], "size": entry["size"],
                        "e": {str(k): v for k, v in entry["e"].items()},
-                       "v": {str(k): v for k, v in entry["v"].items()}}
+                       "v": {str(k): v for k, v in entry["v"].items()},
+                       "m": {str(k): list(v[1]) if v[0] == "s" else None
+                             for k, v in entry["m"].items()}}
                 for name, entry in entries.items()
             },
         }
@@ -844,8 +1062,10 @@ class IngestMixin:
                     continue
                 if kind == "e":
                     bucket, cap = events_by_sid, event_limits
-                else:
+                elif kind == "v":
                     bucket, cap = viewers_by_sid, viewer_limits
+                else:
+                    continue  # sessionの印は数えるpassが持っている(行ではない)
                 rows = bucket.setdefault(sid, [])
                 if cap is not None and len(rows) >= cap.get(sid, 0):
                     continue
@@ -870,7 +1090,9 @@ class IngestMixin:
 
     def flush(self) -> None:
         """バッファ済み書き込みを同期的に確定する。未flushのeventを必要とする読み取り
-        (comment抽出・export・Battle貢献の再構成・session確定)の直前に呼ぶ。"""
+        (comment抽出・export・Battle貢献の再構成・session確定)の直前に呼ぶ。
+        journalの未書き込み分も書き切らせる(DBとjournalの両方が「ここまで」で揃う)。"""
+        self.wait_journal_idle()
         self._drain()
 
     def add_event(self, session_id: int, entry: dict) -> None:

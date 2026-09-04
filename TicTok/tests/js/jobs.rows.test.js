@@ -405,7 +405,7 @@ describe("jobs.js の行の組み立て", () => {
     it("絞っていなければ、台帳に無い実行として名乗る", () => {
       setFilter();
       win.render();
-      expect(doc.getElementById("gpu-summary").textContent).toContain("下の一覧に出ない別queue");
+      expect(doc.getElementById("gpu-summary").textContent).toContain("別queue: 焼き込み");
     });
 
     it("失敗のみで絞っている間は言わない(隠しただけかもしれない)", () => {
@@ -433,7 +433,7 @@ describe("jobs.js の行の組み立て", () => {
       seedBar([{ job_id: "1", state: "failed" }, { job_id: "2", state: "interrupted" }]);
       setFilter({ state: "active" });
       win.render();
-      expect(note().textContent).toContain("失敗・中断が2件");
+      expect(note().textContent).toContain("失敗・中断 2件");
       expect(note().querySelector("a").getAttribute("href")).toBe("/jobs?state=failed");
     });
 
@@ -693,7 +693,7 @@ describe("jobs.js の行の組み立て", () => {
         [BOOT_URL]: jobsBody({ total: 512, limit: 200 }),
       });
       expect(doc.getElementById("job-limit-note").textContent)
-        .toBe("※ 直近200件のみ表示（該当 512件）");
+        .toBe("直近200件 / 該当 512件");
     });
 
     it("切れていなければ何も出さない", () => {
@@ -707,14 +707,14 @@ describe("jobs.js の行の組み立て", () => {
       doc.getElementById("job-flt-text").value = "一致しない語";
       win.render();
       expect(doc.getElementById("job-empty").textContent)
-        .toContain("台帳の該当は512件");
+        .toContain("台帳 512件");
     });
 
     it("filterを外していれば0件は0件と出す", () => {
       seed([]);
       setFilter();
       win.render();
-      expect(doc.getElementById("job-empty").textContent).toBe("jobはありません。");
+      expect(doc.getElementById("job-empty").textContent).toBe("—");
     });
   });
 });

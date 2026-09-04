@@ -38,6 +38,11 @@ async def videos_page() -> FileResponse:
     return _page_response("videos.html")
 
 
+@router.get("/story")
+async def story_page() -> FileResponse:
+    return _page_response("story.html")
+
+
 @router.get("/capacity")
 async def capacity_page() -> FileResponse:
     return _page_response("capacity.html")
@@ -56,6 +61,11 @@ async def assets_page() -> FileResponse:
 @router.get("/ops")
 async def ops_page() -> FileResponse:
     return _page_response("ops.html")
+
+
+@router.get("/backup")
+async def backup_page() -> FileResponse:
+    return _page_response("backup.html")
 
 
 @router.get("/settings")

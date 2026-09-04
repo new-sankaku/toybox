@@ -258,6 +258,10 @@ _MENTION_NAMES_TTL_SECONDS = 600.0
 # 代償はmemory。1 entryは実測875 byte(avatarのURLが大半を占める)で、上限まで埋まると
 # 約33MB。上限が無い現状はここに天井が無く、identity数(実測78,355)ぶん伸び続ける。
 _USER_CACHE_MAX = 40000
+# 投稿へ貼る省略形(user_aliases)の長さの上限。省略のための欄なので、元の表示名より長く
+# 書けても意味が無い。上限を置くのは、貼る文面が1行に収まらなくなるのと、押し間違いで
+# 文章を丸ごと貼り込んだ行がDBへ残るのを止めるためである。
+USER_ALIAS_MAX = 40
 # 1戦のBattle貢献者を「主力貢献者」とみなすcoin(diamond)下限。この閾値以上を投げた
 # 貢献者を1戦ごとに数え、過去全Battleの平均人数を出す。
 _BATTLE_KEY_CONTRIB_DIAMONDS = 100
@@ -422,6 +426,29 @@ CREATE TABLE IF NOT EXISTS users (
 -- indexを順序の充足には使えず、193,360行を毎回並べ直す。identity_keyを載せているのは
 -- last_seenが重複するためで、これが無いとpageを跨いで同じ行が二度出たり抜けたりする。
 CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users(last_seen DESC, identity_key ASC);
+-- 投稿へ貼る文面で名前の代わりに出す省略形。人が付ける層なので users 表とは別に置く ——
+-- あちらは event が来るたび最新の非空値で上書きされるので、同じ列へ書くと配信のたびに
+-- 消えて付け直しになる(字幕の直しを transcript_corrections へ分けたのと同じ理由)。
+-- 1人1つ。空文字の行は置かず消す —— 空で残すと「省略形を付けた人」を数えられない。
+CREATE TABLE IF NOT EXISTS user_aliases (
+    identity_key TEXT PRIMARY KEY,
+    alias TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+-- 同じ人が持つ別アカウント(サブアカウント)の束ね。人が指す層なので user_aliases と
+-- 同じくusers表とは別に置く —— あちらはeventのたびに上書きされる観測値で、こちらは
+-- 「この2つは同じ人だ」という人の判断である。
+-- member_key が主keyなのは、1つのアカウントが2人ぶんの中身になることは無いためである。
+-- 束ねの深さは1段しかない(primary_key は他の行の member_key になれない): 段を許すと
+-- 「AはBへ、BはCへ」の途中で環ができ、集計の畳み先が引く順で変わる。
+CREATE TABLE IF NOT EXISTS user_merges (
+    member_key TEXT PRIMARY KEY,
+    primary_key TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+-- 束ね先から辿る向き。日のGifterの集計は member_key 側から引くが、画面の一覧と
+-- 「主へ束ねた人を数え直す」はこの向きで引く。
+CREATE INDEX IF NOT EXISTS idx_user_merges_primary ON user_merges(primary_key);
 -- リーグ取得の待ち行列。processを跨いで残す必要がある(1件15秒で流すため、再起動で
 -- 消えると当日ぶんが丸ごと落ちる)。1人1行で、取得できた時点で消える。
 CREATE TABLE IF NOT EXISTS league_queue (
@@ -521,6 +548,39 @@ CREATE TABLE IF NOT EXISTS db_maintenance (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+-- 消えた行そのものの退避(row単位のundo)。DELETE triggerが1行1件で積む
+-- (仕組みと対象表の線引きは :mod:`tictok.store.row_trash`)。
+--
+-- **DBの保護の3段目である。** 1段目のauthorizer(``dbmaint.attach_drop_guard``)はserverの
+-- 接続にしか掛からず、2段目の行数の見張り(``dbmaint.check_row_guard``)は**小さい表の部分
+-- 削除**を原理的に見分けられない —— bookmarks 192件のうち59件が消えても、同じ59件は
+-- 「表示中をすべて削除」という正常な操作でも消えるので、行数だけからは区別が付かない。
+-- 区別できないなら、**消えた行そのものを残す**しかない。
+--
+-- triggerはschemaの一部なのでengineが強制する。つまり sqlite3.exe やDB browserのような
+-- **外部processのDELETEでも発火する** —— authorizerが効かない穴はここで塞がる。
+--
+-- 列を4つに抑え、行の中身は json_object() の1列で持つ。対象表の列構成が変わっても
+-- 退避表のschemaを追いかけずに済むためで、追いかける形にすると「列を足した日に、
+-- 足す前に消えた行が読めなくなる」。
+--   table_name  元の表名
+--   row_pk      その表のPRIMARY KEYを文字にしたもの。一覧で行を名指しするためと、
+--               復元時の「既に在るか」を1回のindex参照で見るため
+--   deleted_at  消えた時刻(epoch秒)。triggerが julianday('now') から作るのでUTC基準
+--   row_json    行の中身そのもの
+--
+-- indexは1本だけにする。復元の一覧は表名と期間で絞るのでこの並びが要るが、保持日数の
+-- 刈り取り(deleted_at単独)のためにもう1本足すのは割に合わない —— 刈り取りは起動時に
+-- 1回で、この表は実測でも数千行にしかならない(削除の実測は row_trash のdocstring)。
+-- 対して索引はDELETEのたびに書かれる側なので、本数がそのまま削除の費用になる。
+CREATE TABLE IF NOT EXISTS row_trash (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name TEXT NOT NULL,
+    row_pk TEXT,
+    deleted_at REAL NOT NULL,
+    row_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_row_trash_table ON row_trash(table_name, deleted_at);
 CREATE TABLE IF NOT EXISTS recordings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
@@ -789,11 +849,17 @@ CREATE INDEX IF NOT EXISTS idx_transcribe_queue_state ON transcribe_queue(state,
 -- 1つのIDで突き合わせられるようにする。
 -- recording_id/session_idともCASCADE: 対象が消えたjobは投入意図ごと無意味になるため残さない
 -- (孤児行を残すと、worker が存在しない録画を延々pickして失敗し続ける)。
+--
+-- recording_idは**任意**である。台帳に載るjobの多くは録画1本に対する処理だが、highlightの
+-- 突き合わせは「どの録画のどこから来たのか」を求めるjobそのものなので、投入時点で書ける
+-- 録画idが原理的に無い。埋め合わせに無関係な録画idを入れると、この列を読む側(busy判定・
+-- 削除の抑止・sweepの済み判定)がその録画で嘘を言う。既存DBの制約外しは
+-- ``_migrate_media_job_recording_optional``。
 CREATE TABLE IF NOT EXISTS media_job_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id TEXT NOT NULL UNIQUE,
     kind TEXT NOT NULL,
-    recording_id INTEGER NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+    recording_id INTEGER REFERENCES recordings(id) ON DELETE CASCADE,
     session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
     group_id TEXT NOT NULL DEFAULT '',
     title TEXT NOT NULL DEFAULT '',
@@ -981,6 +1047,208 @@ CREATE TABLE IF NOT EXISTS analytics_session_cache (
 -- serverが事実上停止する。
 -- session対象の行はsession_idを埋めてON DELETE CASCADEで孤児化を防ぐ。配信者対象の行は
 -- session_idがNULLで、伝播対象を持たない(配信者は表ではなくunique_idの参照のため)。
+-- TikTok本体が出すhighlight(LIVE replayの切り抜き)1本。実体はfilesystemに在り、この表は
+-- 「どこで見つけたか」と「照合の結果どうだったか」だけを持つ。
+--
+-- 置き場が複数ある(``layout.highlight_dirs``)ので、root_key と source_dir を必ず残す。
+-- pathだけでは、同じfile名の別の置き場の物と区別が付かず、画面も利用者もfileへ戻れない。
+--
+-- unique(unique_id, filename) にしてあるのは、同じhighlightが正規の置き場と現行の置き場の
+-- 両方に在り得るためである(移行の途中では必ずそうなる)。実体は1本なので行も1本にし、
+-- 見つけた場所は先に当たった置き場(highlight_dirsの順)で上書きする。
+--
+-- statusは 'new'(未照合) / 'matching'(queueに居る) / 'matched' / 'failed' / 'missing'。
+-- missing は走査でfileが見つからなかった行で、**消さない** —— segmentには人が直した内容が
+-- 貼り付いているので、外付けdriveを挿し忘れた回に消えると取り返せない。fileが戻れば
+-- 走査が status を元へ戻す(matched_at が在れば matched、無ければ new)。
+CREATE TABLE IF NOT EXISTS highlight_videos (
+    id INTEGER PRIMARY KEY,
+    unique_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    path TEXT NOT NULL,
+    root_key TEXT,
+    source_dir TEXT,
+    bytes INTEGER,
+    duration_seconds REAL,
+    status TEXT NOT NULL DEFAULT 'new',
+    error TEXT,
+    -- 照合時の設定(days/scope/gift_lead/...)をそのまま。既定値は動くので、この結果が
+    -- どの条件で出たのかは行が自分で名乗れないといけない。
+    scope_json TEXT,
+    matched_at REAL,
+    created_at REAL,
+    UNIQUE(unique_id, filename)
+);
+CREATE INDEX IF NOT EXISTS idx_highlight_videos_uid ON highlight_videos(unique_id, status);
+-- highlight 1本の中のgift演出1つ。highlightはmontageで、平均6秒のgift演出が10個ほど、複数の録画から
+-- 繋がれている(doc/HIGHLIGHT_MATCH.md)。start/end は**highlight自身の時間軸**の秒で、
+-- media_start は当たった録画のmedia軸の秒である。2つの軸を1行に持つので名前で分ける。
+--
+-- approved/edited/excluded/memo と、手で差し替えたgift列は**人の入力**である。再照合は
+-- 機械の列だけを書き換え、ここは残す(``tictok.store.highlights`` のdocstringに保存し直し方)。
+-- dropped は「前回は在ったが今回の照合では出なくなった」印で、人の入力を持つ行だけが残る。
+CREATE TABLE IF NOT EXISTS highlight_segments (
+    id INTEGER PRIMARY KEY,
+    highlight_id INTEGER NOT NULL REFERENCES highlight_videos(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    start REAL NOT NULL,
+    end REAL NOT NULL,
+    recording_id INTEGER,
+    media_start REAL,
+    votes INTEGER,
+    ratio REAL,
+    corr REAL,
+    confidence TEXT,
+    effect_json TEXT,
+    -- 映像が切り替わり終わる秒(highlight自身の時間軸)。start は**音**で決めた境目で、
+    -- TikTokのmontageは音を一瞬で切り替えながら映像には演出を掛ける。実測(境目29箇所)で
+    -- 映像は中央値0.60秒あと、手前に出た境目は1つも無い。切り出しの頭の既定はこちらで、
+    -- start のままにすると全部の切り出しの頭に前のgiftの場面が残る。
+    -- NULL は「測っていない/測れなかった」で、0や start では表せない。**既定値で埋めない**。
+    video_start REAL,
+    -- **次の**giftへの切り替わりが始まる秒。end は次の音の境目で、演出はそこを跨ぐ ――
+    -- 実測で end より 0.93秒手前から次の場面が現れている境目が在り、その窓を通しで観ると
+    -- 「2人目のgiftの終わりに3人目のgiftが少し映る」形になっていた(誰のgiftかを誤認させる)。
+    -- 切り出しの尻の既定はこちらである。NULL の意味は video_start と同じ。
+    video_end REAL,
+    -- 測ろうとしたか。video_start/video_end が NULL のままでも、測って決まらなかったのか
+    -- 一度も測っていないのかで画面の言うことが変わる(前者は素材の側の話、後者は操作の話)。
+    -- 両端は1回の測定で同時に出る(:func:`tictok.media.highlight_switch.switch_span`)ので、
+    -- 印は1つで足りる。
+    video_probed INTEGER NOT NULL DEFAULT 0,
+    approved INTEGER NOT NULL DEFAULT 0,
+    edited INTEGER NOT NULL DEFAULT 0,
+    excluded INTEGER NOT NULL DEFAULT 0,
+    dropped INTEGER NOT NULL DEFAULT 0,
+    memo TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_highlight_segments_hl ON highlight_segments(highlight_id, idx);
+-- gift演出1つが持つgift。**1 segment 1 gift では持てない。** segmentは最長8.3秒あり、その中に
+-- 演出を持つgiftが複数入る —— 実測の最後のgift演出(t=54–60)に Galaxy 1000💎(54.99s)と
+-- Spartan Helmet 399💎(57.43s)が入っており、画面に映っていたのは**後者**(t=59.0から兜)なのに
+-- 「窓の中で最も高額」の規則が範囲内の399💎を範囲外の1000💎に負けさせた。出力をgifterごとに
+-- 1本ずつ作る以上、これは「giftが1件落ちる」ではなく**別人の名前が付く**誤りである。
+-- **成果物の単位はsegmentではなくgiftである。**
+--
+-- gift演出の属性はここへ降ろさない。降ろすと意味が変わる ―― idx は「gift演出の並び」で書き出しの
+-- 順序が読んでいる値、votes/ratio/corr/confidence は「そのgift演出が当たっている確からしさ」で
+-- あってgiftの確からしさではなく、media_start はgift演出の頭(giftの位置は gift_media_time)、
+-- effect_json は検出した演出区間(giftごとの重なりは has_effect)、approved は「このgift演出を
+-- 確認した」であって「このgifterを確認した」ではない。
+CREATE TABLE IF NOT EXISTS highlight_segment_gifts (
+    id INTEGER PRIMARY KEY,
+    segment_id INTEGER NOT NULL REFERENCES highlight_segments(id) ON DELETE CASCADE,
+    -- highlight_id は segment から辿れるが持たせる。俯瞰(coverage)と書き出しは
+    -- 「このhighlightのgift全部」をJOIN 1回で引くので、辿らせると毎回2表を跨ぐ。
+    highlight_id INTEGER NOT NULL REFERENCES highlight_videos(id) ON DELETE CASCADE,
+    -- そのsegmentの中の時刻順。gift演出の並び(highlight_segments.idx)とは別物である。
+    idx INTEGER NOT NULL,
+    -- events.id そのもの。**画面が選ぶのは「どのeventか」だけ**なので、ここがNULLの
+    -- gift行は存在しない(giftを持たないgift演出は、この表に行を持たないことで表す)。
+    gift_event_id INTEGER NOT NULL,
+    -- events.gift_id はINTEGERだが、こちらはTEXTで持つ。SQLiteは型を強制しないので、
+    -- 混ぜると同じgiftが 1234 と '1234' の2通りで入り、突き合わせが黙って外れる。
+    gift_id TEXT,
+    gift_name TEXT,
+    diamonds INTEGER,
+    -- events.gift_count そのもの(1回のeventでまとめて投げた個数)。**diamonds は個数を
+    -- 掛けた後の合計**なので、これが無いと「30💎を9個」と「270💎を1個」が同じ値になる。
+    -- 演出が出るかを決めるのは1個あたりの単価の方で、下限の判定はそちらで行う
+    -- (``store.highlights.gift_unit_diamonds``)。
+    gift_count INTEGER,
+    gift_image TEXT,
+    user_unique_id TEXT,
+    user_nickname TEXT,
+    user_id TEXT,
+    identity_key TEXT,
+    -- そのgiftが録画のmedia軸のどこに在るか。**差ではなく絶対秒で持つ** —— 差にすると、
+    -- 人がgift演出の端を1秒ずらした瞬間にgiftの位置まで1秒動く(動いていないのは録画の中の
+    -- giftの方である)。highlight内の秒は ``store.highlights.gift_position`` が毎回引き直す。
+    gift_media_time REAL,
+    -- segmentの [start, end] の中に居るか。0 は gift_lead で手前へ伸ばした窓に入っただけで、
+    -- **highlightにはその手前の映像が無い**(別の時刻のgift演出が繋がっているだけ)。
+    inside INTEGER NOT NULL DEFAULT 1,
+    -- そのsegmentの主。inside の中で最も高額な1件(insideが1件も無いときだけlead窓の中)。
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    -- **gift単位の「演出と重なるか」の列は持たない。** 差分による演出検出は実測で両方向に
+    -- 無力だった —— 60.8秒の実物で最も分かりやすい全画面演出(Flying Jets 5000💎 / 白鳥 /
+    -- 花火)は区間が1つも出ず、出た2区間はどちらもTikTok自身の継ぎ目のワイプだった。
+    -- 7本のgift 47件で当たりは0件である。**当たりが0件の信号を表に置くと、いずれ誰かが
+    -- 信じる。** 生の演出区間は診断用に ``highlight_segments.effect_json`` へ残してあり、
+    -- 検出器を作り直すならそこが起点になる。演出が映っているかを人が見る手段は代表frameの
+    -- 2枚並べ(highlight側と録画側の同じ秒)で、**人の目のほうがこの検出器より確実に強い。**
+    -- 人がこのgiftを差し替えた/足した印。gift演出側の ``edited``(端を動かした)とは**別にする**
+    -- —— 1つにすると、端を微調整しただけで人のgift差し替えが守られたことになり、再照合が
+    -- 機械の答えで上書きすべき行を守ってしまう(逆も起きる)。
+    manual INTEGER NOT NULL DEFAULT 0,
+    -- そのgiftの**見せ場**。1つのgift演出に順番待ちで並んだ演出のうち、このgiftのものが
+    -- 映っている区間で、映像の切り替わりまで詰めた後の値である(highlight_match の
+    -- ``_attach_shows``)。**NULLは「まだ割っていない」**で、gift演出の窓と同じという意味では
+    -- ない —— gift演出を割れるのは演出の数と載ったgiftの数が一致したときだけなので、多くの
+    -- 行はNULLのままである。人が触った ``cut_start``/``cut_end`` とは持ち主が違い、
+    -- **人の窓の方が優先する**(``store.highlights.gift_cut``)。
+    show_start REAL,
+    show_end REAL,
+    -- 人がこのgift 1件だけを出力から外した印。gift演出側の ``excluded`` と**別に要る** ——
+    -- gift演出が残ったままgift 1件だけを落とす場面があり、gift演出単位でしか外せないと巻き添えで
+    -- 同じgift演出の他のgiftまで消える。
+    excluded INTEGER NOT NULL DEFAULT 0,
+    -- **このgiftだけの切り出し範囲**(highlight自身の時間軸の秒)。NULL は「gift演出の窓をその
+    -- まま使う」という意味で、gift演出の値をcopyして埋めてはいけない —— copyすると、再照合で
+    -- gift演出が動いたときに、人が一度も触っていないgiftの窓だけが古い場所へ取り残される。
+    --
+    -- gift演出の窓と**別に要る**。1つのgift演出は最長8.3秒あり、そこに別人のgiftが複数入る(実測で
+    -- 6.0秒のgift演出に あきと6000💎(1.17s) / おニャンコ999💎(4.55s) / るきしろ99💎(0.32s) の
+    -- 3人)。出力はgifterごとに1本なので、窓がgift演出単位だと**同じ6秒が3人ぶんのfileへ同じ形で
+    -- 入り**、しかも1人の行から窓を詰めると他の2人のfileまで一緒に動く。
+    --
+    -- 範囲は必ずgift演出の中に収める。montageなのでgift演出の外は「その少し前」ではなく**まったく
+    -- 無関係な場面**で、そこにこのgiftの映像は無い。
+    cut_start REAL,
+    cut_end REAL,
+    -- **人がこのgiftの当たりとして選んだ1本**の印。同じgiftはTikTokの複数のhighlightに
+    -- 入るので(実測で1件が3本)、そのgiftを代表する当たりが機械の順位で決まっていた。
+    -- 順位はgift演出の中で一番よく映っている人を当てる代用でしかなく、**その人自身の演出が
+    -- 映っているのは別のhighlightの方**という形が普通に起きる(実測: Whale diving 2,150💎は
+    -- 3本に当たり、11.1秒ある1本にだけ本人の演出が映っていて、代表は5.9秒の別の本だった)。
+    -- 立つのは同じ ``gift_event_id`` の中で1行だけで、書き出しの重複排除(``dedup_by_gift``)も
+    -- 画面の代表もこの印を最優先に読む。gift演出側の ``approved`` とは別物である ——
+    -- あちらは「このgift演出を確認した」、こちらは「このgiftはこの1本を使う」である。
+    chosen INTEGER NOT NULL DEFAULT 0,
+    -- 前回の照合には在ったが今回は出なくなった印。人の入力を持つ行だけが残る。
+    dropped INTEGER NOT NULL DEFAULT 0,
+    -- 同じgiftが1つのgift演出へ2度入ることは無い(``highlight_match._assign_gifts`` が保証する)。
+    -- 保存し直しが行を二重に積まないための最後の砦でもある。
+    UNIQUE(segment_id, gift_event_id)
+);
+CREATE INDEX IF NOT EXISTS ix_highlight_segment_gifts_seg
+    ON highlight_segment_gifts(segment_id, idx);
+-- 俯瞰(coverage)は「その週のgift eventがhighlightのどこに出たか」をevent idで引く。
+CREATE INDEX IF NOT EXISTS ix_highlight_segment_gifts_event
+    ON highlight_segment_gifts(gift_event_id);
+CREATE INDEX IF NOT EXISTS ix_highlight_segment_gifts_hl
+    ON highlight_segment_gifts(highlight_id);
+-- 検証の面で人が「この行は見た」と付ける印。**gift event 1件ごとに持つ。**
+--
+-- gift演出(highlight_segments.approved)にもgift行にも載せられない。載せられるのは
+-- highlightに当たった行だけで、**この面で一番確かめたいのは「1本も出ていない」行**
+-- —— 高額なのにhighlightに現れないgiftが、TikTokが選ばなかったのかこちらの照合が
+-- 取りこぼしたのかを人が判ずる相手である。その行はgift演出もgift行も持たないので、
+-- 印を残す場所がそもそも無い。approved は「このgift演出を確認した」であって
+-- 「このgiftを確認した」ではない(highlight_segment_gifts の注)。
+--
+-- 行が在ること = 確認済み。取り消しは行を消す(状態列を持たない ―— 2値しか無い印に
+-- 列を足すと、行が在るのに未確認、という読み手のいない状態が作れる)。
+--
+-- gift_event_id は events.id だが**外部keyにはしない**(highlight_segment_gifts.
+-- gift_event_id と同じ約束)。eventの側の整理でこの表がFK違反の元になると、印を
+-- 消すのではなく書き込みそのものが止まる。
+CREATE TABLE IF NOT EXISTS highlight_gift_checks (
+    gift_event_id INTEGER PRIMARY KEY,
+    -- いつ確認したか。印を消して付け直すと更新される。**再照合で古くなった印を
+    -- 見分けるための材料**であって、画面の絞り込みはこの値を読まない。
+    checked_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ai_analysis (
     kind TEXT NOT NULL,
     target_type TEXT NOT NULL,

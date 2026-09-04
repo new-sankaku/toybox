@@ -272,7 +272,8 @@ describe("common.js の推移(率と水準のpane)", () => {
     chart.update(ROWS);
     const footer = chart.charts[1].options.plugins.tooltip.callbacks.footer;
     expect(footer([{ dataIndex: 0 }])).toEqual(["宝箱窓の外: 観測時間の 50%"]);
+    // 宝箱の記録が無い期間は割合を出せないので、行そのものを添えない。
     chart.update([{ ...ROWS[0], viewers_avg_nobox: null, nobox_seconds: 0 }]);
-    expect(footer([{ dataIndex: 0 }])).toEqual(["宝箱窓を除く: 宝箱の記録が無い期間"]);
+    expect(footer([{ dataIndex: 0 }])).toEqual([]);
   });
 });

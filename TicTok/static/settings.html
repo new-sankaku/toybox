@@ -26,25 +26,23 @@
       <div class="a-card a-settingscard">
         <h3>設定</h3>
         <div class="body">
-          <div class="chart-note">設定はDatabaseに保存され、Server再起動後も維持されます。一部の設定は次のSession開始から適用されます。</div>
           <div class="settings-filter">
-            <input id="settings-filter" type="search" aria-label="設定項目を絞り込む" placeholder="項目名・説明・keyで絞り込む" />
+            <input id="settings-filter" type="search" aria-label="絞込" placeholder="項目名・説明・keyで絞り込む" />
             <span id="settings-filter-count" class="chart-note"></span>
           </div>
           <div id="settings-form" class="settings-form"></div>
           <!-- 焼き込み設定の調整は「変更→保存→プレビュー→変更」の反復で、保存が表の
                直下にあると1周ごとに上下scrollが要る。card下端に貼り付けて往復を消す。 -->
           <div class="note-actions settings-save-bar">
-            <button id="settings-save" class="btn btn-primary">設定を保存</button>
+            <button id="settings-save" class="btn btn-primary">保存</button>
             <span id="settings-status" class="form-message" aria-live="polite"></span>
           </div>
         </div>
       </div>
 
       <div class="a-card a-settingscard">
-        <h3>通知の宛先 <span class="sub">webhookが実際に届くかを確かめる</span></h3>
+        <h3>通知の宛先</h3>
         <div class="body">
-          <div class="chart-note">通知の宛先(Discord/Slack/汎用receiverのwebhook URL)は、投稿権限を持つ資格情報のため設定画面ではなく <code>TicTok/.env</code> の <code>TICTOK_NOTIFY_WEBHOOK_URL</code> で指定します（カンマ区切りで複数指定できます）。変更後はServerの再起動が必要です。何を通知するか・閾値・不応期は上の設定「通知(webhook)」の値を使います。</div>
           <div class="note-actions">
             <button id="notify-test" class="btn btn-primary">テスト通知を送る</button>
             <span id="notify-status" class="form-message"></span>
@@ -56,18 +54,17 @@
               <tbody id="notify-target-list"></tbody>
             </table>
           </div>
-          <div id="notify-target-empty" class="chart-note hidden">宛先が設定されていません。</div>
+          <div id="notify-target-empty" class="chart-note hidden">宛先なし</div>
         </div>
       </div>
 
       <div class="a-card a-settingscard">
-        <h3>焼き込みプレビュー <span class="sub">設定の効き目を1配信ぶん出力せずに確かめる</span></h3>
+        <h3>焼き込みプレビュー</h3>
         <div class="body">
-          <div class="chart-note">録画を1本選んで、上の焼き込み設定をそのまま適用した結果を確認します。静止画は1 frameだけを合成するので数秒で返ります。動画は本出力と同じ解像度・codec・qualityで焼き込み、尺だけを切ります(長さは上の設定「焼き込み: 時刻合わせとプレビュー」にある「動画化: プレビュー動画の尺(秒)」で決まります)。切り出す位置はコメント/Gift/Battleが最も多い区間を自動で選びます。プレビューは保存済みの設定を使います。</div>
           <div class="note-actions">
             <select id="preview-recording"></select>
             <button id="preview-still-btn" class="btn btn-primary">静止画で確認</button>
-            <button id="preview-clip-btn" class="btn">動画で確認（queueに入ります）</button>
+            <button id="preview-clip-btn" class="btn">動画で確認</button>
             <span id="preview-status" class="form-message"></span>
           </div>
           <div id="preview-meta" class="chart-note"></div>
@@ -76,28 +73,26 @@
       </div>
 
       <div class="a-card a-settingscard">
-        <h3>shortの型 <span class="sub">縦の短尺動画を、どの尺でどう仕上げるか</span></h3>
+        <h3>shortの型</h3>
         <div class="body">
           <!-- 型が設定表ではなく別の表なのは、同時に複数成立する値だからである。設定は
                1 keyに1値しか持てず、短尺の型と中尺の型を併存させた時点で表現できない。 -->
-          <div class="chart-note">short生成API（<code>/api/recordings/{id}/short</code>）が、ここで作った型で範囲を決めます（録画画面にあった「short」の節は外したため、投入はAPIから行います）。尺は範囲確定の目標と許容で、下限に届かない・上限を超える範囲は縮めずに捨てます（縮めて通すと話の途中で切れたshortが出ます）。焼く要素は焼き込み設定の値をこの型の指定で差し替えるだけなので、出来上がる絵は同じ設定の全尺焼きと一致します。</div>
           <div class="note-actions">
-            <input id="short-preset-name" type="text" placeholder="型の名前（例: 短尺 15〜60秒）" aria-label="新しい型の名前" />
+            <input id="short-preset-name" type="text" placeholder="型の名前（例: 短尺 15〜60秒）" aria-label="型の名前" />
             <button id="short-preset-add" class="btn btn-primary">型を追加</button>
             <span id="short-preset-status" class="form-message" aria-live="polite"></span>
           </div>
           <div id="short-preset-list" class="settings-form"></div>
-          <div id="short-preset-empty" class="feed-empty" data-label="shortの型">shortの型がまだありません。</div>
+          <div id="short-preset-empty" class="feed-empty" data-label="shortの型">型なし</div>
         </div>
       </div>
 
       <div class="a-card a-settingscard">
         <h3>保持policy <span class="sub">古いdataの削除</span></h3>
         <div class="body">
-          <div class="chart-note">上の設定「容量と保持policy」にある「保持policy:」で始まる各項目に沿って、①中断したrenderが残した中間file → ②作り直せる派生物(焼き込み・Up出力) → ③生録画 の順で削除します。生録画のmp4は唯一の再取得不能なdataなので、既定では③を実行しません。</div>
           <div class="note-actions">
-            <button id="retention-preview" class="btn">削除内容を確認（削除しません）</button>
-            <button id="retention-apply" class="btn btn-danger" disabled>確認した内容を削除する</button>
+            <button id="retention-preview" class="btn">確認</button>
+            <button id="retention-apply" class="btn btn-danger" disabled>削除</button>
             <span id="retention-status" class="form-message"></span>
           </div>
           <div id="retention-plan"></div>
@@ -105,24 +100,26 @@
       </div>
 
       <div class="a-card a-settingscard">
-        <h3>Databaseの保守 <span class="sub">event・解析結果・設定はtictok.dbにしかありません。退避はSQLiteのbackup APIで取るため、収集を止めずに実行できます。</span></h3>
+        <h3>Databaseの保守</h3>
         <div class="body">
           <div class="note-actions">
-            <button id="mnt-backup" class="btn btn-primary" title="稼働したまま、その時点のDBの複製を1世代作ります。作成後にintegrity_checkで読めることを確認してから確定します。">今すぐ退避</button>
-            <button id="mnt-integrity" class="btn" title="PRAGMA integrity_check を実行します。読み取りのみで、収集は止まりません。">健全性check</button>
-            <button id="mnt-checkpoint" class="btn" title="WALの内容をDB本体へ書き戻し、WAL fileを切り詰めます。">WAL checkpoint</button>
-            <button id="mnt-vacuum" class="btn btn-danger" title="DB fileを作り直して空き領域を回収します。実行中は全ての書き込みが待たされます。">VACUUM</button>
+            <button id="mnt-backup" class="btn btn-primary">今すぐ退避</button>
+            <button id="mnt-integrity" class="btn">健全性check</button>
+            <button id="mnt-checkpoint" class="btn">WAL checkpoint</button>
+            <button id="mnt-vacuum" class="btn btn-danger">VACUUM</button>
+            <button id="mnt-unfreeze" class="btn" hidden>刈り取りの凍結を解除</button>
             <span id="mnt-status" class="form-message"></span>
           </div>
           <div id="mnt-summary" class="chart-note"></div>
+          <div id="mnt-guard" class="chart-note" hidden></div>
           <div class="table-wrap">
             <table class="result-table">
               <thead>
-                <tr><th>退避file</th><th>種別</th><th>作成日時</th><th>size</th></tr>
+                <tr><th>退避file</th><th>種別</th><th>取得日時</th><th>層</th><th>size</th></tr>
               </thead>
               <tbody id="mnt-rows"></tbody>
             </table>
-            <div id="mnt-empty" class="feed-empty" data-label="退避">退避fileはまだありません。</div>
+            <div id="mnt-empty" class="feed-empty" data-label="退避">退避fileなし</div>
           </div>
         </div>
       </div>
@@ -131,7 +128,7 @@
 
     <!-- 行3: フッター -->
     <div class="a-footer">
-      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot" aria-live="polite">Server接続中…</span>
+      <span id="ws-indicator-foot" class="dot">●</span>
       <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
     </div>
   </div>

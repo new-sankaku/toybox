@@ -463,24 +463,22 @@ class TranscriptsMixin:
         件数は2つ出す。``item_count`` は所属する見どころの全件で、``ranged_count`` は
         そのうち範囲を持つ(=mp4にできる)件数である。合計尺は範囲付きだけの和なので、
         件数を1つしか出さないと「10件あるのに0秒」という読めない組み合わせが出る。"""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT g.id, g.name, g.memo, g.position, g.created_at,"
-                " (SELECT COUNT(*) FROM bookmarks b WHERE b.group_id = g.id)"
-                "   AS item_count,"
-                " (SELECT COUNT(*) FROM bookmarks b"
-                "   WHERE b.group_id = g.id AND b.end IS NOT NULL) AS ranged_count,"
-                " (SELECT COALESCE(SUM(b.end - b.start), 0) FROM bookmarks b"
-                "   WHERE b.group_id = g.id AND b.end IS NOT NULL) AS ranged_seconds"
-                " FROM clip_groups g"
-                " ORDER BY (g.position IS NULL), g.position, g.created_at, g.id"
-            ).fetchall()
+        rows = self._read_connection().execute(
+            "SELECT g.id, g.name, g.memo, g.position, g.created_at,"
+            " (SELECT COUNT(*) FROM bookmarks b WHERE b.group_id = g.id)"
+            "   AS item_count,"
+            " (SELECT COUNT(*) FROM bookmarks b"
+            "   WHERE b.group_id = g.id AND b.end IS NOT NULL) AS ranged_count,"
+            " (SELECT COALESCE(SUM(b.end - b.start), 0) FROM bookmarks b"
+            "   WHERE b.group_id = g.id AND b.end IS NOT NULL) AS ranged_seconds"
+            " FROM clip_groups g"
+            " ORDER BY (g.position IS NULL), g.position, g.created_at, g.id"
+        ).fetchall()
         return [dict(row) for row in rows]
 
     def get_group(self, group_id: int) -> Optional[dict]:
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM clip_groups WHERE id = ?", (group_id,)).fetchone()
+        row = self._read_connection().execute(
+            "SELECT * FROM clip_groups WHERE id = ?", (group_id,)).fetchone()
         return dict(row) if row else None
 
     def add_group(self, name: str, memo: str = "") -> dict:
@@ -746,13 +744,12 @@ class TranscriptsMixin:
 
     def list_unmapped_bookmarks(self, recording_id: int) -> list:
         """まだPTS軸へ載せていないlive見どころ(finalizeの再map対象)。"""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT id, start, live_wall FROM bookmarks"
-                " WHERE recording_id = ? AND pts_mapped = 0 AND live_wall IS NOT NULL"
-                " ORDER BY live_wall",
-                (recording_id,),
-            ).fetchall()
+        rows = self._read_connection().execute(
+            "SELECT id, start, live_wall FROM bookmarks"
+            " WHERE recording_id = ? AND pts_mapped = 0 AND live_wall IS NOT NULL"
+            " ORDER BY live_wall",
+            (recording_id,),
+        ).fetchall()
         return [dict(row) for row in rows]
 
     def apply_bookmark_pts(self, mapped: list) -> int:
@@ -781,8 +778,7 @@ class TranscriptsMixin:
             sql += " WHERE b.recording_id = ?"
             params = (recording_id,)
         sql += " ORDER BY r.started_at DESC, b.start"
-        with self._lock:
-            rows = self._conn.execute(sql, params).fetchall()
+        rows = self._read_connection().execute(sql, params).fetchall()
         return [dict(row) for row in rows]
 
     def bookmarks_in_group(self, group_id: int) -> list:
@@ -796,15 +792,14 @@ class TranscriptsMixin:
         点(``end IS NULL``)も返す。除くのは呼び出し側の仕事である ―― ここで黙って落とすと、
         画面が「グループに5件」と数えたものが4シーンで書き出され、消えた1件の理由が
         どこにも出ない。"""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT b.*, r.path, r.filename, r.started_at AS recording_started_at,"
-                " r.session_id AS recording_session_id, r.ended_at AS recording_ended_at"
-                " FROM bookmarks b LEFT JOIN recordings r ON r.id = b.recording_id"
-                " WHERE b.group_id = ?"
-                " ORDER BY (b.position IS NULL), b.position, b.start, b.id",
-                (int(group_id),),
-            ).fetchall()
+        rows = self._read_connection().execute(
+            "SELECT b.*, r.path, r.filename, r.started_at AS recording_started_at,"
+            " r.session_id AS recording_session_id, r.ended_at AS recording_ended_at"
+            " FROM bookmarks b LEFT JOIN recordings r ON r.id = b.recording_id"
+            " WHERE b.group_id = ?"
+            " ORDER BY (b.position IS NULL), b.position, b.start, b.id",
+            (int(group_id),),
+        ).fetchall()
         return [dict(row) for row in rows]
 
     def mark_bookmark_exported(self, bookmark_id: int, path: str,
@@ -839,9 +834,8 @@ class TranscriptsMixin:
         return cursor.rowcount
 
     def get_bookmark(self, bookmark_id: int) -> Optional[dict]:
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM bookmarks WHERE id = ?", (bookmark_id,)).fetchone()
+        row = self._read_connection().execute(
+            "SELECT * FROM bookmarks WHERE id = ?", (bookmark_id,)).fetchone()
         return dict(row) if row else None
 
     def update_bookmark_range(self, bookmark_id: int, start: Optional[float] = None,

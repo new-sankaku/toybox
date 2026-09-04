@@ -86,11 +86,10 @@ describe("streamers.js のファン継続率(日次コホート)", () => {
     expect(avg.data).toEqual([50.8, 50.8, 50.8]);
   });
 
-  it("視聴dataが無ければ案内を出す", () => {
+  it("視聴dataが無ければ日数の名乗りも出さない", () => {
     win.renderCohort({ days: [] });
-    expect(doc.getElementById("sm-cohort-empty").classList.contains("hidden")).toBe(false);
+    expect(doc.getElementById("sm-cohort-note").textContent).toBe("");
     win.renderCohort({ days: DAYS });
-    expect(doc.getElementById("sm-cohort-empty").classList.contains("hidden")).toBe(true);
     expect(doc.getElementById("sm-cohort-note").textContent).toBe("3日");
   });
 });

@@ -33,6 +33,7 @@ from tictok.api import runtime
 from tictok.core import layout
 from tictok.media import clip_subtitles, clipper
 from tictok.media.clipper import parse_clip_name
+from tictok.media import highlight_export
 from tictok.media import work
 
 router = APIRouter()
@@ -152,6 +153,10 @@ def _scan_root(root: str, base: Path, by_stem: dict) -> tuple:
                     "end": parsed.get("end"),
                     "label": parsed.get("label") or "",
                     "parts": parsed.get("parts"),
+                    # highlightをgifterごとに繋いだ1本だけが持つ。範囲(start/end)を持たない
+                    # 成果物なので、素性はこの2つで名乗る(週の窓とその週の合計コイン)。
+                    "week": parsed.get("week") or "",
+                    "coin": parsed.get("coin"),
                     # 字幕fileだけが持つ書式(srt/vtt/ass)。空なら字幕fileではない。
                     "subtitle_format": parsed.get("subtitle_format") or "",
                     "recording_id": owner.get("recording_id"),
@@ -213,25 +218,33 @@ async def delete_clip_file(root: str, name: str) -> dict:
     mp4を消すときは、そのmp4に添えた字幕fileも一緒に消す。字幕fileは単独では使い道が無く
     (時刻が対のmp4の軸に載っている)、残すと消えた動画の字幕だけが一覧に並び続ける。逆向き
     (字幕fileを消してもmp4は残る)は成り立つので、そちらは1本ずつのままである。
+
+    highlightを繋いだ1本に添えた**素性のJSON**(``<file名>.mp4.json``)も同じ理由で道連れに
+    する。中身の無い素性は素性ではないうえ、一覧に出ない拡張子なので残っても誰も気付けない。
     """
     path = await asyncio.to_thread(_resolve, root, name)
 
     def _remove() -> tuple:
         size = path.stat().st_size
         path.unlink()
-        companions: list = []
+        subtitles: list = []
+        others: list = []
         if path.suffix.lower() == ".mp4":
-            for suffix in clip_subtitles.SUBTITLE_EXTENSIONS:
-                sidecar = path.with_suffix(suffix)
+            # 字幕と素性は**別々に数える**。画面は「字幕も消しました」を件数で名乗るので、
+            # 素性のJSONを同じ数に混ぜると字幕が1つ増えて見える。
+            for sidecar, bucket in (
+                    *((path.with_suffix(suffix), subtitles)
+                      for suffix in clip_subtitles.SUBTITLE_EXTENSIONS),
+                    (highlight_export.provenance_path(path), others)):
                 if not sidecar.is_file():
                     continue
                 size += sidecar.stat().st_size
                 sidecar.unlink()
-                companions.append(sidecar.name)
-        return size, companions
+                bucket.append(sidecar.name)
+        return size, subtitles, others
 
     try:
-        freed, sidecars = await asyncio.to_thread(_remove)
+        freed, sidecars, others = await asyncio.to_thread(_remove)
     except OSError as exc:
         runtime.logger.warning(
             "切り出しfileの削除に失敗しました: %s", path, exc_info=True,
@@ -240,6 +253,7 @@ async def delete_clip_file(root: str, name: str) -> dict:
     runtime.logger.info(
         "切り出しfileを削除しました: %s", path,
         extra={"event": "clip.deleted",
-               "ctx": {"path": str(path), "bytes": freed, "subtitles": sidecars}})
+               "ctx": {"path": str(path), "bytes": freed, "subtitles": sidecars,
+                       "companions": others}})
     return {"deleted": True, "freed_bytes": freed, "path": str(path),
-            "subtitle_files": sidecars}
+            "subtitle_files": sidecars, "companion_files": others}

@@ -56,6 +56,24 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+def dotenv_key_names() -> list:
+    """.env に**どのkeyが書かれているか**だけを返す(値は返さない)。
+
+    設定値の退避(``core.settings_export``)が使う。退避は一次保存と全ての最終保存先へ
+    書かれるので、値を載せればdriveを1台紛失した時点でAPI keyが漏れる —— backupが増やしたのは
+    安全ではなく攻撃面である。一方、どのkeyが設定されていたかは復旧時に必要なので、名前だけは
+    残す。
+
+    grammarを退避側に書き直させないためにここへ置く。書き直すと、退避が名乗るkeyとserverが
+    実際に読み込んだkeyが静かにずれ得る(引用符や空行の扱いが1つ違うだけで起きる)。読むのは
+    import時ではなく呼ばれた時点のfileで、``_load_dotenv`` の後に人が足したkeyも載る。
+    fileが無ければ空list。"""
+    env_path = PROJECT_ROOT / ".env"
+    if not env_path.is_file():
+        return []
+    return sorted(_parse_env_text(env_path.read_text(encoding="utf-8")))
+
+
 def dotenv_summary() -> dict:
     """Counts from the import-time .env load, reported by the server once logging is
     configured. This module is imported by logging_setup itself, so the load runs before
@@ -281,6 +299,73 @@ def final_record_dir_from_db(db_path: str) -> str:
     return value or record_dir_from_db(db_path)
 
 
+def secondary_record_dirs_from_db(db_path: str) -> list:
+    """二次保存先(HDD)の全系統。設定された順に返し、未設定なら空list。
+
+    二次保存先が2つあるのは**振り分けではなく相互mirror**である。1台のdiskが壊れても
+    二次のdataが残るようにするためのもので、両系統は常に同じ内容でなければならない。
+    したがってここは「どちらか」を選ぶ関数ではなく、書き込む側は返ったroot**すべて**へ
+    書き、読む側はすべてを探す。片方だけが最新という状態は、次の障害で気付かないまま
+    dataを失うので、移送はどちらか一方に書けない時点で行わない(``tictok.api.disk``)。
+
+    順序に意味があるのは読み出しだけで、先に見つかった方から読む。移送・再同期は順序に
+    依存しない。"""
+    values = []
+    for key, env in (("record_dir_final", "TICTOK_RECORD_DIR_FINAL"),
+                     ("record_dir_final2", "TICTOK_RECORD_DIR_FINAL2")):
+        value = _setting_from_db(db_path, key) or os.environ.get(env, "").strip()
+        if value:
+            values.append(value)
+    return values
+
+
+def record_backup_dir_from_db(db_path: str) -> str:
+    """一次保存の定期backup先(親)。未設定なら空文字 = 定期backupを行わない。
+
+    ここが指すのは**親folder**で、実体は下に作る
+    :data:`tictok.record.primary_backup.PRIMARY_BACKUP_DIRNAME` の中へ置く。既存のdataが
+    入っているdriveをそのまま指定できるようにするためで、backupだけをまとめて消したり
+    運んだりする操作を、他のfileを巻き込まずに行えるようにする。"""
+    return _setting_from_db(db_path, "record_backup_dir")         or os.environ.get("TICTOK_RECORD_BACKUP_DIR", "").strip()
+
+
+def get_record_backup_enabled() -> bool:
+    """録画の確定を合図に一次保存をbackup先へ写すか。保存先が未設定なら値に関わらず走らない。"""
+    return _setting_from_db(get_db_path(), "record_backup_enabled") != "0"
+
+
+def get_record_backup_quiet_minutes() -> float:
+    """録画の確定からbackupを始めるまでに待つ静穏時間(分)。
+
+    確定の直後は ts結合・波形・サムネ・文字起こしが同じfileを読み書きしている
+    (``startup._sweep_candidates``)。その最中に写すと、写した先には途中の姿が残り、
+    しかも同じdiskを奪い合って両方が遅くなる。次の配信が始まってしまう前に終わらせたいので
+    長くはしない。"""
+    raw = _setting_from_db(get_db_path(), "record_backup_quiet_minutes")
+    return float(raw) if raw else 15.0
+
+
+def get_record_backup_min_interval_minutes() -> float:
+    """backupを続けて走らせない下限間隔(分)。
+
+    配信が短い間隔で終わる日に、1本ごとに全体を舐め直すのを防ぐ。差分copyなので2回目は
+    軽いが、73万fileのpoolを走査する費用は毎回かかる。"""
+    raw = _setting_from_db(get_db_path(), "record_backup_min_interval_minutes")
+    return float(raw) if raw else 60.0
+
+
+def get_record_backup_keep_deleted_days() -> int:
+    """backup先で、一次保存から消えたfileを残しておく日数。0で消さない(無期限)。
+
+    backupを厳密なmirrorにすると、一次保存でのdelete事故がそのままbackupへ伝播して
+    「backupがあるのに戻せない」になる。猶予を置くことで、誤って消したfileは気付くまでの
+    間backup先に残る。既定は消さない側に倒す ―― diskは足せるが、消えたdataは足せない。
+    0を「無効」とするのは ``get_db_backup_keep`` / ``get_journal_retention_days`` と同じ
+    規約で、この設定群のあいだで0の意味を割らないためである。"""
+    raw = _setting_from_db(get_db_path(), "record_backup_keep_deleted_days")
+    return int(raw) if raw else 0
+
+
 def get_locale_lang() -> str:
     return os.environ.get("TICTOK_LOCALE_LANG", "ja")
 
@@ -401,6 +486,17 @@ def get_log_dedup_window_seconds() -> int:
 def get_log_dedup_max_tracked() -> int:
     """Cap on distinct fingerprints held by the suppressor, bounding its memory."""
     return _env_int("TICTOK_LOG_DEDUP_MAX_TRACKED", 2000)
+
+
+def get_log_demote_proactor_reset() -> bool:
+    """Demote the Windows ProactorEventLoop teardown reset to DEBUG.
+
+    CPython 3.10 calls socket.shutdown() unguarded in _call_connection_lost, so a
+    client that vanished (player seek aborting a range request, tab closed) surfaces
+    as an ERROR after the request already finished. Demoting keeps it visible at
+    DEBUG instead of dropping it. Only applies to that exact callback, and never
+    when the reset masks an exception raised by connection_lost itself."""
+    return _env_bool("TICTOK_LOG_DEMOTE_PROACTOR_RESET", True)
 
 
 def get_log_quiet_loggers() -> str:
@@ -635,8 +731,14 @@ def get_db_backup_dir() -> str:
     tiny test snapshots claiming the ``premigration`` name pushed out the real one:
     measured, a 1.85GB pre-migration snapshot was gone after a single test run, and
     the loss is invisible until someone needs to restore. A snapshot belongs to the
-    database it was taken from."""
-    configured = os.environ.get("TICTOK_DB_BACKUP_DIR")
+    database it was taken from.
+
+    設定(DB)を先に見るのは、退避先を**DB本体とは別のdiskへ**置けるようにするためである
+    (設定 > 環境変数 > DBの隣)。DBと退避が同じdiskに在る限り、退避はDBの論理的な事故
+    (誤削除・migration失敗)しか守らず、diskそのものが落ちれば両方まとめて失われる。
+    設定はそのDB自身から読むので、test sandboxの別DBは値を持たず既定(そのDBの隣)のまま
+    である ―― 上の性質は保たれる。"""
+    configured = _setting_from_db(get_db_path(), "db_backup_dir")         or os.environ.get("TICTOK_DB_BACKUP_DIR", "").strip()
     if configured:
         return configured
     return str(Path(get_db_path()).resolve().parent / "backups")
@@ -646,8 +748,110 @@ def get_db_backup_keep() -> int:
     """Snapshot generations kept per reason (manual / pre-migration), oldest pruned
     after a new one lands. A snapshot is a full copy of the database, so generations are
     counted in hundreds of MB each; three is enough to step back past a bad run without
-    the folder outgrowing the data it protects. 0 disables pruning."""
-    return _env_int("TICTOK_DB_BACKUP_KEEP", 3)
+    the folder outgrowing the data it protects. 0 disables pruning.
+
+    これが数えるのは manual / premigration のような**理由つきの世代**である。時刻で層化した
+    世代(日次・週次)は別の数(:func:`get_db_backup_keep_daily` ほか)が持つ ―― 人が誤りに
+    気付くまでの猶予は日単位で、そこを世代数3で削ると事故の**前**の姿が先に消える。"""
+    raw = _setting_from_db(get_db_path(), "db_backup_keep")
+    return int(raw) if raw else _env_int("TICTOK_DB_BACKUP_KEEP", 3)
+
+
+def get_db_backup_on_recording_finished() -> bool:
+    """録画の確定を合図にDBのsnapshotを取るか。
+
+    退避の合図を「配信の終わり」に合わせるのは、そこがDBの中身が最も増えた直後であり、かつ
+    収集が止まっている唯一の予測可能な時点だからである。時刻で回すcronにすると、配信の
+    真っ最中に1.6GBを読み出すことになる。"""
+    raw = _setting_from_db(get_db_path(), "db_backup_on_recording_finished")
+    return raw != "0"
+
+
+def get_db_backup_keep_daily() -> int:
+    """日次世代の保持日数。1日1つだけ残す(その日の最初のsnapshotを昇格させる)。
+
+    誤ったDELETE/DROPは**気付くまでに日数がかかる**種類の事故である。世代を回数で数えると、
+    配信が続いた日に事故の前の姿が押し出される。日で数えれば、押し出す速さは配信の本数では
+    なく暦が決める。0で無効。"""
+    raw = _setting_from_db(get_db_path(), "db_backup_keep_daily")
+    return int(raw) if raw else 14
+
+
+def get_db_backup_keep_weekly() -> int:
+    """週次世代の保持週数。日次から溢れる更に古い姿を、週1つだけ残す。0で無効。"""
+    raw = _setting_from_db(get_db_path(), "db_backup_keep_weekly")
+    return int(raw) if raw else 8
+
+
+def get_db_guard_drop_rows() -> int:
+    """「行が急に減った」と見なす**行数**。0で検知しない。
+
+    割合(:func:`get_db_guard_drop_ratio`)だけでは、DBが育つほど見逃す量が増える —— 2%は
+    events 154万行の今なら約3万行だが、1,500万行になれば30万行まで黙って消せる。絶対数は
+    その天井を固定する。
+
+    既定の50,000は**通常運用で1回に消える最大量の実測から**採った。行が大量に減る経路は
+    どれもoperatorの明示操作で、最大のものはsession 1件の削除(eventsがcascadeで消える)。
+    実測(2026-09-02、実DB): events 1,537,964行のうち1 sessionの最大が36,892行、中央値
+    4,140行。50,000はその最大を上回るので、通常のsession削除では鳴らない。"""
+    raw = _setting_from_db(get_db_path(), "db_guard_drop_rows")
+    return int(raw) if raw else 50000
+
+
+def get_db_guard_drop_min_rows() -> int:
+    """割合の判定を当てる最小の減少幅(行)。これ未満の減少は割合では判定しない。0で無制限。
+
+    割合という物差しは小さい表では成立しない —— 30行の表から1行消えれば3.3%で、既定の2%を
+    必ず超える。ここに下限を置くことで、同じ2%を大きい表にも小さい表にも当てられる。
+
+    既定の500は**通常運用の1操作で消える最大量の実測**から採った(2026-09-02、実DB):
+    markers は1 sessionあたり最大351行、bookmarks の「表示中をすべて削除」は最大の
+    グループで59行、envelopes は1 sessionあたり最大128行、その他(monitored_targets /
+    clip_groups / clip_presets / recordings / transcripts / sessions)はどれも1操作1行。
+    500未満の減少はこれらで説明がつくので、割合では事故と判定しない。
+
+    この下限を越えられない小さい表を守るのは「0行になったこと」の側である(:func:`
+    get_db_guard_drop_ratio` の説明を参照)。"""
+    raw = _setting_from_db(get_db_path(), "db_guard_drop_min_rows")
+    return int(raw) if raw else 500
+
+
+def get_db_guard_drop_ratio() -> float:
+    """「行が急に減った」と見なす割合。0で検知しない。
+
+    snapshotを取る直前に主要な表の行数を数え、前回の記録より この割合を超えて減っていたら
+    事故とみなす。減ることそのものは正常にも起きる(retentionのops_events刈り込み等)ので
+    止めはしない ―― 行うのは2つで、**古い世代の刈り取りを凍結**して事故の前の姿を守り、
+    運用logと通知で名乗る。世代を回転させ続けることこそが、backupがあるのに戻せない状態を
+    作る唯一の経路である。
+
+    物差しはこれ1つではない。割合は大きい表にしか効かないので、行数
+    (:func:`get_db_guard_drop_rows`)と「行が在った表が0行になったこと」を合わせた3本立てで
+    見る。0行化に閾値が無いのは意図的で、``DROP TABLE`` して作り直しても
+    ``DELETE FROM <表>`` でも最終形は同じ「0行」であり、割合にも行数にも取りこぼす設定値が
+    在り得るためである。件数の小さい手入力データ(settings / monitored_targets / clip_groups)は、
+    実質この条件だけが守る。"""
+    raw = _setting_from_db(get_db_path(), "db_guard_drop_ratio")
+    return float(raw) if raw else 0.02
+
+
+def get_row_trash_keep_days() -> int:
+    """消えた行そのものの退避(``row_trash``)を何日残すか。0で刈らない(無期限)。
+
+    退避されるのは人がやり直すしか復旧手段が無い6表の削除行で、仕組みと対象の線引きは
+    :mod:`tictok.store.row_trash` に在る。刈り取りは起動時に1回。
+
+    既定を365日と長く取れるのは、**これが安いから**である。実測(2026-09-02、logs/の46日ぶん
+    のJSONL): 対象6表へのDELETE要求は46日で29件(≒0.63件/日)、1行のJSONは実測292 byte
+    (bookmarks)〜448 byte(clip_presets)なので、1年貯めても数百KBにしかならない(現行DBは
+    1.6GB)。cascadeで最も大きい録画1本の削除でも実測1,070行・約240KBである。
+
+    DBの退避の暦層(:func:`get_db_backup_keep_daily` 14日 + :func:`get_db_backup_keep_weekly`
+    8週 ≒ 70日)より長いのは意図的で、**戻せる単位が違う**ためである。退避はその時点の全体
+    なので、1行を戻せば他の全ての変更も巻き戻る。行単位で戻せるのはこちらだけなので、誤削除
+    に人が気付くまでの猶予をここでは長く取る。"""
+    raw = _setting_from_db(get_db_path(), "row_trash_keep_days")
+    return int(raw) if raw else 365
 
 
 def get_db_backup_min_free_ratio() -> float:
@@ -1771,6 +1975,165 @@ def get_clip_duration_tolerance_seconds() -> float:
     is not checked; only a clip shorter than requested trips this, which is what catches
     an audio filter silently changing the length."""
     return _env_float("TICTOK_CLIP_DURATION_TOLERANCE_SECONDS", 1.0)
+
+
+# ---- highlight(TikTok本体の切り抜き) ----
+
+# 演出gift下限の既定。値の根拠は :func:`get_highlight_effect_coin_floor` にある。
+# 定数で持つのは、不正値の報告(``_reject``)と既定の解決で同じ値を2回書かないため。
+HIGHLIGHT_EFFECT_COIN_FLOOR_DEFAULT = 98
+
+
+def get_highlight_effect_coin_floor() -> int:
+    """**画面に演出が出る**とみなすgiftの下限💎。DB設定 > 環境変数 > 既定98。
+
+    以前はこの下限をscriptの定数(1,000💎)で持っていた。「全画面演出を持つのは高額giftだけ」
+    という前提だったが、実物のhighlightで**99💎の階層(LIVE On Air / Singing Mushroom 等)にも
+    画面上の演出が出る**ことを確認したため、階層ごと拾える値へ下げた。98なのは99💎の階層を
+    含めるためで、99でも同じ集合になるが、階層の値そのものを閾値に置くと後で1💎の丸めが
+    入った日に階層が丸ごと外れる。
+
+    これ未満のgiftは小さなbannerしか出さない。切り出しても見せ場にならないので、書き出しの
+    既定の下限としても使う(:func:`tictok.media.highlight_export.export_highlights`)。
+
+    **2つの用途で意味が違うことに注意する。** 照合側(``highlight_match``)では
+    「gift窓を張る候補の下限」= 探す範囲を決める値であり、書き出し側では
+    「出来上がりの1本へ載せる下限」= 成果物の中身を決める値である。同じ既定値を使うが、
+    片方を変えたい日は必ず来るので、呼ぶ側は自分の引数名で受け直すこと。
+
+    解決順を ``record_dir_from_db`` と揃えるのは、設定画面(DB)で変えた値がserverの再起動を
+    待たずに効くようにするためである。"""
+    raw = _setting_from_db(get_db_path(), "highlight_effect_coin_floor")
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            # ``_reject`` は使わない。あちらの文言は「環境変数」「この行を削除すれば既定値へ
+            # 戻る」で、設定画面で入れた値の直し方としては嘘になる。
+            logger.error(
+                "設定値が整数として読めません: highlight_effect_coin_floor=%r"
+                "（既定値は %r。設定画面で直してください）",
+                raw, HIGHLIGHT_EFFECT_COIN_FLOOR_DEFAULT,
+                extra={"event": "process.config_setting_invalid",
+                       "ctx": {"key": "highlight_effect_coin_floor", "raw": raw,
+                               "expected": "整数",
+                               "default": HIGHLIGHT_EFFECT_COIN_FLOOR_DEFAULT}},
+            )
+            raise ConfigError(
+                f"設定値 highlight_effect_coin_floor が整数として読めません: {raw!r}"
+                f"（既定値 {HIGHLIGHT_EFFECT_COIN_FLOOR_DEFAULT!r}）"
+            ) from None
+    return _env_int("TICTOK_HIGHLIGHT_EFFECT_COIN_FLOOR",
+                    HIGHLIGHT_EFFECT_COIN_FLOOR_DEFAULT)
+
+
+# 候補にする録画をどれだけ遡るかの**段**。値の根拠は
+# :func:`get_highlight_match_day_stages` にある。定数で持つのは、不正値の報告と既定の解決で
+# 同じ値を2回書かないため。
+HIGHLIGHT_MATCH_DAY_STAGES_DEFAULT = (14.0, 30.0)
+
+
+def get_highlight_match_day_stages() -> tuple:
+    """照合の候補にする録画を何日ぶん遡るか。**1つではなく段で持つ。** 既定 ``(14, 30)``。
+
+    DB設定 > 環境変数 > 既定。書式は ``14,30`` のようなコンマ区切りの日数で、**狭い順**に
+    並べる(並んでいなければここで並べ替える —— 広い方から試すと段の意味が無くなる)。
+
+    段にしてある理由は実測にある。候補の窓を広げても**通しの時間はほとんど増えない**が
+    (2026-09-02の実測: 候補14本→33本で 18.0秒→19.9秒。通しの8〜9割は候補の量と無関係な
+    「gift演出の詰め」)、**外れた照合は1.0秒で終わる**(当たりが無いと詰めが走らない)。よって
+    「狭い窓で試して、1本も当たらなければ広げてもう一度」は**ほぼ ただ**である。
+
+    広い方を最初から使わないのは、候補が増えるほど確実に増える費用が2つあるためである:
+
+    - 指紋の初回作成。実時間の401倍速なので、1年ぶん(1,460時間)で約1時間かかる
+    - 指紋のsidecar。1本2.3MBなので、1年ぶんで1配信者あたり1.8GB
+
+    **窓は「今」から遡って張られる**(:func:`tictok.media.highlight_match.candidates`)ので、
+    古い配信のハイライトほど広い窓が要る。段の一番外を広げれば拾えるが、その日数ぶんの
+    指紋が要ることになる —— だから既定は30日までにして、それより古い物は画面から日数を
+    明示してもらう。
+
+    解決順を他の設定と揃えるのは、設定画面(DB)で変えた値がserverの再起動を待たずに効く
+    ようにするためである。"""
+    raw = _setting_from_db(get_db_path(), "highlight_match_day_stages")
+    source = "highlight_match_day_stages"
+    if not raw:
+        raw = os.environ.get("TICTOK_HIGHLIGHT_MATCH_DAY_STAGES") or ""
+        source = "TICTOK_HIGHLIGHT_MATCH_DAY_STAGES"
+    if not raw:
+        return HIGHLIGHT_MATCH_DAY_STAGES_DEFAULT
+    return _parse_day_stages(raw, source)
+
+
+def _parse_day_stages(raw: str, source: str) -> tuple:
+    """``"14,30"`` を ``(14.0, 30.0)`` へ。読めない値は既定へ落とさず失敗させる。
+
+    **黙って既定へ落とさない。** 落とすと、設定したつもりの窓と実際に走る窓が食い違い、
+    「当たらない」の理由が設定の書き間違いだったことに誰も気付けない。"""
+    stages: list = []
+    for part in str(raw).replace("、", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            value = float(part)
+        except ValueError:
+            value = float("nan")
+        if not math.isfinite(value) or value <= 0:
+            logger.error(
+                "照合の遡り日数が読めません: %s=%r（既定値は %r）",
+                source, raw, HIGHLIGHT_MATCH_DAY_STAGES_DEFAULT,
+                extra={"event": "process.config_setting_invalid",
+                       "ctx": {"key": source, "raw": raw,
+                               "expected": "正の実数のコンマ区切り（例 14,30）",
+                               "default": list(HIGHLIGHT_MATCH_DAY_STAGES_DEFAULT)}},
+            )
+            raise ConfigError(
+                f"設定値 {source} が日数として読めません: {raw!r}"
+                f"（例 14,30 / 既定値 {list(HIGHLIGHT_MATCH_DAY_STAGES_DEFAULT)}）")
+        stages.append(value)
+    if not stages:
+        return HIGHLIGHT_MATCH_DAY_STAGES_DEFAULT
+    # 狭い順へ揃える。広い方から試すと1段目で当たってしまい、段の意味が無くなる。
+    # 同じ日数が2つ在っても落とす —— 2度同じ窓を走らせても結果は変わらない。
+    return tuple(sorted(set(stages)))
+
+
+def get_highlight_export_quality() -> int:
+    """highlightの書き出しのencode品質(H.264のCRF/CQ目盛り、小さいほど高品質・大きいfile)。
+
+    ``get_normalize_quality``(17)を借りない。あれは**配信のHLSを保存用のmp4へ焼き直す**値で、
+    こちらの入力は**TikTokが既に1.3〜1.5Mbpsまで圧縮し終えたmp4**である。17で焼くと
+    720x1280で6.8Mbps、素材の4.5倍になり、増えた分はほぼ素材自身の圧縮ノイズを写し取る
+    ためだけに使われる(``get_normalize_codec`` が録画側で見つけたのと同じ現象)。
+
+    25にした根拠(実物のhighlightから、演出の中でも細かい3本のgift演出で実測。VMAFは元frameとの比較、
+    最小はframe単位の最悪値):
+
+    ====  =================  ==========  ==========
+    cq    bitrate            VMAF平均    VMAF最小
+    ====  =================  ==========  ==========
+    17    5.1〜7.8Mbps       98.6〜98.9  96.1〜96.8
+    21    3.5〜5.1Mbps       98.2〜98.6  94.8〜96.1
+    23    2.9〜4.1Mbps       97.8〜98.3  93.6〜95.7
+    **25**  **2.4〜3.3Mbps**   **97.3〜97.9**  **92.5〜94.7**
+    27    2.0〜2.7Mbps       96.1〜97.1  90.5〜94.1
+    29    1.7〜2.2Mbps       94.7〜95.8  88.6〜92.6
+    ====  =================  ==========  ==========
+
+    25は素材の**1.8〜2.2倍**で、17に対しfileは**55%小さい**のにVMAFの平均差は1.0〜1.6しか
+    ない。27まで下げると素材の1.5〜1.8倍まで落ちるが、最も細かいgift演出で最小VMAFが90.5まで
+    下がる ―― 出力に載るのは全画面の演出で、粒子とgradientが画面を覆う数秒である。そこは
+    最悪値が効く場面なので、平均ではなく最小の側で線を引いた。
+
+    encoderのoptionでは埋まらないことも測った(同じcq25で ``-multipass fullres`` は±0.03、
+    ``-rc-lookahead 32 -spatial_aq 1`` はbitrate +11%でVMAF **-0.7**、``-preset p7`` は
+    -0.13)。よって ``video_overlay._encoder_args`` は焼き込みと共有のままにして、cqだけを
+    この用途の値にする。
+
+    ``TICTOK_HIGHLIGHT_EXPORT_QUALITY`` で上書きできる。"""
+    return _env_int("TICTOK_HIGHLIGHT_EXPORT_QUALITY", 25)
 
 
 # ---- 通知(webhook) ----

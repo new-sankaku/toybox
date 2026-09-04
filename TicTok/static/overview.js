@@ -93,7 +93,6 @@ function buildTile(uid) {
   th.className = "th";
   const link = document.createElement("a");
   link.href = `/?monitor=${encodeURIComponent(uid)}`;
-  link.title = "詳細tabを開く";
   const avatar = document.createElement("span");
   avatar.dataset.field = "avatar";
   const nm = document.createElement("span");
@@ -163,8 +162,7 @@ function buildTile(uid) {
   const on = audioOn.has(uid);
   audioBtn.textContent = on ? "🔊" : "🔇";
   audioBtn.classList.toggle("on", on);
-  audioBtn.title = "音声のON/OFF";
-  audioBtn.setAttribute("aria-label", "音声のON/OFF");
+  audioBtn.setAttribute("aria-label", "音声");
   audioBtn.addEventListener("click", () => toggleAudio(uid));
   const recVideoBtn = document.createElement("button");
   recVideoBtn.dataset.field = "record-video-btn";
@@ -173,8 +171,7 @@ function buildTile(uid) {
   const bookmarkBtn = document.createElement("button");
   bookmarkBtn.dataset.field = "bookmark-btn";
   bookmarkBtn.textContent = "🔖";
-  bookmarkBtn.title = "いま見ている場面を見どころとして記録します。録画中のみ押せます。";
-  bookmarkBtn.setAttribute("aria-label", "見どころに記録");
+  bookmarkBtn.setAttribute("aria-label", "見どころ");
   bookmarkBtn.disabled = true;
   bookmarkBtn.addEventListener("click", () => markBookmark(uid));
   ctl.append(recBtn, recVideoBtn, bookmarkBtn, audioBtn);
@@ -241,7 +238,7 @@ async function toggleRecordVideo(uid) {
   const recording = isRecording(snap);
   if (!next && recording) {
     const ok = await confirmDialog(
-      `@${uid} の動画保存をOFFにすると進行中の録画を停止します。よろしいですか？`,
+      `@${uid} の録画を停止して動画保存をOFFにする`,
       { title: "動画保存をOFFにする", confirmLabel: "OFFにする" },
     );
     if (!ok) return;
@@ -400,9 +397,6 @@ function updateTile(tile, monitor) {
   recVideoBtn.disabled = false;
   recVideoBtn.textContent = videoOn ? "🎥保存" : "📊dataのみ";
   recVideoBtn.classList.toggle("on", videoOn);
-  recVideoBtn.title = videoOn
-    ? "動画保存: ON（クリックでデータのみ収集に切替）"
-    : "動画保存: OFF（データのみ収集。クリックで録画ONに切替）";
 
   // Record button
   const recBtn = tile.querySelector('[data-field="record-btn"]');
@@ -418,7 +412,6 @@ function updateTile(tile, monitor) {
   } else if (snap.record_video === false) {
     recBtn.disabled = true;
     recBtn.textContent = "● 動画保存OFF";
-    recBtn.title = "この監視対象はデータのみ収集（動画保存OFF）です。";
     recBtn.classList.remove("on");
   } else {
     recBtn.disabled = snap.status !== "connected";
@@ -429,11 +422,7 @@ function updateTile(tile, monitor) {
   // 見どころは動画の中の位置を指すので、録画中だけ押せる。
   const bookmarkBtn = tile.querySelector('[data-field="bookmark-btn"]');
   if (bookmarkBtn) {
-    const canBookmark = !!rec && rec.state === "recording" && !!rec.recording_id;
-    bookmarkBtn.disabled = !canBookmark;
-    bookmarkBtn.title = canBookmark
-      ? "いま見ている場面を見どころとして記録します。"
-      : "録画中のみ記録できます。";
+    bookmarkBtn.disabled = !(rec && rec.state === "recording" && rec.recording_id);
   }
 
   // Video / placeholder
@@ -444,7 +433,7 @@ function updateTile(tile, monitor) {
     ensurePlayer(uid, tile);
   } else {
     destroyPlayer(uid);
-    ph.textContent = recording ? "プレビュー準備中…" : snap.status === "connected" ? "録画停止中" : "未接続";
+    ph.textContent = recording ? "準備中…" : snap.status === "connected" ? "録画停止中" : "未接続";
   }
 }
 
@@ -600,7 +589,6 @@ function unattributedGroup(byHost, key) {
   const label = document.createElement("span");
   label.className = "tb-host-unattr";
   label.textContent = "宛先不明（陣営の合計のみ）";
-  label.title = "チーム戦のスコア内訳はチーム単位で届くため、どの配信者への貢献かが判りません。";
   const cnt = document.createElement("span");
   cnt.className = "tb-host-cnt";
   cnt.textContent = `貢献者${contribs.length}人`;
@@ -705,7 +693,7 @@ document.getElementById("video-all-on").addEventListener("click", () => {
   });
   // 対象が1件も無いとloopが空回りして完全な無反応になる。押せた上で何も起きないのと、
   // 起こす相手が居ないのは別の事実なので言い分ける。
-  if (!started) showToast("映像を開始できる録画中の配信はありません。", null, { title: "映像 全ON" });
+  if (!started) showToast("録画中の配信なし", null, { title: "映像 全ON" });
 });
 
 document.getElementById("audio-all-off").addEventListener("click", () => {

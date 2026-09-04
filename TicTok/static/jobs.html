@@ -38,7 +38,7 @@
       </label>
       <!-- 絞り込みと同じ範囲に効く一括取消。1本ずつの取り消しは行のbuttonが持つが、
            数百本の一括投入を止める手段がここにしか無い(投入した画面には台帳が無い)。 -->
-      <button id="job-cancel-all" class="btn btn-danger btn-small" type="button">表示中の未終了をまとめて取消</button>
+      <button id="job-cancel-all" class="btn btn-danger btn-small" type="button">まとめて取消</button>
       <span class="sp"></span>
       <span id="job-failed-note" class="chart-note"></span>
       <span id="job-limit-note" class="chart-note"></span>
@@ -47,7 +47,7 @@
     </div>
 
     <div class="a-card a-card-fill" id="jobs">
-      <h3>Job <span class="sub">焼き込み・Up出力・再mp4化はserver側の永続queueで1本ずつ実行します。Serverを再起動しても待機中のjobは残ります。終わったjobの記録は<a href="/ops">運用log</a>に残ります。</span></h3>
+      <h3>Job</h3>
       <div class="body">
         <div class="table-wrap">
           <table class="result-table" id="job-table">
@@ -61,7 +61,7 @@
             </thead>
             <tbody id="job-rows"></tbody>
           </table>
-          <div id="job-empty" class="feed-empty" data-label="job一覧">jobはありません。</div>
+          <div id="job-empty" class="feed-empty" data-label="job一覧">—</div>
         </div>
       </div>
     </div>

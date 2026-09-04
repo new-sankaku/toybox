@@ -2063,8 +2063,11 @@ def test_cut_list_is_folded_into_bookmarks_and_dropped(tmp_path):
 
     # 統合前のschemaを再現する。bookmarksから新しい列を落とし、cut_listを手で作る。
     # 索引を先に落とすのは、列を参照している索引が残っているとDROP COLUMNが弾かれるため。
+    # 消えた行の退避trigger(tictok.store.row_trash)も同じ理由で先に落とす。この時代のDBに
+    # triggerは無く、次にStorageを開いた時に作り直される。
     conn = sqlite3.connect(str(path))
     conn.execute("DROP INDEX idx_bookmarks_group")
+    conn.execute("DROP TRIGGER trg_row_trash_bookmarks")
     for column in ("position", "origin", "exported_at", "exported_path"):
         conn.execute(f"ALTER TABLE bookmarks DROP COLUMN {column}")
     conn.execute(
@@ -2772,17 +2775,29 @@ def test_claim_can_be_limited_to_one_lane(tmp_db, recording_id):
         kinds=("still",), allow_busy_recording=True) is None
 
 
-def test_media_job_queue_forbids_a_null_recording_id(tmp_db, make_session):
-    """``recording_id`` は NOT NULL。これが飢餓に対する実際の防御になっている。
+def test_media_job_without_a_recording_is_not_starved_by_a_running_job(
+    tmp_db, make_session, recording_id
+):
+    """録画を持たないjobは、他のjobが走っていても拾われる。
 
-    claim の SQL は ``recording_id NOT IN (SELECT recording_id FROM media_job_queue
-    WHERE state='running' AND recording_id IS NOT NULL)`` で、SQLの三値論理により
-    ``NULL NOT IN (非空集合)`` は真にならない。もし NULL を許していれば、複数録画に
-    またがるjob(reel等)を recording_id 無しで積んだ瞬間に「実行中のjobが在る間だけ
-    拾われない」という再現性の低い飢餓に落ちていた。schemaが先に止めるので到達しない。
+    かつて ``recording_id`` は NOT NULL で、それが飢餓に対する唯一の防御だった。claim の
+    SQL は ``recording_id NOT IN (... state='running' ...)`` で、SQLの三値論理により
+    ``NULL NOT IN (非空集合)`` は真にならない ―― NULLの行は実行中のjobが在る間ずっと
+    拾われなかった。
+
+    highlightの突き合わせは録画1本に属さない(どの録画のどこから来たのかを求めるのが
+    job本体)ので、NOT NULLは維持できない。代わりにclaim側で「録画を持たない行はこの排他の
+    対象ではない」と明示してある。掴む録画が無いので、誰の足元も抜かない。
     """
-    with pytest.raises(sqlite3.IntegrityError):
-        tmp_db.enqueue_media_job("null_rec", "reel", None)
+    tmp_db.enqueue_media_job("burn", "overlay", recording_id)
+    tmp_db.enqueue_media_job("hl", "highlight_match", None,
+                             params={"highlight_id": 1})
+    tmp_db.start_media_job("burn")
+
+    claimed = tmp_db.claim_next_pending_media_job()
+    assert claimed is not None and claimed["job_id"] == "hl"
+    assert claimed["recording_id"] is None
+    assert claimed["params"] == {"highlight_id": 1}
 
 
 # ---------------- 接続時の遡り(backlog)の二重記録 ----------------

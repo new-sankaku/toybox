@@ -156,7 +156,7 @@ describe("videos.js のグループ操作tab", () => {
       buttonOf(shelfRows()[0], "削除").click();
       await page.settle();
       const text = doc.querySelector(".confirm-modal").textContent;
-      expect(text).toContain("未分類へ戻ります");
+      expect(text).toContain("未分類へ");
       expect(text).toContain("見どころ 4件");
       answerConfirm(true);
       await page.settle();
@@ -260,7 +260,7 @@ describe("videos.js のグループ操作tab", () => {
     it("行き先の名前をbuttonの文言に出す(左右のselectは表2つ分離れている)", async () => {
       pick("left", 0);
       await page.settle();
-      expect($id("gops-left-move").textContent).toBe("「罵倒集」へ移動（1件）");
+      expect($id("gops-left-move").textContent).toBe("「罵倒集」へ移動 1");
       expect($id("gops-right-move").textContent).toBe("左へ移動");
     });
 
@@ -269,16 +269,16 @@ describe("videos.js のグループ操作tab", () => {
     it("複製は元を残して行き先へ足す", async () => {
       pick("left", 0);
       await page.settle();
-      expect($id("gops-left-copy").textContent).toBe("「罵倒集」へ複製（1件）");
+      expect($id("gops-left-copy").textContent).toBe("「罵倒集」へ複製 1");
       $id("gops-left-copy").click();
       await page.settle();
       expect(posted).toEqual([{
         url: "/api/bookmarks/bulk", method: "POST",
         body: { op: "copy", ids: [20], group_id: 2 },
       }]);
-      expect($id("gops-status").textContent).toContain("複製しました");
+      expect($id("gops-status").textContent).toContain("複製");
       // moveと違い元が残るので、選択も残す(続けて別の行き先へも複製できる)。
-      expect($id("gops-left-selected").textContent).toBe("選択 1件");
+      expect($id("gops-left-selected").textContent).toBe("1");
     });
 
     it("行き先が「全て」なら移動も複製も押せない(所属の指定にならない)", async () => {
@@ -287,7 +287,6 @@ describe("videos.js のグループ操作tab", () => {
       await page.settle();
       expect($id("gops-left-move").disabled).toBe(true);
       expect($id("gops-left-copy").disabled).toBe(true);
-      expect($id("gops-left-move").title).toContain("行き先になりません");
       expect(buttonOf(paneRows("left")[0], "右へ").disabled).toBe(true);
     });
 
@@ -317,7 +316,7 @@ describe("videos.js のグループ操作tab", () => {
       await page.settle();
       $id("gops-left-all").click();
       await page.settle();
-      expect($id("gops-left-selected").textContent).toBe("選択 1件");
+      expect($id("gops-left-selected").textContent).toBe("1");
       $id("gops-left-move").click();
       await page.settle();
       expect(posted).toEqual([{
@@ -368,7 +367,7 @@ describe("videos.js のグループ操作tab", () => {
       await setSide("right", "2");
       $id("gops-merge").click();
       await page.settle();
-      expect(doc.querySelector(".confirm-modal").textContent).toContain("を削除します");
+      expect(doc.querySelector(".confirm-modal").textContent).toContain("「神回」を削除");
       answerConfirm(true);
       await page.settle();
       expect(posted).toContainEqual({

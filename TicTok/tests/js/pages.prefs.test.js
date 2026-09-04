@@ -205,7 +205,7 @@ describe("画面を切り替えても表示設定が残る", () => {
       ["index", "/"], ["overview", "/overview"], ["history", "/history"],
       ["streamers", "/streamers"], ["videos", "/videos"], ["capacity", "/capacity"],
       ["fans", "/fans"], ["analytics", "/analytics"], ["jobs", "/jobs"],
-      ["ops", "/ops"], ["settings", "/settings"],
+      ["ops", "/ops"], ["backup", "/backup"], ["settings", "/settings"],
     ];
     for (const [name, path] of PAGES) {
       const page = await visit(broken, name, path);

@@ -2358,6 +2358,7 @@ def _finalized_recorder(tmp_db, tmp_root, session_id, state="completed", started
     return SimpleNamespace(
         recording_id=recording_id, state=state, output_path=path, ended_at=ended,
         error=None, duration_seconds=ended - started, base=path.stem,
+        hls_dir=tmp_root / "streamer" / "ts" / path.stem,
         snapshot=lambda: {"bytes": 1024},
     )
 

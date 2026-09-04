@@ -108,7 +108,7 @@ describe("ops.js の対象列", () => {
   it("job_id からは同一画面の絞り込みとJob画面の両方へ行ける", () => {
     const detail = page.document.querySelector("#ops-rows .ops-detail");
     const button = Array.from(detail.querySelectorAll("button")).find(
-      (el) => el.textContent === "このjobの記録だけ表示",
+      (el) => el.textContent === "このjobだけ",
     );
     expect(button).toBeTruthy();
     button.dispatchEvent(new page.win.Event("click", { bubbles: true }));

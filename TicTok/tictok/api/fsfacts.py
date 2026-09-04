@@ -220,6 +220,35 @@ SIDECAR_SWEEP_SETTINGS = {
 }
 
 
+def _recording_src(recording: dict) -> Optional[Path]:
+    """sidecarの済みを判定するときに見る録画mp4のpath。**jobが実際に読むのと同じ解決**を通す。
+
+    DBのpathは実体を指さないことがある(完了録画はfinal dirへ移動するため)。判定がDBのpathを
+    そのまま信じ、実行(``media_jobs._run_sidecar_cache_job``)が
+    ``files._resolved_recording_path`` で両rootから実体を探していた頃は、rootのずれた録画1本
+    (rid=146)が**永久にsweepへ乗り続けた** —— jobは実体側の`.sidecars`にcache命中して20〜60msで
+    completedになるのに、判定はDBのpath側の`.sidecars`を見て「未生成」のままなので、30分ごとに
+    同じ4種別(waveform/sprite/voice/gain)が積み直される。台帳2,279行のうち627行(27.5%)が
+    この1本だった。判定と実行が別々にpathを解くと、jobが成功しても事実が1bitも変わらない。"""
+    path = recording.get("path")
+    if not path:
+        return None
+    try:
+        return files._resolved_recording_path(recording)
+    except HTTPException:
+        return None
+
+
+def _memo_recording_src(recording: dict, memo: dict) -> Optional[Path]:
+    """``_recording_src`` を走査1回ぶんのmemoに載せる。1録画につき4種別を判定するので、
+    memoが無いとpath解決のstatが4倍になる。memoは ``_sidecar_names`` と同じdictを使う
+    (keyがPathとtupleで重ならない)。"""
+    key = ("src", recording.get("path"))
+    if key not in memo:
+        memo[key] = _recording_src(recording)
+    return memo[key]
+
+
 def _recording_sidecar_done(recording: dict, fact: str) -> bool:
     """この録画のsidecar cache(波形 / sprite / 声)が既に在るか。その判定に入ったときだけ
     遅延で引き、cache済みfacts dictへ書き戻す(has_hls・packedと同じ流儀)。
@@ -229,11 +258,7 @@ def _recording_sidecar_done(recording: dict, fact: str) -> bool:
     無くすこと」であって、cacheの鮮度を追いかけることではない。"""
     facts = _recording_fs_facts(recording)
     if fact not in facts:
-        path = recording.get("path")
-        try:
-            src = files._safe_recording_path(path) if path else None
-        except HTTPException:
-            src = None
+        src = _recording_src(recording)
         facts[fact] = bool(src) and all(
             p.is_file() for p in _SIDECAR_ARTIFACTS[fact](src))
     return facts[fact]
@@ -263,11 +288,7 @@ def _sidecar_names(directory: Path, memo: dict) -> set:
 def _sidecar_done_in(recording: dict, fact: str, memo: dict) -> bool:
     """``_recording_sidecar_done`` と同じ判定を、個別statではなくdir一覧のmembershipで行う。
     判定するfileの集合は同一で、走査だけをdir単位に畳む。"""
-    path = recording.get("path")
-    try:
-        src = files._safe_recording_path(path) if path else None
-    except HTTPException:
-        src = None
+    src = _memo_recording_src(recording, memo)
     if src is None:
         return False
     names = _sidecar_names(sidecar_dir(src), memo)

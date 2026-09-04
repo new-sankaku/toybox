@@ -169,8 +169,8 @@ describe("videos.js の無音skip再生", () => {
       plan([{ start: 0, end: 40 }]);
       win.rebuildSkipSpans();
       const text = doc.getElementById("skip-note").textContent;
-      expect(text).toContain("尺の40%");
-      expect(text).toContain("倍速");
+      expect(text).toContain("40%");
+      expect(text).toContain("倍");
     });
 
     it("計画の待ちと、飛ばせる無音が無いのを言い分ける", () => {
@@ -181,21 +181,21 @@ describe("videos.js の無音skip再生", () => {
 
       plan([]);
       win.rebuildSkipSpans();
-      expect(doc.getElementById("skip-note").textContent).toContain("0.5秒以上の無音がありません");
+      expect(doc.getElementById("skip-note").textContent).toBe("");
     });
 
     it("声が1つも取れなかった録画は、0件ではなくその旨を名乗る", () => {
       doc.getElementById("skip-silence").checked = true;
       plan([], { speech_spans: 0 });
       win.rebuildSkipSpans();
-      expect(doc.getElementById("skip-note").textContent).toContain("声の区間が見つかりません");
+      expect(doc.getElementById("skip-note").textContent).toContain("声なし");
     });
 
     it("反応が未解析の録画はそう名乗る(叫びや拍手を飛ばしている可能性がある)", () => {
       doc.getElementById("skip-silence").checked = true;
       plan([{ start: 0, end: 20 }], { has_reactions: false });
       win.rebuildSkipSpans();
-      expect(doc.getElementById("skip-note").textContent).toContain("反応は未解析");
+      expect(doc.getElementById("skip-note").textContent).toContain("反応未解析");
     });
 
     it("切っている間は何も名乗らない", () => {

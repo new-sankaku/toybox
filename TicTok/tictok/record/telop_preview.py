@@ -51,7 +51,9 @@ BG_LIGHT = "#D8DCE4"
 BG_SEED = 7
 BG_SPEED = 0
 
-PREVIEW_DIRNAME = "telop_previews"
+# 名前の実体は ``layout`` が持つ。root直下の共有dirは ``NON_STREAMER_DIRS`` にも載る必要が
+# あり、名前が2箇所に在ると片方だけ直したときに容量の内訳と削除の対象が食い違う。
+PREVIEW_DIRNAME = layout.TELOP_PREVIEW_DIRNAME
 
 
 def preview_dir() -> Path:

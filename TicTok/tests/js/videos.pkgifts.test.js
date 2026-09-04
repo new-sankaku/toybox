@@ -93,20 +93,19 @@ describe("videos.js のPK・ギフトpanel", () => {
         gifts: [gift(50, "外", null), gift(120, "中", 2)],
         now: 50,
       });
-      expect(nowText()).toContain("PK中ではありません");
-      expect(nowText()).toContain("PK 2戦目");
+      expect(nowText()).toContain("PK 2");
       expect(giftTexts().join(" ")).not.toContain("外");
       expect(giftTexts().join(" ")).not.toContain("中");
     });
 
     it("後ろにPKが無ければ直前のPKを指す(終わった戦へ戻る口が無いと探し直しになる)", () => {
       render({ battles: [BATTLE], now: 500 });
-      expect(nowText()).toContain("直前のPK 2戦目");
+      expect(nowText()).toContain("◀ PK 2");
     });
 
     it("PKが1戦も無い録画ではその旨を名乗る", () => {
       render({ gifts: [gift(10, "バラ", null)] });
-      expect(nowText()).toContain("この録画にPKはありません");
+      expect(nowText()).toBe("—");
     });
 
     it("不成立のPKは勝敗の枠で「—」を出さず、不成立と名乗る", () => {
@@ -129,13 +128,13 @@ describe("videos.js のPK・ギフトpanel", () => {
     it("PKが終わってもその戦を出し続ける(勝利時間の終わりまで)", () => {
       render({ battles: [PUNISHED], now: 300 });
       expect(nowText()).toContain("PK 2戦目");
-      expect(nowText()).not.toContain("PK中ではありません");
       expect(nowText()).toContain("勝利時間");
     });
 
     it("勝利時間が終われば普段どおりPK外になる", () => {
       render({ battles: [PUNISHED], now: 390 });
-      expect(nowText()).toContain("PK中ではありません");
+      expect(nowText()).toContain("◀ PK 2");
+      expect(nowText()).not.toContain("勝利時間");
     });
 
     it("窓を実測できていない戦は目安だと名乗る", () => {
@@ -184,7 +183,7 @@ describe("videos.js のPK・ギフトpanel", () => {
     it("再生位置での値で分割する(確定scoreではない)", () => {
       render({ battles: [BATTLE], now: 150 });
       expect(segments().map((s) => s.textContent)).toEqual(["400", "100"]);
-      expect(nowText()).toContain("+300 リード");
+      expect(nowText()).toContain("+300");
       render({ battles: [BATTLE], now: 200 });
       expect(segments().map((s) => s.textContent)).toEqual(["400", "300"]);
     });
@@ -246,7 +245,7 @@ describe("videos.js のPK・ギフトpanel", () => {
     it("推移の記録がこの録画に無い戦は最終スコアだと名乗る", () => {
       render({ battles: [{ ...BATTLE, series: [] }], now: 150 });
       expect(segments().map((s) => s.textContent)).toEqual(["400", "300"]);
-      expect(nowText()).toContain("最終スコア");
+      expect(nowText()).toContain("推移なし");
     });
   });
 
@@ -279,7 +278,7 @@ describe("videos.js のPK・ギフトpanel", () => {
     it("その戦にギフトが1件も無ければ、欄は残したままその旨を出す", () => {
       render({ battles: [BATTLE], gifts: [gift(50, "外", null)], now: 150 });
       expect(giftRows()).toHaveLength(1);
-      expect(giftTexts()[0]).toContain("ギフトはありません");
+      expect(giftTexts()[0]).toContain("なし");
     });
 
     it("icon URLの無いgiftも行としては残す(画像が無いことは飛ばなかったではない)", () => {
@@ -298,7 +297,7 @@ describe("videos.js のPK・ギフトpanel", () => {
     it("再生位置まで届いた分だけを出し、進むほど下に増える", () => {
       render({ ...feed(), now: 105 });
       // まだ1件も飛んでいない時間。行は無く、その旨だけを出す。
-      expect(giftTexts()[0]).toContain("まだ飛んでいません");
+      expect(giftTexts()[0]).toBe("—");
       setCurrentTime(120);
       win.syncPkPanel();
       expect(giftTexts()).toHaveLength(1);
@@ -322,7 +321,7 @@ describe("videos.js のPK・ギフトpanel", () => {
       expect(giftTexts()[0]).toContain("先");
       setCurrentTime(100);
       win.syncPkPanel();
-      expect(giftTexts()[0]).toContain("まだ飛んでいません");
+      expect(giftTexts()[0]).toBe("—");
     });
 
     it("追従ONの間は下端へ貼り付く(積み上がる一覧では今の行は常に一番下)", () => {

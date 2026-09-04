@@ -86,7 +86,7 @@ describe("videos.js の見どころ区間の面", () => {
       win.drawHeat();
       const band = fills.find((f) => f.style === rampAlpha(0.1));
       expect(band.y).toBe(px("RANGE_LANE_PX"));
-      expect(band.y + band.h).toBe(60 - px("BOOKMARK_LANE_PX"));
+      expect(band.y + band.h).toBe(60 - px("MARKER_LANE_PX"));
     });
   });
 
@@ -145,7 +145,7 @@ describe("videos.js の見どころ区間の面", () => {
       const canvas = sizeCanvas("zoom", 200, 80);
       const fills = recordFills(canvas);
       win.drawZoom();
-      const waveH = 80 - px("RULER_LANE_PX") - px("BOOKMARK_LANE_PX") - px("RANGE_LANE_PX");
+      const waveH = 80 - px("RULER_LANE_PX") - px("MARKER_LANE_PX") - px("RANGE_LANE_PX");
       const bars = fills.filter((f) => f.w === 1 && f.h === waveH);
       expect(bars.length).toBeGreaterThan(0);
     });

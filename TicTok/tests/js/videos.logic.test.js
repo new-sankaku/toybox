@@ -23,41 +23,6 @@ describe("videos.js", () => {
 
   const state = () => page.get("state");
 
-  describe("mediaText", () => {
-    it("素材(.ts)とmp4をそれぞれ名乗る", () => {
-      expect(win.mediaText(["ts", "mp4"])).toBe("TS・MP4");
-    });
-
-    it("実体が1つも無い録画は「実体なし」と言い切る(file名のmp4を実体と読ませない)", () => {
-      expect(win.mediaText([])).toContain("実体なし");
-      expect(win.mediaText([])).toContain("再生できません");
-      expect(win.mediaText(null)).toContain("実体なし");
-    });
-
-    it("未知の種別でも捨てずにそのまま名乗る", () => {
-      expect(win.mediaText(["mkv"])).toBe("mkv");
-    });
-  });
-
-  // 録画一覧の行は列を3つ(配信者・配信日・尺)しか持たない。file名・実体・中断・文字起こしの
-  // 有無はhoverでしか読めないので、そこから落ちていないことを見る。
-  describe("browseRowTitle", () => {
-    it("file名と実体を名乗る(拡張子は落とす — 実体がmp4だと読ませない)", () => {
-      const title = win.browseRowTitle(
-        { filename: "a.mp4", media: ["ts"], has_transcript: true });
-      expect(title).toContain("（TS）");
-      expect(title).not.toContain(".mp4");
-    });
-
-    it("中断・文字起こしなしは理由まで出す(行を開く前に読めないと意味が無い)", () => {
-      const title = win.browseRowTitle(
-        { filename: "a.mp4", media: [], status: "interrupted", has_transcript: false });
-      expect(title).toContain("実体なし");
-      expect(title).toContain("中断");
-      expect(title).toContain("文字起こしなし");
-    });
-  });
-
   describe("reviewStateOf", () => {
     it("serverの3状態はそのまま通す", () => {
       expect(win.reviewStateOf({ review_state: "checking" })).toBe("checking");
@@ -131,7 +96,6 @@ describe("videos.js", () => {
       const button = doc.getElementById("add-mark");
       expect(button.textContent).toBe("記録済");
       expect(button.disabled).toBe(true);
-      expect(button.title).toContain("未分類");
     });
 
     it("frame未満のずれは同じ範囲として扱う(詰め直した拍子の重複を作らない)", () => {
@@ -266,15 +230,14 @@ describe("videos.js", () => {
 
     it("語での検索へ戻すと、語の欄と検索対象が押せる状態へ戻る", async () => {
       await pickLaugh();
-      const help = doc.getElementById("q").title;
       doc.getElementById("flt-mode").value = "keyword";
       doc.getElementById("flt-mode").dispatchEvent(new win.Event("change", { bubbles: true }));
       await page.settle();
       expect(doc.getElementById("q").disabled).toBe(false);
       expect(doc.getElementById("src-stt").disabled).toBe(false);
-      // hoverの説明はmarkupが唯一の出所。戻したときに笑い声の断り書きが残らない。
-      expect(doc.getElementById("q").title).not.toBe(help);
-      expect(doc.getElementById("q").title).toContain("AND");
+      expect(doc.getElementById("src-comment").disabled).toBe(false);
+      // 語での検索へ戻れば並替も語のものへ戻る(笑い声の選択肢が残らない)。
+      expect(doc.getElementById("laugh-order-field").classList.contains("hidden")).toBe(true);
     });
   });
 
@@ -343,19 +306,19 @@ describe("videos.js", () => {
       expect(state().hitIndex).toBe(1);
     });
 
-    it("0件でも「取得失敗」ではなく、その絞り込みに該当が無いことを名乗る", () => {
+    it("0件でも「取得失敗」の見た目にはしない", () => {
       state().browseAll = [{ recording_id: 1, review_state: "checked" }];
       doc.getElementById("flt-review").value = "unchecked";
       win.applyBrowseFilter();
       const empty = doc.getElementById("hit-empty");
-      expect(empty.textContent).toBe("「未確認」の録画はありません。");
+      expect(empty.textContent).toBe("");
       expect(empty.classList.contains("list-failed")).toBe(false);
     });
 
     it("件数の要約に絞り込み後と全体の両方を出す", () => {
       doc.getElementById("flt-review").value = "unchecked";
       win.applyBrowseFilter();
-      expect(doc.getElementById("search-summary").textContent).toBe("未確認 2本 / 録画 4本");
+      expect(doc.getElementById("search-summary").textContent).toBe("2/4");
     });
   });
 
@@ -387,28 +350,15 @@ describe("videos.js", () => {
       expect(state().hits.map((r) => r.recording_id)).toEqual([2, 1, 4, 3]);
     });
 
-    it("何順で並んでいるかと、末尾に溜まった未解析の本数を要約へ出す", () => {
+    it("末尾に溜まった未解析の本数を要約へ出す", () => {
       doc.getElementById("flt-browse-order").value = "laugh";
       win.applyBrowseFilter();
-      const summary = doc.getElementById("search-summary").textContent;
-      expect(summary).toContain("笑い声が多い順");
-      expect(summary).toContain("未解析 1本");
+      expect(doc.getElementById("search-summary").textContent).toContain("未解析 1");
     });
 
-    it("未解析の欄は0秒ではなく「—」と出し、hoverで数え方を名乗る", () => {
+    it("未解析の欄は0秒ではなく「—」と出す", () => {
       expect(win.laughText({ laugh_seconds: null })).toBe("—");
-      expect(win.laughTitle({ laugh_seconds: null })).toContain("未解析");
-      const done = win.laughTitle({
-        laugh_seconds: 30, laugh_windows: 4, laugh_exclude: "coop",
-        laugh_collab_observed: true, laugh_excluded_seconds: 600 });
-      expect(done).toContain("コラボ・Battle");
-      // 共演を外す前に張ったindexは、値は出るが意味が違う。そのことを行が名乗る。
-      expect(win.laughTitle({ laugh_seconds: 30, laugh_windows: 4 }))
-        .toContain("外す前に数えた値");
-      // 記録の無い時期の配信は「コラボが無かった」ではない。
-      expect(win.laughTitle({
-        laugh_seconds: 30, laugh_windows: 4, laugh_exclude: "coop",
-        laugh_collab_observed: false })).toContain("記録が無い時期");
+      expect(win.laughText({ laugh_seconds: 30 })).not.toBe("—");
     });
   });
 
@@ -498,7 +448,6 @@ describe("videos.js", () => {
       expect(cellOf(row, "overlay").disabled).toBe(false);
       expect(cellOf(row, "overlay").textContent).toContain("2");
       expect(cellOf(row, "upscale").disabled).toBe(true);
-      expect(cellOf(row, "upscale").title).toContain("すべて処理済み");
     });
 
     it("文字起こしが無効なときは押させない(押してから503で知らせない)", () => {
@@ -506,7 +455,6 @@ describe("videos.js", () => {
       state().sttAvailable = false;
       win.renderBulk();
       expect(cellOf(rows()[0], "transcribe").disabled).toBe(true);
-      expect(cellOf(rows()[0], "transcribe").title).toContain("無効");
     });
 
     // 録画を選んで投入する道は、cellを押さないと開かない。押されていたのは列見出し
@@ -544,13 +492,12 @@ describe("videos.js", () => {
         expect(state().bulkOpen).toEqual({ uniqueId: "alive", kind: "overlay" });
       });
 
-      it("全配信者ぶんの確認からは開けない理由を出す(録画一覧は配信者1人ぶん)", () => {
+      it("全配信者ぶんの確認からは開けない(録画一覧は配信者1人ぶん)", () => {
         state().bulk = [entry({ unique_id: "alive", targets: { overlay: 3 } })];
         state().bulkPending = pending(null);
         win.renderBulk();
         const pick = confirmButtons().find((b) => b.textContent.includes("録画を選んで"));
         expect(pick.disabled).toBe(true);
-        expect(pick.title).toContain("配信者");
       });
     });
 
@@ -595,22 +542,19 @@ describe("videos.js", () => {
 
     it("記録した時刻と行き先を画面内notificationに出す", async () => {
       await win.saveBookmark(65, null, "", null);
-      // 点か尺つきかも名乗る。押した結果が入力の状態で変わるので、入った物を言わないと
-      // 一覧を見に行くまで確かめられない。
-      expect(toastText()).toBe("見どころに記録しました（点 00:01:05 → 未分類）");
+      expect(toastText()).toBe("★ 00:01:05 → 未分類");
       expect(doc.getElementById("player-status").textContent).toBe(toastText());
     });
 
     it("記録先グループを選んでいればその名前を出す", async () => {
       state().addGroup = "3";
       await win.saveBookmark(65, null, "", null);
-      expect(toastText()).toBe("見どころに記録しました（点 00:01:05 → 切り抜きA）");
+      expect(toastText()).toBe("★ 00:01:05 → 切り抜きA");
     });
 
     it("範囲で記録したときはIN/OUTの両方を出す", async () => {
       await win.saveBookmark(65, 90, "", null);
-      expect(toastText())
-        .toBe("見どころに記録しました（00:01:05 - 00:01:30 → 未分類・mp4にできます）");
+      expect(toastText()).toBe("★ 00:01:05 - 00:01:30 → 未分類");
     });
 
     it("記録した位置をtimeline上で光らせる(点はendを持たない)", async () => {

@@ -42,28 +42,22 @@ async function loadLedger() {
 function renderSummary() {
   const totalCoins = ledger.fans.reduce((sum, f) => sum + f.diamonds, 0);
   chipBar("fan-kpi", [
-    ["giftを送った視聴者", fmtNum(ledger.total_gifters)],
-    ["表示中", `${fmtNum(ledger.fans.length)} / ${fmtNum(ledger.eligible)} 名`],
-    ["表示分のコイン計", fmtNum(totalCoins)],
-    ["複数の配信者へ投げた人", `${fmtNum(ledger.multi_streamer)} 名`],
+    ["Gifter", fmtNum(ledger.total_gifters)],
+    ["表示中", `${fmtNum(ledger.fans.length)} / ${fmtNum(ledger.eligible)}`],
+    ["コイン計", fmtNum(totalCoins)],
+    ["複数配信者", fmtNum(ledger.multi_streamer)],
   ]);
 
   const parts = [];
   if (ledger.min_diamonds > 0) {
-    parts.push(`通算 ${fmtNum(ledger.min_diamonds)} コイン以上の視聴者のみ`);
+    parts.push(`通算 ${fmtNum(ledger.min_diamonds)} コイン以上`);
   }
   // 除外した身元不明分は必ず出す。黙って落とすと、台帳の合計がSessionのコイン合計と
   // 合わない理由を画面から辿れなくなる。
   const un = ledger.unidentified || {};
-  if (un.gift_events) {
-    parts.push(
-      `身元を特定できないGift ${fmtNum(un.gift_events)} 件`
-      + `（${fmtNum(un.diamonds)} コイン）は台帳から除外`,
-    );
-  } else {
-    parts.push("身元を特定できないGiftは0件");
-  }
-  parts.push("集計対象はgiftを送った視聴者のみ（コメントのみの視聴者は含みません）");
+  parts.push(un.gift_events
+    ? `身元不明 ${fmtNum(un.gift_events)} 件（${fmtNum(un.diamonds)} コイン）を除外`
+    : "身元不明 0 件");
   document.getElementById("fan-note").textContent = parts.join(" / ");
 }
 
@@ -89,7 +83,6 @@ function streamerBreakdown(fan) {
     const line = document.createElement("a");
     line.className = "uid fan-streamer-link";
     line.href = `/streamers?uid=${encodeURIComponent(s.unique_id)}`;
-    line.title = `@${s.unique_id} の配信者画面を開きます。`;
     line.textContent = `@${s.unique_id}: ${fmtNum(s.diamonds)}`;
     line.addEventListener("click", (e) => e.stopPropagation());
     wrap.appendChild(line);
@@ -109,9 +102,7 @@ function renderRows() {
 
   setListMessage(
     document.getElementById("fan-empty"),
-    q || elFilter.value !== "all"
-      ? "絞込に一致する視聴者がいません。"
-      : "giftを送った視聴者がまだいません。",
+    q || elFilter.value !== "all" ? "該当なし" : "Gifterなし",
   );
   renderTableRows(
     "fan-rows",
@@ -132,7 +123,6 @@ function renderRows() {
     [0, 2, 3, 4, 5],
     (tr, f) => {
       tr.classList.add("row-clickable");
-      tr.title = "クリックで明細を表示";
       tr.tabIndex = 0;
       tr.setAttribute("role", "button");
       tr.addEventListener("click", () => showFanDetail(f));

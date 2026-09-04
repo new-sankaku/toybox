@@ -58,12 +58,9 @@ describe("streamers.js のライバー指標", () => {
       expect(meta.textContent).toContain("ライバー/人数");
     });
 
-    it("分母と判定済みをtooltipに添える", () => {
+    it("一覧の行に隠れた説明のtooltipは付けない", () => {
       const meta = renderList([ALPHA])[0];
-      expect(meta.title).toContain("300 / 1,000");
-      expect(meta.title).toContain("1 / 8 人");
-      expect(meta.title).toContain("下限");
-      expect(meta.title).toContain("50.0%");
+      expect(meta.title).toBe("");
     });
 
     it("serverが古くてfieldが無くても一覧は落ちない", () => {

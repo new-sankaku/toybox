@@ -23,11 +23,10 @@ class AiCacheMixin:
     # 「未計算をまとめて計算する」経路は意図的に持たない(operatorの明示要求のみで走らせる)。
 
     def get_ai_analysis(self, kind: str, target_type: str, target_id: str) -> Optional[dict]:
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM ai_analysis WHERE kind = ? AND target_type = ? AND target_id = ?",
-                (kind, target_type, str(target_id)),
-            ).fetchone()
+        row = self._read_connection().execute(
+            "SELECT * FROM ai_analysis WHERE kind = ? AND target_type = ? AND target_id = ?",
+            (kind, target_type, str(target_id)),
+        ).fetchone()
         if row is None:
             return None
         item = dict(row)

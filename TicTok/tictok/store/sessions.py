@@ -241,15 +241,21 @@ class SessionsMixin:
         return len(rows)
 
     def create_session(self, unique_id: str, bucket_seconds: int) -> int:
+        started_at = time.time()
         with self._lock:
             cursor = self._conn.execute(
                 "INSERT INTO sessions (unique_id, status, started_at, bucket_seconds,"
                 " conn_instrumentation) VALUES (?, ?, ?, ?, ?)",
-                (unique_id, "connecting", time.time(), bucket_seconds,
+                (unique_id, "connecting", started_at, bucket_seconds,
                  CONN_INSTRUMENTATION_VERSION),
             )
             self._conn.commit()
-            return cursor.lastrowid
+            session_id = cursor.lastrowid
+        # 作成の印をjournalへ。event/viewerだけでは、DBを古いsnapshotへ戻したときに
+        # 「誰の・いつからの配信か」が無く、行ごと蘇らせられない(recover_from_journal)。
+        self._journal_append(
+            "s", (session_id, unique_id, started_at, bucket_seconds, CONN_INSTRUMENTATION_VERSION))
+        return session_id
 
     def update_session(self, session_id: int, status: str, room_id: Optional[int] = None) -> None:
         with self._lock:
@@ -401,7 +407,11 @@ class SessionsMixin:
                 "DELETE FROM sessions WHERE id = ?", (session_id,)
             )
             self._conn.commit()
-            return cursor.rowcount > 0
+            deleted = cursor.rowcount > 0
+        if deleted:
+            # 削除の印。これが無いと、journalに作成の印が残る限り次の起動で蘇る。
+            self._journal_append("d", (session_id,))
+        return deleted
 
     def find_restricted_session(self, unique_id: str, room_id) -> Optional[int]:
         """同一roomについて既に書かれている制限sessionのidを返す(無ければNone)。

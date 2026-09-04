@@ -16,54 +16,20 @@ const FRAME_STEP_SECONDS = 1 / 30;
 const FORWARD_RATES = [1, 1.5, 2, 4];
 const REWIND_RATES = [2, 4, 8];
 const REWIND_TICK_MS = 100;
-// bar上端のこの帯だけを範囲の新規作成・平行移動にあて、それより下は従来通りclick/dragで
-// 移動する。modifier方式は発見できず、touchでは押せないので採らない。
-const RANGE_LANE_PX = 14;
-const HANDLE_HIT_PX = 8;
-const HANDLE_HIT_TOUCH_PX = 16;
-// IN/OUT線は帯の全高に描いてあるので、lane内でしか掴めないと「線の上を掴んだのにseekした」
-// になる(全尺barは高さの2〜3割しかlaneが無い)。lane外でも掴めるようにし、代わりに許容幅を
-// この割合まで絞る — 全尺barは1px≈数秒あり、lane内と同じ幅を全高へ広げるとhandleの周りで
-// seekできない帯ができる。
-const HANDLE_HIT_BODY_RATIO = 0.5;
-const HANDLE_DRAW_PX = 6;
-const PLAYHEAD_KNOB_PX = 5;
-// bar下端のこの帯を見どころmarker専用にあてる。波形・heatと重ねると、どちらが記録した
-// 位置なのか読めなくなる。
-const BOOKMARK_LANE_PX = 8;
+// 時間軸(seek bar)の寸法・handleの掴み幅・gift iconの並べ方は static/timeline.js が持つ。
+// **ストーリーの検証tabと同じ物を同じ見た目・同じ操作で出すため**で、片方だけを直した日に
+// もう片方が別の操作感で残るのを防ぐ。ここに残すのは、この画面にしか無い物だけである。
 // 記録済みの見どころの面。作業中のIN/OUT(緑)とは別色(--ramp)にして、「今挟んでいる範囲」と
 // 「もう記録した範囲」を取り違えないようにする。薄いのは波形を透かすため — この面は読む
 // 対象ではなく「もう手を付けた場所」の地色で、濃さは全尺barより拡大窓を上げる(全尺barは
 // heatとgiftが同じ面に載るので、濃くすると山が読めなくなる)。
 const MARK_BAND_ALPHA_FULL = 0.1;
 const MARK_BAND_ALPHA_ZOOM = 0.16;
-// 拡大窓下端の時刻ruler。無いと拡大中に「今どの辺りか」が全尺barへ目を往復しないと
-// 分からなくなる。
-const RULER_LANE_PX = 14;
-// timelineへ載せるgift iconの一辺(px)。全尺barは縦を波形とheatで使い切っているので、
-// そちらは更に小さくする。横に重なるiconは高額なものだけ残す(pickGiftIcons)。
-const GIFT_ICON_PX = 28;
-const GIFT_ICON_FULL_PX = 20;
-// icon同士の最小間隔(px)。詰めて並べると連投されたgiftで帯が埋まり、
-// どこで何が飛んだのかがかえって読めなくなる。
-const GIFT_ICON_GAP_PX = 2;
-// 送り主。iconだけでは「何が飛んだか」しか読めないので、拡大窓ではavatarを重ね、名前の
-// 頭を添える。名前を丸ごと出すと1件が横に伸び、その幅のぶんだけ隣のgiftが落ちる。
-const GIFT_NAME_CHARS = 3;
-const GIFT_NAME_FONT_PX = 9;
-// 名前1行ぶんの高さ(iconの下)。
-const GIFT_NAME_LANE_PX = 11;
-// 送り主avatarの直径(iconの一辺に対する割合)。iconの左下へ重ねるので、これ以上大きくすると
-// giftの絵そのものが読めなくなる。
-const GIFT_AVATAR_RATIO = 0.5;
-// 名前まで載せると1件の幅が2〜3倍になり、同じ列へ並べられる件数が落ちる。縦へ段を足して
-// 拾い直す(実際の段数は帯の高さが許すぶんだけ)。段を積み過ぎると波形が残らない。
-const GIFT_MAX_ROWS = 3;
-const GIFT_ROW_GAP_PX = 2;
-// gift側が使ってよい拡大窓の高さの割合。ここを越えて段を足さない — この窓は波形を読む
-// 場所で、giftはその上に載る注記に留める。段は詰まったときだけ使われる(空いていれば
-// 全て最上段に載る)ので、この上限は「混んだ場面でどこまで下へ伸ばすか」を決める。
-const GIFT_LANE_RATIO = 0.85;
+// 見どころtabで挟んだIN/OUTを書き戻すまでの待ち。dragはpointerが動くたびsetCutを呼ぶので、
+// そのまま送ると1回のdragで数十往復し、結末の名乗り(toast)も同じ数だけ積み上がる。手が
+// 止まってから1回だけ送る。値も流儀もストーリーの区間編集(story.jsのCUT_SEND_DELAY_MS)と
+// 揃える —— 同じ「範囲を挟んで直す」操作が画面ごとに別の作法になるのを避ける。
+const MARK_RANGE_SEND_DELAY_MS = 400;
 // 拡大窓の幅の可動域(秒)。下限より詰めても0.1s刻みの波形が箱状になるだけで情報は増えない。
 const ZOOM_MIN_SPAN_SECONDS = 8;
 const ZOOM_DEFAULT_SPAN_SECONDS = 150;
@@ -233,6 +199,11 @@ const state = {
   // ドラッグ中の行(tabへ放り込む経路)。dataTransferはdragover中に中身を読めないため、
   // 行き先の可否判定に使う情報はここに持つ。
   drag: null,
+  // 見どころtabで挟んだIN/OUTの送信予約(queueMarkRangeSave / flushMarkRange)。
+  // 中身だけで送れる形にしてある —— 手が止まるまでの間に別の行へ移っても、予約した時点の
+  // 見どころへ書き戻せるようにするため。
+  markRangePending: null,
+  markRangeTimer: null,
 };
 
 let rewindTimer = null;
@@ -283,7 +254,10 @@ function shareStreamerSelection(fromId) {
   state.bulkOnly = $("bulk-streamer").value || null;
 }
 
-function showView(name) {
+// keepPlayback は「呼んだ側がシーン検索のplayerを自分で読み込む」ことを告げる印。
+// 見どころからの「シーン検索視聴」は直後にopenHitが読み込むので、ここでも投げると
+// 同じplaylistを2度取りに行くことになる。
+function showView(name, { keepPlayback = false } = {}) {
   // 次に開いた時も同じtabで始める。nav遷移はフルリロードなので、残さないと作業の途中で
   // 他画面を見に行くたびシーン検索へ戻される。
   prefSet(VIEW_PREF_KEY, name);
@@ -300,11 +274,20 @@ function showView(name) {
     // 読み込みも位置も捨てない。戻れば続きから再生できる。
     if (video && !video.paused) video.pause();
   }
-  // 時間軸は隠れている間の描画要求を全て捨てる(実寸が0になるため drawHeat/drawZoom が
-  // 即returnする)。離れている間に届いた波形・heat・giftは描かれないまま残り、再描画の口は
-  // timeupdateとresizeしか無いのに、離れる時にvideoを止めているので誰も回さない。
-  // 戻った時点で1回描き直す(隠れている間のresizeで寸法がずれた絵も、ここで作り直る)。
-  if (name === "search") drawTimeline();
+  // 時間軸は画面に1つしかない。使う面(シーン検索・見どころ)へ要素ごと移す。
+  moveTimelineTo(name === "marks" ? "marks" : "search");
+  if (name === "search") {
+    // 見どころtabで別の録画へ移っていた場合、このplayerはまだ前の録画を指している。
+    // 戻った時点で読み込み直す(飛び先はmoveTimelineToが控えたstate.current.video_time)。
+    if (!keepPlayback && state.current && searchLoadedId !== state.current.recording_id) {
+      reloadPlayback(false);
+    }
+    // 時間軸は隠れている間の描画要求を全て捨てる(実寸が0になるため drawHeat/drawZoom が
+    // 即returnする)。離れている間に届いた波形・heat・giftは描かれないまま残り、再描画の口は
+    // timeupdateとresizeしか無いのに、離れる時にvideoを止めているので誰も回さない。
+    // 戻った時点で1回描き直す(隠れている間のresizeで寸法がずれた絵も、ここで作り直る)。
+    drawTimeline();
+  }
   // 実物を見に行く画面なので、開くたびに走査し直す(消したり増えたりするのはserver側)。
   if (name === "clips") loadClipFiles();
   if (name === "marks") loadMarks();
@@ -339,25 +322,12 @@ function syncSearchControls(mode, query) {
   const byLaugh = mode === LAUGH_MODE;
   const bySemantic = mode === "semantic";
   const box = $("q");
-  // 語の構文の説明はmarkupが唯一の出所。同じ文をここにも書くと、片方だけ直された説明が
-  // hoverで出る。最初の1回だけ退避して、笑い声から戻ったときに書き戻す。
-  if (box.dataset.help === undefined) box.dataset.help = box.title;
   box.disabled = byLaugh;
-  box.title = byLaugh
-    ? "笑い声は音そのものが根拠で、当たる語を持ちません。語で絞るには「語で一致」か「意味で近い」を選んでください。"
-    : box.dataset.help;
   ["src-stt", "src-comment"].forEach((id) => {
     $(id).disabled = byLaugh;
-    $(id).closest(".vd-chk").title = byLaugh
-      ? "検索対象は語を探す先です。笑い声は語を持たないため、この指定は効きません。"
-      : "";
   });
   // 確認の印は録画1本の属性。シーンが並んでいる間(語での検索・笑い声の一覧)は対象を持たない。
-  const reviewFilter = $("flt-review");
-  reviewFilter.disabled = Boolean(query) || byLaugh;
-  reviewFilter.title = reviewFilter.disabled
-    ? "確認状態の絞り込みは、検索語なしの録画一覧でだけ使えます。"
-    : "確認状態で録画一覧を絞り込みます。";
+  $("flt-review").disabled = Boolean(query) || byLaugh;
   // 並替は探し方ごとに選択肢が違う。語の一致度(関連度順)は笑い声には無く、強さ・長さは
   // 語での検索には無く、録画1本ごとの値(笑い声の合計)はシーンの一覧には無い。同じ群を
   // 出しっぱなしにせず、その探し方の選択肢だけを出す。
@@ -369,9 +339,6 @@ function syncSearchControls(mode, query) {
   // pillは動くのに並びが変わらず「壊れている」と読まれる。
   $("flt-order").querySelectorAll(".seg-item").forEach((item) => {
     item.disabled = bySemantic;
-    item.title = bySemantic
-      ? "意味検索は「意味が近い順」で返るため、並べ替えは使えません。"
-      : "";
   });
 }
 
@@ -412,7 +379,7 @@ async function runSearch(reset) {
     state.browsing = false;
     renderHits();
     $("search-summary").textContent = "";
-    setListMessage($("hit-empty"), "検索対象（音声／コメント）を選んでください。");
+    setListMessage($("hit-empty"), "");
     return;
   }
   state.browsing = false;
@@ -464,16 +431,13 @@ async function runSearch(reset) {
   state.total = data.total;
   state.hits = state.hits.concat(data.items);
   const note = data.mode === "semantic"
-    ? "（意味が近い順）"
+    ? "意味順"
     : data.mode === "like"
-      ? "（2文字以下のみのため全走査。3文字以上でindex検索になります）"
+      ? "全走査"
       : "";
-  $("search-summary").textContent = `${fmtNum(data.total)}件 / 表示${fmtNum(state.hits.length)}件 ${note}`;
-  // 空振りの理由は方式で違う。意味検索にANDは無いので、語の組み合わせを疑わせる文言を
-  // 出すと、実際の原因(index未構築・埋め込みmodel未接続)へ辿り着けない。
-  setListMessage($("hit-empty"), data.mode === "semantic"
-    ? "近い意味の発話が見つかりません。indexが古い場合は上の「意味検索indexを更新」を実行してください。"
-    : "該当するシーンがありません。複数語のANDは1つの発話・コメントの中で判定されます。");
+  $("search-summary").textContent =
+    `${fmtNum(state.hits.length)}/${fmtNum(data.total)}${note ? ` ${note}` : ""}`;
+  setListMessage($("hit-empty"), "");
   $("load-more").classList.toggle(
     "hidden", data.mode === "semantic" || state.hits.length >= state.total);
   renderHits();
@@ -508,24 +472,12 @@ async function loadLaughs() {
   if ($("flt-mode").value !== LAUGH_MODE) return;
   state.total = data.total;
   state.hits = state.hits.concat(data.items);
-  $("search-summary").textContent =
-    `${fmtNum(data.total)}件 / 表示${fmtNum(state.hits.length)}件 ${LAUGH_ORDER_NOTES[$("flt-laugh-order").value] || ""}`;
-  // 0件の理由は「笑っていない」ではなく「まだ解析していない」ことがほとんどなので、
-  // 対処(一括処理の笑い声分析)まで書く。ここで「該当なし」とだけ出すと、解析が要ることに
-  // 辿り着けない。
-  setListMessage($("hit-empty"),
-    "笑い声が見つかりません。一括処理の「笑い声分析」を実行すると、解析した録画から並びます。");
+  $("search-summary").textContent = `${fmtNum(state.hits.length)}/${fmtNum(data.total)}`;
+  // 0件の理由は「笑っていない」ではなく「まだ解析していない」ことがほとんど。
+  setListMessage($("hit-empty"), "未解析");
   $("load-more").classList.toggle("hidden", state.hits.length >= state.total);
   renderHits();
 }
-
-// 並替の値 → 要約欄に添える語。何順で並んでいるかが表からは読めない(強さも長さも
-// 同じ列に文字で出るため)。
-const LAUGH_ORDER_NOTES = {
-  time: "（配信が新しい順）",
-  strength: "（強い順）",
-  length: "（長い順）",
-};
 
 // snippetはServerが\x02..\x03で一致箇所を囲んで返す(囲みは重ならない=入れ子にならない)。
 // HTMLを組み立てずDOMで包むことで、コメント本文中の記号がmarkupとして解釈されるのを防ぐ。
@@ -638,14 +590,12 @@ function applyBrowseFilter() {
   highlightHitRow();
   setListState($("hit-empty"), state.hits.length ? "ok" : "empty");
   if (!state.hits.length && want && state.browseAll.length) {
-    setListMessage($("hit-empty"), `「${REVIEW_LABELS[want]}」の録画はありません。`);
+    setListMessage($("hit-empty"), "");
   }
   const total = state.browseAll.length;
   const note = browseOrderNote();
   $("search-summary").textContent = total
-    ? (want
-      ? `${REVIEW_LABELS[want]} ${fmtNum(state.hits.length)}本 / 録画 ${fmtNum(total)}本${note}`
-      : `録画 ${fmtNum(total)}本${note || "（検索語を入れるとシーンを探せます）"}`)
+    ? (want ? `${fmtNum(state.hits.length)}/${fmtNum(total)}${note}` : `${fmtNum(total)}${note}`)
     : "";
 }
 
@@ -668,21 +618,7 @@ function sortBrowseRows(rows) {
 function browseOrderNote() {
   if ($("flt-browse-order").value !== "laugh") return "";
   const pending = state.hits.filter((rec) => typeof rec.laugh_seconds !== "number").length;
-  return pending
-    ? `（笑い声が多い順・未解析 ${fmtNum(pending)}本は末尾）`
-    : "（笑い声が多い順）";
-}
-
-// 実体の種別を名乗る語。録画の身元(``<stem>.mp4``)は名前でしかなく、finalizeはmp4を
-// 作らない。名前だけを見せると「mp4というfileが在る」と読めてしまうので、実物が.tsなのか
-// mp4なのかを併せて出す。
-const MEDIA_BADGE_LABELS = { ts: "TS", mp4: "MP4" };
-
-// 実体が1つも無い録画は行だけが残っている。開けないことは名乗る(文字起こし・検索・bookmarkは
-// 残るので行自体は消さない)。
-function mediaText(media) {
-  if (!media || !media.length) return "実体なし（再生できません。文字起こし・検索・bookmarkは使えます）";
-  return media.map((kind) => MEDIA_BADGE_LABELS[kind] || kind).join("・");
+  return pending ? `（未解析 ${fmtNum(pending)}）` : "";
 }
 
 // ===== 確認状態(観たかどうかの印) =====
@@ -706,7 +642,7 @@ async function setReview(recordingId, next) {
   try {
     await apiSend("PATCH", `/api/recordings/${recordingId}/review`, { state: next });
     if (state.current && state.current.recording_id === recordingId) {
-      $("review-note").textContent = `「${REVIEW_LABELS[next]}」にしました。`;
+      $("review-note").textContent = "";
     }
   } catch (err) {
     if (previous) applyReviewLocally(recordingId, previous);
@@ -807,8 +743,7 @@ function recordingMemoCell(rec) {
   memo.className = "vd-memo";
   memo.value = rec.memo || "";
   memo.placeholder = "メモ";
-  memo.setAttribute("aria-label", "この録画のメモ");
-  memo.title = "この録画1本ぶんの覚え書きです（配信ではなく録画に付きます）。";
+  memo.setAttribute("aria-label", "録画のメモ");
   // 行clickはこの録画を開く操作なので、この欄の操作は行へ伝播させない。
   ["click", "mousedown", "keydown", "dragstart"].forEach((type) => {
     memo.addEventListener(type, (event) => event.stopPropagation());
@@ -822,7 +757,7 @@ function recordingMemoCell(rec) {
       rec.memo = next;
       // 成功時に画面が何も変わらないと、保存されたのか離れ方が悪くて捨てられたのかを
       // 判別できず、確かめるために画面を読み込み直すことになる。
-      showToast("メモを保存しました。", null, { title: "録画のメモ" });
+      showToast("保存", null, { title: "録画のメモ" });
     } catch (err) {
       // 保存できなかった値を欄に残すと、書けたものとして次の行へ進んでしまう。
       memo.value = rec.memo || "";
@@ -837,46 +772,6 @@ function recordingMemoCell(rec) {
 function laughText(rec) {
   if (typeof rec.laugh_seconds !== "number") return "—";
   return fmtDuration(rec.laugh_seconds);
-}
-
-// 一覧の行が名乗らなくなった事実(file名・実体・中断・文字起こしの有無)。列を1つずつ立てると
-// 身元3つを読むのに横が要るので、行そのもののhoverへまとめる。行は開く操作を持つので、
-// 開く前に「開けるのか・語で検索に出るのか」をここで確かめられる。
-function browseRowTitle(rec) {
-  // 表示は身元から拡張子を落としたstem。`.mp4`を出すと、実体がmp4だと読めてしまう。
-  const parts = [`${recName(rec)}（${mediaText(rec.media)}）`];
-  // 中断録画も一覧に出す(素材は揃っていることがある)。ただし確定を跨げていないので、
-  // 尺が未測定なことがある事実は行から読めるようにしておく。
-  if (rec.status === "interrupted") {
-    parts.push("中断: 確定処理を跨げなかった録画です（serverの再起動・crashなど）。素材は残っており再生できます。");
-  }
-  // 文字起こしが無い録画は語で検索しても当たらない。開く前に見分けられるようにしておく。
-  if (!rec.has_transcript) {
-    parts.push("文字起こしなし: まだ文字起こしされていないため、語での検索には出てきません。");
-  }
-  parts.push(laughTitle(rec));
-  return parts.join("\n");
-}
-
-// 笑い声の欄が何を名乗っているか。秒だけを出すと、0秒が「笑わなかった」なのか「共演で
-// 埋まっていた」なのか「まだ数えていない」なのか読めない。
-function laughTitle(rec) {
-  if (typeof rec.laugh_seconds !== "number") {
-    return "笑い声: 未解析（一括処理の「笑い声分析」で数えられます）。";
-  }
-  const parts = [`笑い声: ${fmtDuration(rec.laugh_seconds)}（${fmtNum(rec.laugh_windows)}区間）`];
-  if (!rec.laugh_exclude) {
-    // 共演を外す前に張ったindex。行はそのまま残っているので、値は出るが意味が違う。
-    parts.push("※コラボ・Battle中を外す前に数えた値です。一括処理の「笑い声分析」で数え直せます。");
-  } else if (rec.laugh_exclude === "none") {
-    parts.push("※共演中も数えた値です（設定 TICTOK_LAUGH_INDEX_EXCLUDE_COOP）。");
-  } else if (!rec.laugh_collab_observed) {
-    parts.push("※この配信はコラボ窓の記録が無い時期のため、コラボ中は外れていません。");
-  } else if (rec.laugh_excluded_seconds) {
-    const kinds = rec.laugh_exclude === "coop" ? "コラボ・Battle" : "コラボ";
-    parts.push(`${kinds}中の ${fmtDuration(rec.laugh_excluded_seconds)} は数えていません。`);
-  }
-  return parts.join("\n");
 }
 
 // hitの出所を名乗る語。serverのsource名をそのまま画面語へ写す。三項演算子で2択に
@@ -938,9 +833,7 @@ function renderHits() {
       if (!state.browsing && continuesRecording(state.hits, index)) tr.classList.add("vd-cont");
       tr.classList.add("vd-hit");
       tr.tabIndex = 0;
-      // 一覧の行は列を持たない事実(file名・実体・中断・文字起こしの有無)をhoverで名乗る。
       if (state.browsing) {
-        tr.title = browseRowTitle(hit);
         // 数値列(尺・笑い声)の右寄せ。renderTableRowsのnumericColsを使わないのは、
         // この表が探し方で列を出し入れするため — headerの列番号(隠し列を含む)とdataの
         // 列番号がずれ、値と見出しが別々の列で右寄せになる。
@@ -1010,9 +903,48 @@ function reapplyVoiceSnap(hit) {
   }
 }
 
+// 録画1本ぶんの読み込み。<video>そのもの以外(印・拡大窓・波形・盛り上がり・gift・
+// 見どころ・文字起こし・コメント)を、これから観る録画のものへ入れ替える。
+// **シーン検索と見どころtabの共通の入口**である —— 時間軸は面をまたいで1つの実装で、
+// 読む対象もstate側の1組しか無いので、どちらの面で録画を開いてもここを通す。
+// state.currentは呼ぶ側が先に置いておくこと(この中のloaderが照合に使う)。
+function loadRecordingContext(hit) {
+  // 印は録画ごとの値。前の録画のものを残すと、開いた直後の一瞬だけ別録画の印が
+  // 出てしまう。確定値はloadPathsがserverから持ってくる(一覧経由なら行の値が既にある)。
+  $("review-note").textContent = "";
+  setReviewControlEnabled(true);
+  syncReviewControl(reviewStateOf(hit));
+  state.heat = null;
+  // 拡大窓も仕切り直す。前の録画で狭めた窓や追従OFFを引き継ぐと、開いた直後に
+  // 「どこも映っていない」拡大窓が出る。
+  state.zoomStart = null;
+  state.zoomSpan = ZOOM_DEFAULT_SPAN_SECONDS;
+  $("zoom-follow").checked = true;
+  // 文字起こしの有無はloadTranscriptが確定させる。それまでは押せない状態にしておく。
+  $("do-transcribe").disabled = true;
+  setRecordingJobButtons(true);
+  $("job-note").textContent = "";
+  drawTimeline();
+  loadHeat(hit.recording_id);
+  loadTranscript(hit.recording_id);
+  loadChapters(hit.recording_id);
+  loadComments(hit.recording_id);
+  loadBookmarks(hit.recording_id);
+  loadThumbnails(hit.recording_id);
+  loadWaveform(hit.recording_id);
+  loadGainCurve(hit.recording_id);
+  loadSkipPlan(hit.recording_id);
+  loadPacePlan(hit.recording_id);
+  loadGifts(hit.recording_id);
+}
+
 async function openHit(hit, index) {
   const video = $("video");
-  const sameRecording = state.current && state.current.recording_id === hit.recording_id;
+  // 「同じ録画」は**このplayerが実際にその録画を読み込んである**こと。state.currentだけを
+  // 見ていた頃は、見どころtabで別の録画を観るとstate.currentだけが先に移り、戻ってきて
+  // 同じ行を押したときに読み込み直しを飛ばして、前の録画の映像をseekしていた。
+  const sameRecording = state.current && state.current.recording_id === hit.recording_id
+    && searchLoadedId === hit.recording_id;
   const range = hitCutRange(hit);
   state.current = hit;
   if (index !== undefined) {
@@ -1029,36 +961,10 @@ async function openHit(hit, index) {
   $("player-status").textContent = "";
 
   if (!sameRecording) {
-    // 印は録画ごとの値。前の録画のものを残すと、開いた直後の一瞬だけ別録画の印が
-    // 出てしまう。確定値はloadPathsがserverから持ってくる(一覧経由なら行の値が既にある)。
-    $("review-note").textContent = "";
-    setReviewControlEnabled(true);
-    syncReviewControl(reviewStateOf(hit));
     // 別録画に移ったらIN/OUTは持ち越さない(別fileの秒数として無意味になるため)。
     // 声の判定はまだ無いので、届いた時点でreapplyVoiceSnapが寄せ直す。
     setCut(...(range || [null, null]));
-    state.heat = null;
-    // 拡大窓も仕切り直す。前の録画で狭めた窓や追従OFFを引き継ぐと、開いた直後に
-    // 「どこも映っていない」拡大窓が出る。
-    state.zoomStart = null;
-    state.zoomSpan = ZOOM_DEFAULT_SPAN_SECONDS;
-    $("zoom-follow").checked = true;
-    // 文字起こしの有無はloadTranscriptが確定させる。それまでは押せない状態にしておく。
-    $("do-transcribe").disabled = true;
-    setRecordingJobButtons(true);
-    $("job-note").textContent = "";
-    drawTimeline();
-    loadHeat(hit.recording_id);
-    loadTranscript(hit.recording_id);
-    loadChapters(hit.recording_id);
-    loadComments(hit.recording_id);
-    loadBookmarks(hit.recording_id);
-    loadThumbnails(hit.recording_id);
-    loadWaveform(hit.recording_id);
-    loadGainCurve(hit.recording_id);
-    loadSkipPlan(hit.recording_id);
-    loadPacePlan(hit.recording_id);
-    loadGifts(hit.recording_id);
+    loadRecordingContext(hit);
     // 素材版の実在を確定させてから読み込む。後追いにすると、選択中の版が在る録画でも
     // 一度元録画を読み込んでから差し替わり、無駄な読み込みと一瞬別の絵が出る。
     await loadPaths(hit.recording_id);
@@ -1114,16 +1020,6 @@ function applyVariantAvailability() {
     const kind = item.dataset.value;
     const has = kinds.includes(kind);
     item.disabled = !has;
-    // 「下の処理から作れます」とだけ案内していたが、全尺の焼き込みは可逆中間がC:を
-    // 192GB/時食うため長尺では実行できない。切り出しなら範囲だけを焼けるので、そちらを示す。
-    item.title = has
-      ? ""
-      : !variantsKnown
-        ? "素材版の一覧を取得できませんでした（この版が無いという意味ではありません）。"
-        : `この録画には${VARIANT_LABELS[kind]}がありません。${
-            kind === "source"
-              ? ""
-              : "この版での再生はできませんが、切り出しは範囲だけを焼いて出せます（下の「処理」で全尺を作ることもできます）。"}`;
   });
 }
 
@@ -1144,6 +1040,10 @@ let playbackToken = 0;
 // 再生listの引き直し(hlsPlaylistMayBeStale 参照)。ts結合で素材の置き場所が変わると、
 // 開いたままのpageは消えたsegmentを指すlistを持ち続ける。
 const playbackGate = hlsReloadGate();
+// シーン検索のplayerが今読み込んである録画。見どころtabで別の録画を観るとstate.currentだけが
+// 先に移るので、「この<video>が指しているのはどの録画か」は別に持つ必要がある。持たずに
+// state.currentだけで判断していた頃は、戻ってきた時に前の録画の映像をseekしていた。
+let searchLoadedId = null;
 
 function detachHls() {
   if (!hlsPlayer) return;
@@ -1167,7 +1067,7 @@ function loadPlayback(playback, at, playing) {
       if (!data.fatal) return;
       // ts結合で素材の置き場所が変わっただけなら、listを引き直せば同じ位置から続けられる。
       if (hlsPlaylistMayBeStale(data) && playbackGate.take()) {
-        $("player-status").textContent = "素材の置き場所が変わりました。再生listを取り直しています…";
+        $("player-status").textContent = "";
         reloadPlayback(true, true);
         return;
       }
@@ -1216,15 +1116,15 @@ async function reloadPlayback(keepTime, recovering = false) {
   }
   if (token !== playbackToken) return;
   if (want !== variant) {
-    $("player-status").textContent =
-      `切り出し素材は「${VARIANT_LABELS[want]}」ですが、この録画にはその出力が無いため元録画を再生しています。`;
+    // 頼んだ版が無いことは出来の判断に効く。指した版と実際に鳴っている版だけを出す。
+    $("player-status").textContent = `${VARIANT_LABELS[want]}なし → ${VARIANT_LABELS[variant]}`;
   } else if (variant === "source" && playback.mode !== "hls") {
-    // 素材から直接観られない録画であることは、出来を見るうえで知っておく必要がある。
-    $("player-status").textContent = "この録画は.tsが残っていないため、mp4を再生しています。";
+    $("player-status").textContent = "MP4";
   } else {
     $("player-status").textContent = "";
   }
   loadPlayback(playback, at, playing);
+  searchLoadedId = recordingId;
 }
 
 async function loadPaths(recordingId) {
@@ -1239,8 +1139,7 @@ async function loadPaths(recordingId) {
     data = await apiSend("GET", `/api/recordings/${recordingId}/path`);
     state.variants = data.variants || [];
   } catch (err) {
-    $("player-status").textContent =
-      `素材版の一覧を取得できませんでした（版が無いという意味ではありません）: ${err.message}`;
+    $("player-status").textContent = `素材版の取得失敗: ${err.message}`;
     showError(err, "素材版の取得");
     return;
   }
@@ -1271,7 +1170,7 @@ async function loadHeat(recordingId) {
     if (state.current && state.current.recording_id === recordingId) {
       state.heat = null;
       drawTimeline();
-      $("heat-note").textContent = "盛り上がりを取得できませんでした（0件という意味ではありません）。";
+      $("heat-note").textContent = "取得失敗";
       showError(err, "盛り上がりの取得");
     }
   }
@@ -1304,8 +1203,7 @@ async function loadTranscript(recordingId) {
         // 未処理のときだけ押せる。既存transcriptの再文字起こしはbackendが受け付けない。
         $("do-transcribe").disabled = false;
       } else {
-        $("transcript-note").textContent =
-          `文字起こしを取得できませんでした（未処理という意味ではありません）。${errorDetailText(err)}`;
+        $("transcript-note").textContent = `取得失敗: ${errorDetailText(err)}`;
         $("do-transcribe").disabled = true;
       }
     }
@@ -1337,14 +1235,12 @@ async function transcribeCurrent() {
   button.disabled = true;
   // 投入結果はbuttonの隣(job-note)に出す。文字起こしpanelのnoteはtranscriptそのものの
   // 状態を持つ欄で、buttonから離れており押した手応えにならない。
-  $("job-note").textContent = "文字起こしの順番待ちに入れています…";
+  $("job-note").textContent = "投入中…";
   try {
     const result = await apiSend("POST", "/api/transcribe/queue", {
       recording_ids: [recordingId],
     });
-    const text = result.added
-      ? "文字起こしの順番待ちに入れました。終わり次第ここに反映されます。"
-      : "文字起こしは既に順番待ちか処理済みです。";
+    const text = result.added ? "順番待ちへ" : "投入済み";
     $("job-note").textContent = text;
     showToast(text, null, { title: "文字起こし", duration: JOB_TOAST_MS });
   } catch (err) {
@@ -1382,11 +1278,11 @@ async function startRecordingJob(kind) {
   const spec = RECORDING_JOBS[kind];
   const recordingId = state.current.recording_id;
   setRecordingJobButtons(false);
-  $("job-note").textContent = `${spec.label}を順番待ちに入れています…`;
+  $("job-note").textContent = `${spec.label} 投入中…`;
   try {
     await apiSend("POST", `/api/recordings/${recordingId}/${spec.path}`);
     // buttonは伏せたままにする。終わるか失敗するまでは同じ録画へ二重に投げても意味が無い。
-    const text = `${spec.label}を順番待ちに入れました。進み具合はJob画面に出ます。`;
+    const text = `${spec.label} 順番待ちへ`;
     $("job-note").textContent = text;
     showToast(text, null, { title: spec.label, duration: JOB_TOAST_MS });
   } catch (err) {
@@ -1409,7 +1305,7 @@ function onRecordingJobUpdate(job) {
     return;
   }
   if (job.state === "completed") {
-    $("job-note").textContent = `${label}が終わりました。`;
+    $("job-note").textContent = "";
     // 出来た版をその場で選べるようにする。再mp4化と音量正規化は元録画そのものが差し
     // 替わるので、開いているplayerも読み直す(古いfileを再生し続けると直ったか分からない)。
     loadPaths(job.recording_id).then(() => {
@@ -1604,8 +1500,7 @@ async function loadVoiceSpans(recordingId) {
   } catch (err) {
     if (state.current && state.current.recording_id === recordingId) {
       // 黙って寄せないでいると「直っていない」としか見えない。理由を出す。
-      $("player-status").textContent =
-        `声の判定を取得できませんでした（文字起こしの秒をそのまま使います）。${errorDetailText(err)}`;
+      $("player-status").textContent = `声の判定なし: ${errorDetailText(err)}`;
     }
   }
 }
@@ -1628,8 +1523,7 @@ async function loadChapters(recordingId) {
     data = await apiSend("GET", `/api/recordings/${recordingId}/chapters`);
   } catch (err) {
     if (state.current && state.current.recording_id === recordingId) {
-      $("chapter-note").textContent =
-        `章立てを取得できませんでした。${errorDetailText(err)}`;
+      $("chapter-note").textContent = `取得失敗: ${errorDetailText(err)}`;
     }
     return;
   }
@@ -1723,7 +1617,7 @@ async function generateChapters() {
   button.disabled = true;
   // 実測で40分の録画に約10分かかる(chunk数に比例)。押した直後に無反応に見えないよう、
   // 待たされることを先に伝える。
-  $("chapter-note").textContent = "章立てを作っています。録画の長さに応じて数分〜数十分かかります…";
+  $("chapter-note").textContent = "作成中…（数分〜数十分）";
   try {
     const data = await apiSend("POST", `/api/recordings/${recordingId}/chapters`);
     if (!state.current || state.current.recording_id !== recordingId) return;
@@ -1755,11 +1649,11 @@ async function copyChapterText() {
     text = await res.text();
   } catch (err) {
     // 押したbuttonは章立てblock側にあり、player-statusはそこから離れている。
-    $("player-status").textContent = `章立てを取得できませんでした: ${err.message}`;
+    $("player-status").textContent = `章立ての取得失敗: ${err.message}`;
     showError(err, "章立てのcopy");
     return;
   }
-  copyText(text, "説明欄用の章立てをcopyしました。");
+  copyText(text, "copy");
 }
 
 // ===== コメントpanel =====
@@ -1778,21 +1672,17 @@ async function loadComments(recordingId) {
   try {
     data = await apiSend("GET", `/api/recordings/${recordingId}/comments`);
   } catch (err) {
-    // panelは空のまま残るので、生のerror文言だけだと成功時の「コメントがないか、検索
-    // indexが未構築です。」と見分けにくい。loadTranscriptと同じ文型で0件と区別する。
     if (state.current && state.current.recording_id === recordingId) {
-      $("comment-note").textContent =
-        `コメントを取得できませんでした（0件という意味ではありません）: ${err.message}`;
+      $("comment-note").textContent = `取得失敗: ${err.message}`;
     }
     return;
   }
   if (!state.current || state.current.recording_id !== recordingId) return;
   state.comments = data.items || [];
+  // 「0件」と「未index」はsearch_hits上で区別が付かない(空indexは行を残さない)。
   $("comment-note").textContent = state.comments.length
     ? `${fmtNum(state.comments.length)}件`
-    // 「0件」と「未index」はsearch_hits上で区別が付かない(空indexは行を残さない)ので、
-    // 断定せずどちらもあり得る文言にする。
-    : "コメントがないか、検索indexが未構築です。";
+    : "0件 / 未index";
   renderComments();
   highlightActiveComment();
 }
@@ -1854,7 +1744,7 @@ function markedHitIds() {
 function paintCommentMark(button, on) {
   button.classList.toggle("vd-cmt-mark-on", on);
   button.setAttribute("aria-pressed", on ? "true" : "false");
-  button.title = on ? "見どころから外す" : "この位置を見どころに記録";
+  button.setAttribute("aria-label", on ? "見どころから外す" : "見どころに記録");
 }
 
 function syncCommentMarks() {
@@ -1963,9 +1853,6 @@ function buildGiftRow(gift, index, punish) {
     row.appendChild(icon);
   }
   row.append(who, name, diamonds);
-  row.title = `${gift.nickname || gift.uid || ""}：${gift.name}×${fmtNum(gift.count)}`
-    + `（${fmtNum(gift.diamonds)}コイン）`
-    + (punish ? "／PK後の勝利時間（スコアには入りません）" : "");
   return row;
 }
 
@@ -2046,12 +1933,9 @@ function buildPkOutside(now) {
   const box = document.createElement("div");
   box.className = "vd-pk-empty";
   if (!(state.battles || []).length) {
-    box.textContent = "この録画にPKはありません";
+    box.textContent = "—";
     return box;
   }
-  const label = document.createElement("div");
-  label.textContent = "PK中ではありません";
-  box.appendChild(label);
   const target = pkOutsideTarget(now);
   if (target) {
     const button = document.createElement("button");
@@ -2059,7 +1943,7 @@ function buildPkOutside(now) {
     button.type = "button";
     const forward = target.start > now;
     button.textContent =
-      `${forward ? "次" : "直前"}のPK ${target.ordinal}戦目 ${fmtDuration(target.start)} へ`;
+      `${forward ? "▶" : "◀"} PK ${target.ordinal} ${fmtDuration(target.start)}`;
     button.addEventListener("click", () => { $("video").currentTime = target.start; });
     box.appendChild(button);
   }
@@ -2096,7 +1980,6 @@ function renderPkNow(battle, now) {
     const partial = document.createElement("span");
     partial.className = "vd-pk-partial";
     partial.textContent = "一部のみ";
-    partial.title = "このPKはこの録画に一部だけ入っています。";
     head.appendChild(partial);
   }
   // PKが終わった後の勝利(罰ゲーム)時間。同じ戦を出し続けるので、今がPK中なのか演出中
@@ -2108,7 +1991,6 @@ function renderPkNow(battle, now) {
   const gap = document.createElement("span");
   gap.className = "vd-pk-gap";
   head.appendChild(gap);
-  head.title = "clickでこのPKの頭へ移動";
   const body = document.createElement("div");
   body.className = "vd-pk-now-body";
   const barHost = document.createElement("div");
@@ -2124,11 +2006,11 @@ function renderPkNow(battle, now) {
     ? battleModeLabel({ type: battle.type, participants: parts })
     : (battle.type === "team" ? "チーム戦" : "個人戦");
   foot.textContent = `${mode}`
-    + `${opponents ? ` / 相手: ${opponents}` : ""}`
-    + ` / 尺 ${fmtDuration(Math.max(0, battle.end - battle.start))}`
+    + `${opponents ? ` / ${opponents}` : ""}`
+    + ` / ${fmtDuration(Math.max(0, battle.end - battle.start))}`
     // 推移の記録がこの録画の窓に1点も無い戦。バーが動かない理由を名乗らないと、
     // 最後の値が再生位置の値に見える。
-    + ((battle.series || []).length ? "" : " / 推移の記録なし（最終スコア）");
+    + ((battle.series || []).length ? "" : " / 推移なし");
   foot.title = foot.textContent;
   body.append(barHost, foot);
   box.append(head, body);
@@ -2142,15 +2024,9 @@ function paintPkPhase(node, battle, punishing) {
   node.hidden = !punishing;
   if (!punishing) {
     node.textContent = "";
-    node.title = "";
     return;
   }
   node.textContent = battle.punish_measured ? "勝利時間" : "勝利時間（目安）";
-  node.title = battle.punish_measured
-    ? "PK終了後の勝利（罰ゲーム）時間です。終わりはTikTokの終了eventで実測しています。"
-      + "スコアはPKの確定値で止めています。"
-    : "PK終了後の勝利（罰ゲーム）時間です。終わりの合図が録れていないので、次のPKの開始と"
-      + "実測上限の180秒のうち早い方までを目安に出しています。スコアはPKの確定値です。";
 }
 
 // 再生位置で変わる所だけを書き換える。timeupdateは毎秒4回来るので、値が動いていない
@@ -2176,10 +2052,7 @@ function paintPkLive() {
   // opp(敵陣)は個人マルチでも最上位1陣の値。勝敗の判定と同じ相手で差を出す。
   const opp = sample ? sample.opp : battle.opp_score;
   const gap = own - opp;
-  pkLiveNodes.gap.textContent =
-    gap === 0 ? "互角" : (gap > 0 ? `+${fmtNum(gap)} リード` : `${fmtNum(gap)} ビハインド`);
-  pkLiveNodes.gap.title = gap === 0 ? "自陣と敵陣が同点です。"
-    : `自陣と敵陣（最上位）の差です。`;
+  pkLiveNodes.gap.textContent = gap === 0 ? "互角" : `${gap > 0 ? "+" : ""}${fmtNum(gap)}`;
 }
 
 // ギフト欄。出すのはこの戦の窓に飛んだ味方陣のギフトだけ(相手陣のコインは相手Roomの
@@ -2219,9 +2092,6 @@ function renderPkGifts(battle) {
   const coin = document.createElement("span");
   coin.className = "vd-pk-coin";
   head.append(count, punishSum, coin);
-  head.title = "この配信者の枠へ飛んだギフトです（相手の枠のギフトは含みません）。"
-    + "「ここまで / この戦の合計」で数えています。PK終了後の勝利時間に飛んだ分は"
-    + "スコアにも貢献にも入らないので、別に数えます。";
   // 行は先に全部作っておき、DOMへは再生位置まで届いた分だけを入れる(下のsyncPkGiftFeed)。
   // 作るのを都度にすると、巻き戻しのたびに同じ行を作り直すことになる。
   pkGiftItems.forEach(
@@ -2238,9 +2108,7 @@ function renderPkGifts(battle) {
   const empty = document.createElement("div");
   empty.className = "vd-pk-empty";
   // 「この戦には無い」と「まだ来ていない」は別の話。0件の戦でだけ前者を出す。
-  empty.textContent = pkGiftItems.length
-    ? "この時点ではまだ飛んでいません"
-    : "この戦に飛んだギフトはありません";
+  empty.textContent = pkGiftItems.length ? "—" : "なし";
   list.appendChild(empty);
   pkGiftEmpty = empty;
 }
@@ -2378,8 +2246,7 @@ async function loadBookmarks(recordingId) {
   } catch (err) {
     // 別の録画へ移った後に古い失敗が届くことがある。今開いている録画の欄を潰さない。
     if (state.current && state.current.recording_id === recordingId) {
-      $("player-status").textContent =
-        `見どころを取得できませんでした（0件という意味ではありません）: ${err.message}`;
+      $("player-status").textContent = `見どころの取得失敗: ${err.message}`;
     }
     showError(err, "見どころの取得");
     return;
@@ -2412,7 +2279,7 @@ async function saveBookmark(start, end, memo, sourceHitId) {
   if (end !== null && end !== undefined) {
     const twin = existingMarkFor(state.current.recording_id, start, end);
     if (twin) {
-      const dup = `この範囲は既に見どころ（${groupNameOf(twin.group_id) || "未分類"}）にあります。`;
+      const dup = `記録済み（${groupNameOf(twin.group_id) || "未分類"}）`;
       $("player-status").textContent = dup;
       showToast(dup, "error", { title: "見どころの記録" });
       syncAddMarkButton();
@@ -2438,9 +2305,7 @@ async function saveBookmark(start, end, memo, sourceHitId) {
   const where = end === null
     ? fmtDuration(start)
     : `${fmtDuration(start)} - ${fmtDuration(end)}`;
-  const message = end === null
-    ? `見どころに記録しました（点 ${where} → ${groupNameOf(groupId) || "未分類"}）`
-    : `見どころに記録しました（${where} → ${groupNameOf(groupId) || "未分類"}・mp4にできます）`;
+  const message = `★ ${where} → ${groupNameOf(groupId) || "未分類"}`;
   $("player-status").textContent = message;
   showToast(message);
   flashBookmark(start, end);
@@ -2531,20 +2396,20 @@ function markToken(mark) {
 function drawBookmarks(ctx, width, height, duration) {
   if (!state.bookmarks.length) return;
   const toX = (seconds) => (seconds / duration) * width;
-  const top = height - BOOKMARK_LANE_PX;
+  const top = height - MARKER_LANE_PX;
   state.bookmarks.forEach((mark) => {
     const x = toX(mark.start);
     if (x < 0 || x > width) return;
     ctx.fillStyle = cssTokenAlpha(markToken(mark), 0.85);
     if (mark.end !== null && mark.end !== undefined) {
-      ctx.fillRect(x, top, Math.max(2, toX(mark.end) - x), BOOKMARK_LANE_PX);
+      ctx.fillRect(x, top, Math.max(2, toX(mark.end) - x), MARKER_LANE_PX);
       return;
     }
-    ctx.fillRect(x - 1, top, 2, BOOKMARK_LANE_PX);
+    ctx.fillRect(x - 1, top, 2, MARKER_LANE_PX);
     ctx.beginPath();
-    ctx.moveTo(x - BOOKMARK_LANE_PX / 2, top);
-    ctx.lineTo(x + BOOKMARK_LANE_PX / 2, top);
-    ctx.lineTo(x, top + BOOKMARK_LANE_PX);
+    ctx.moveTo(x - MARKER_LANE_PX / 2, top);
+    ctx.lineTo(x + MARKER_LANE_PX / 2, top);
+    ctx.lineTo(x, top + MARKER_LANE_PX);
     ctx.closePath();
     ctx.fill();
   });
@@ -2699,7 +2564,7 @@ function bindGroupMemo(inputId, statusId) {
     if (!groupId) return;
     try {
       await apiSend("PATCH", `/api/groups/${groupId}`, { memo: memo.value.trim() });
-      showToast("メモを保存しました。", null, { title: "グループのメモ" });
+      showToast("保存", null, { title: "グループのメモ" });
     } catch (err) {
       $(statusId).textContent = err.message;
       showError(err, "グループのメモ保存");
@@ -2727,10 +2592,10 @@ function renderMarksHead() {
   const scope = selected.length ? selected : rows;
   const picked = targetMarks();
   const points = scope.length - picked.length;
-  const excluded = points ? `／点 ${fmtNum(points)}件は対象外` : "";
+  const excluded = points ? ` / 点${fmtNum(points)}除外` : "";
   $("cuts-scope").textContent = hasMarkSelection()
-    ? `対象: 選択中の${fmtNum(picked.length)}件（${groupScopeLabel(state.groupSel)}${excluded}）`
-    : `対象: ${groupScopeLabel(state.groupSel)}の${fmtNum(picked.length)}件${excluded}`;
+    ? `選択 ${fmtNum(picked.length)}${excluded}`
+    : `${groupScopeLabel(state.groupSel)} ${fmtNum(picked.length)}${excluded}`;
   $("marks-list-title").textContent = grouped
     ? `■ ${groupName} ／ 見どころ（書き出し順）`
     : "■ 見どころ";
@@ -2741,23 +2606,10 @@ function renderMarksHead() {
   // まま数十分の連結jobが走り、出来上がってから気付くことになる。
   const reel = $("cuts-reel");
   reel.disabled = !grouped || picked.length === 0;
-  reel.title = grouped
-    ? "表示順（書き出し順）のまま1本のmp4へ繋ぎます。行を選んでいれば選択した分だけを、その表示順で繋ぎます。尺の無い行は対象に入りません。"
-    : "グループを選ぶと書き出し順が定まります。「全て」「未分類」では順序が決まりません。";
-  // 作品はグループ1件が単位で、行の選択には従わない。同じ帯に並ぶ「1本に連結」は選択に
-  // 従うので、その違いはtitleで名乗る(押してから気付く形にしない)。
-  // 型(作り方)が1つも無ければ作品は作れないので、そちらの可否も併せて見る — ここで
-  // グループの有無だけを見ると、型の読み込みが立てた無効化をこの再描画が毎回消してしまう。
-  const work = $("cuts-work");
-  work.disabled = !grouped || ranged.length === 0 || !workPresetsReady;
-  work.title = !workPresetsKnown
-    ? "作品の型を取得できませんでした（型が無いという意味ではありません）。"
-    : !workPresetsReady
-      ? "作品の型がありません。設定画面の「shortの型」で作成してください。"
-      : grouped
-        ? `「${groupName}」の尺のある${fmtNum(ranged.length)}件を、テロップを焼いて間を詰めた1本の作品にします`
-          + "（行の選択には従いません）。連結と違い全編を焼き直すので時間がかかります。"
-        : "グループを選んでください。作品はグループ1件が単位です。";
+  // 作品はグループ1件が単位で、行の選択には従わない。型(作り方)が1つも無ければ作れないので、
+  // そちらの可否も併せて見る — グループの有無だけを見ると、型の読み込みが立てた無効化を
+  // この再描画が毎回消してしまう。
+  $("cuts-work").disabled = !grouped || ranged.length === 0 || !workPresetsReady;
 }
 
 function updateMarksSummary() {
@@ -2775,16 +2627,9 @@ function updateMarksSummary() {
 function updateMarksSelection() {
   const rows = visibleMarks();
   const count = state.marksSelected.size;
-  $("marks-selected").textContent = count ? `選択 ${fmtNum(count)}件` : "";
+  $("marks-selected").textContent = count ? String(fmtNum(count)) : "";
   $("marks-bulk-delete").disabled = !count;
-  const extras = extraMarksInView().length;
-  const dup = $("cuts-dup-select");
-  dup.disabled = !extras;
-  dup.title = extras
-    ? `表示中に同じ範囲の余りが${fmtNum(extras)}件あります。各組の先頭を残して余りだけを選びます`
-      + "（削除は「選択を削除」で行います）。"
-    : "同じグループの中に同じ範囲が2行在る状態はありません"
-      + "（グループを跨いだ複製は意図した操作なので対象にしません）。";
+  $("cuts-dup-select").disabled = !extraMarksInView().length;
   $("marks-select-all").checked = rows.length > 0 && count === rows.length;
   renderGroupBar("marks-groups", "marks");
   // 選択は書き出し・連結の対象そのものなので、見出しの「対象:」も一緒に描き直す
@@ -2833,9 +2678,7 @@ function selectExtraMarks() {
   if (!extras.length) return;
   state.marksSelected = new Set(extras.map((mark) => mark.id));
   state.lastPick.marks = null;
-  $("marks-status").textContent =
-    `同じ範囲の余り${fmtNum(extras.length)}件を選びました（各組の先頭は残しています）。`
-    + "中身を確かめてから「選択を削除」を押してください。";
+  $("marks-status").textContent = "";
   renderMarks();
 }
 
@@ -2883,20 +2726,7 @@ function markRangeInput(mark, kind) {
   }
   // 配信中に押した見どころのstartは暫定値で、録画の確定(finalize)でPTS軸へ載せ直される。
   // 今直しても再mapに上書きされるので、その前に触らせない(理由は欄の上で名乗る)。
-  if (mark.pts_mapped === 0) {
-    input.disabled = true;
-    input.title = "配信中に記録した見どころです。位置は録画の確定後に定まります。";
-  } else {
-    input.title = (kind === "span"
-      ? "空にすると点へ戻ります。尺を入れるとmp4にできる素材になります。"
-      : "尺は保ったまま窓ごと動きます。")
-      + "\n1:23:45.6 / 23:45 / 45.6 のどれでも入力できます。"
-      + "\n+2 / -1.5 のように符号を付けると、今の値からの増減になります。"
-      + "\n↑↓ で 0.1秒ずつ（shiftで1秒・altで10秒）動かせます。"
-      + (kind === "span" && span !== null
-        ? `\n終端: ${fmtCutTime(mark.end)}`
-        : "");
-  }
+  if (mark.pts_mapped === 0) input.disabled = true;
   // 行clickはこの見どころを再生する操作なので、この欄の操作は行へ伝播させない。
   ["click", "mousedown", "keydown", "dragstart"].forEach((type) => {
     input.addEventListener(type, (event) => event.stopPropagation());
@@ -2914,15 +2744,13 @@ function markRangeInput(mark, kind) {
     if (kind === "span") {
       if (seconds === span) return;
       body = { end: seconds === null ? null : mark.start + seconds };
-      message = seconds === null
-        ? "範囲を外して点に戻しました。"
-        : `尺を ${fmtCutTime(seconds)} にしました。`;
+      message = seconds === null ? "点へ" : `尺 ${fmtCutTime(seconds)}`;
     } else {
       if (seconds === mark.start) return;
       // 尺は据え置く。位置の欄で頭を直したときに終端が動かないと、直した秒数ぶん
       // 尺が伸び縮みして、2つの欄が互いの値を変え合うことになる。
       body = span === null ? { start: seconds } : { start: seconds, end: seconds + span };
-      message = `位置を ${fmtCutTime(seconds)} にしました。`;
+      message = `位置 ${fmtCutTime(seconds)}`;
     }
     try {
       await apiSend("PATCH", `/api/bookmarks/${mark.id}`, body);
@@ -2944,15 +2772,15 @@ function markRangeInput(mark, kind) {
     const raw = input.value.trim();
     const seconds = raw === "" ? null : parseTimeInput(raw, value());
     if (raw !== "" && seconds === null) {
-      fail("時刻を読めません（例: 1:23:45.6 / +2 / -1.5）。");
+      fail("時刻を読めません（例 1:23:45.6）");
       return;
     }
     if (kind !== "span" && seconds === null) {
-      fail("位置は空にできません。");
+      fail("位置は空にできません");
       return;
     }
     if (seconds !== null && seconds < 0) {
-      fail(kind === "span" ? "尺は0より長くしてください。" : "位置は0秒以降にしてください。");
+      fail(kind === "span" ? "尺は0より長く" : "位置は0秒以降");
       return;
     }
     await commit(seconds);
@@ -2986,8 +2814,7 @@ function markMemoCell(mark, twins) {
   memo.className = "vd-memo";
   memo.value = mark.memo || "";
   memo.placeholder = "メモ";
-  memo.setAttribute("aria-label", "この見どころのメモ");
-  memo.title = "覚え書きであり、mp4を書き出すときのfile名にもなります。";
+  memo.setAttribute("aria-label", "見どころのメモ");
   // 行clickはこの見どころを再生する操作なので、この欄の操作は行へ伝播させない。
   ["click", "mousedown", "keydown", "dragstart"].forEach((type) => {
     memo.addEventListener(type, (event) => event.stopPropagation());
@@ -3001,7 +2828,7 @@ function markMemoCell(mark, twins) {
       mark.memo = next;
       // 成功時に画面が何も変わらないと、保存されたのか離れ方が悪くて捨てられたのかを
       // 判別できず、確かめるために画面を読み込み直すことになる。
-      showToast("メモを保存しました。", null, { title: "見どころのメモ" });
+      showToast("保存", null, { title: "見どころのメモ" });
     } catch (err) {
       // メモは書き出しfile名にもなる。保存できなかった値を欄に残すと、それが付くものと
       // して書き出しへ進める。保存済みの値へ戻し、理由をtoastで出す。
@@ -3014,9 +2841,6 @@ function markMemoCell(mark, twins) {
   const badge = document.createElement("span");
   badge.className = "vd-src vd-src-dup";
   badge.textContent = `重複${fmtNum(twins.length)}`;
-  const where = [...new Set(twins.map((twin) => groupNameOf(twin.group_id) || "未分類"))];
-  badge.title = `同じ録画の同じ範囲を指す見どころが${fmtNum(twins.length)}件あります`
-    + `（${where.join("・")}）。書き出すとその件数ぶん同じmp4が出ます。`;
   // 印とメモ欄は同じ段に置く(折り返させると重複の在る行だけ背が2倍になり、
   // 一覧を目で追う手掛かりだった行の高さが揃わなくなる)。狭い時は欄の方が縮む。
   const wrap = document.createElement("span");
@@ -3049,16 +2873,12 @@ function renderMarks() {
       const watch = document.createElement("button");
       watch.className = "btn btn-small";
       watch.textContent = "視聴";
-      watch.title = ranged
-        ? "このtabのまま、この範囲を再生します（終端で一度止まります）。"
-        : "このtabのまま、この位置から再生します。";
       // 「観る」は1列目に据える。同じ範囲が2行並んだとき、どちらが何かを決められるのは
       // 中身だけなので、表を読む起点をその手に置く。
       watch.addEventListener("click", () => markPlayer.play(mark));
       const open = document.createElement("button");
       open.className = "btn btn-small";
-      open.textContent = "シーン検索視聴";
-      open.title = "シーン検索の再生画面で開きます（波形・IN/OUT・文字起こしつき）。";
+      open.textContent = "シーン検索";
       open.addEventListener("click", () => openMark(mark));
       const remove = document.createElement("button");
       remove.className = "btn btn-small btn-danger";
@@ -3067,10 +2887,9 @@ function renderMarks() {
         // 1件削除は最も高頻度で、しかも「視聴」と同じ行に並ぶ。まとめて削除する側にだけ
         // 確認が付いていて、誤clickしやすい方が素通しなのは逆である。
         const ok = await confirmDialog(
-          `この見どころを削除します（${fmtDuration(mark.start)}`
+          `${fmtDuration(mark.start)}`
           + `${ranged ? `〜${fmtDuration(mark.end)}` : ""}`
-          + `${mark.memo ? ` ${mark.memo}` : ""}）。`
-          + `${ranged ? "詰めたIN/OUTと並び順は戻せません。" : "この操作は取り消せません。"}`,
+          + `${mark.memo ? ` ${mark.memo}` : ""}`,
           { title: "見どころの削除", confirmLabel: "削除する" },
         );
         if (!ok) return;
@@ -3124,19 +2943,6 @@ function renderMarks() {
       // 行clickはこのtabの中で再生する(画面ごと移らないぶん安全)。
       tr.classList.add("row-clickable");
       tr.tabIndex = 0;
-      // 元録画のpathと最後の書き出し日時は列を持たないぶんここで読ませる。どちらも普段の
-      // 作業(範囲を詰める・並べる)では読まないが、失われると実体を辿る手が画面から消える
-      // (書き出し日時は「今もそのfileが在る」という意味ではない — 在るかは
-      // 「出力済みclip」tabが答える)。
-      tr.title = [
-        "この見どころをこのtabのまま再生します。",
-        `元録画: ${mark.path || mark.filename || "-"}`,
-        isRanged(mark) ? null : "尺がありません（mp4にはできません）。",
-        mark.exported_at
-          ? `最後の書き出し: ${fmtDateTimeShort(mark.exported_at)}`
-            + `${mark.exported_path ? ` → ${mark.exported_path}` : ""}`
-          : "まだmp4を書き出していません。",
-      ].filter(Boolean).join("\n");
       tr.addEventListener("click", (event) => {
         // 行内のbutton・メモ欄・グループ欄は独自の操作を持つ。素通しすると「視聴」を
         // 押しただけで再生が二重に走り、読み込みも2回投げられる。
@@ -3161,13 +2967,13 @@ async function deleteSelectedMarks() {
   const ids = [...state.marksSelected];
   if (!ids.length) return;
   const ok = await confirmDialog(
-    `選択した${fmtNum(ids.length)}件の見どころを削除しますか？この操作は取り消せません。`,
+    `選択した見どころ ${fmtNum(ids.length)}件を削除`,
     { title: "選択の削除", confirmLabel: "削除", danger: true },
   );
   if (!ok) return;
   try {
     const result = await apiSend("POST", "/api/bookmarks/bulk", { op: "delete", ids });
-    $("marks-status").textContent = `${fmtNum(result.affected)}件を削除しました。`;
+    $("marks-status").textContent = `${fmtNum(result.affected)}件削除`;
     const seen = markPlayer.watching();
     if (seen && ids.includes(seen.id)) markPlayer.close();
     state.marksSelected.clear();
@@ -3184,12 +2990,11 @@ async function deleteSelectedMarks() {
 async function clearVisibleMarks() {
   const rows = visibleMarks();
   if (!rows.length) {
-    $("marks-status").textContent = "表示中の見どころがありません。";
+    $("marks-status").textContent = "";
     return;
   }
   const ok = await confirmDialog(
-    `${groupScopeLabel(state.groupSel)}の${fmtNum(rows.length)}件を削除しますか？`
-    + "この操作は取り消せません。",
+    `${groupScopeLabel(state.groupSel)}の${fmtNum(rows.length)}件を削除`,
     { title: "表示中をすべて削除", confirmLabel: "削除", danger: true },
   );
   if (!ok) return;
@@ -3198,7 +3003,7 @@ async function clearVisibleMarks() {
     // 一致することがこの操作の唯一の約束なので、絞り込みはそのままserverへ渡す。
     const query = state.groupSel ? `?group=${encodeURIComponent(state.groupSel)}` : "";
     const result = await apiSend("DELETE", `/api/bookmarks${query}`);
-    $("marks-status").textContent = `${fmtNum(result.deleted)}件を削除しました。`;
+    $("marks-status").textContent = `${fmtNum(result.deleted)}件削除`;
     markPlayer.close();
     state.marksSelected.clear();
   } catch (err) {
@@ -3211,7 +3016,7 @@ async function clearVisibleMarks() {
 
 // 見どころから再生画面へ戻る。尺があればIN/OUTも復元して、そのまま切り出せる。
 async function openMark(mark) {
-  showView("search");
+  showView("search", { keepPlayback: true });
   await openHit({
     recording_id: mark.recording_id,
     unique_id: mark.unique_id,
@@ -3222,54 +3027,123 @@ async function openMark(mark) {
   inheritAddGroup(mark.group_id);
 }
 
-// 観ている位置で端を決める。時刻を打ち直すより観ながら決める方が速くて正しい
-// (何秒かは覚えていないが、ここから、というのは見れば判る)。
-// kind="in" は頭を今の位置へ(尺は保つ)、kind="out" は頭から今までを尺にする。
-async function setMarkEdgeFromPlayer(kind) {
-  const mark = markPlayer.watching();
+// 見どころtabで観る対象が変わったときに、時間軸が読む物をその録画のものへ入れ替える。
+// 時間軸はシーン検索と**同じ1つの実装**で、読む対象(波形・盛り上がり・gift・見どころ)も
+// state側の1組しか無い。入れ替えないと、前の録画の波形の上に別の録画の再生位置が乗る。
+// シーン検索の<video>はここでは触らない —— 2本を同時に読み込むと同じ素材を二重に引く。
+// あちらの読み込み直しは、その面へ戻った時にshowViewが判断する(searchLoadedId)。
+function adoptMarkContext(mark) {
+  if (!state.current || state.current.recording_id !== mark.recording_id) {
+    state.current = {
+      recording_id: mark.recording_id,
+      unique_id: mark.unique_id,
+      started_at: mark.recording_started_at,
+      video_time: mark.start,
+    };
+    // 一覧の選択も合わせる。前の行を残すと、シーン検索へ戻った時の↑↓が画面に出ている
+    // 録画とは無関係の行から動き出す(openHitと同じ理由・同じ揃え方)。
+    state.hitIndex = state.hits.findIndex((row) => row.recording_id === mark.recording_id);
+    highlightHitRow();
+    loadRecordingContext(state.current);
+  } else {
+    state.current.video_time = mark.start;
+  }
+  // 挟んである範囲はその見どころの範囲そのもの。点(尺なし)はIN側だけを置き、
+  // OUTは時間軸で挟んでもらう(それが点を範囲に変える唯一の操作になる)。
+  // silentなのは、開いただけで同じ値を書き戻さないため(setCut参照)。
+  setCut(mark.start, isRanged(mark) ? mark.end : null, { silent: true });
+}
+
+// ===== 見どころの尺 =====
+// 見どころtabで観ている間、画面下部の時間軸で挟んだIN/OUTが**そのままその見どころの尺**に
+// なる。確定のbuttonは置かない —— 範囲を決める操作(handleのdrag・時刻の打ち込み・IN/OUT
+// button・無音間のdblclick)がそれ自体で結末を持つので、もう一手を挟む理由が無い。
+
+// 今この面のIN/OUTが「見どころの尺」かどうか。**シーン検索のIN/OUTは切り出す範囲であって
+// 見どころの尺ではない**ので、あちらでは絶対に書き戻さない。時間軸は面ごと移す1つの実装
+// なので、判断は持ち主(timelineOwner)で行う。
+function editingMarkRange() {
+  if (timelineOwner !== "marks") return null;
+  return markPlayer.watching();
+}
+
+// 挟んだ範囲を送信予約に入れる。setCutの出口から呼ばれるので、handleのdrag中は
+// pointerが動くたびここへ来る —— 送るのは手が止まってから1回だけ(flushMarkRange)。
+function queueMarkRangeSave() {
+  const mark = editingMarkRange();
   if (!mark) return;
-  const say = (text, level) => {
-    $("mark-play-status").textContent = text;
-    if (level) showToast(text, level, { title: "見どころの範囲" });
+  const start = state.cutIn;
+  const end = state.cutOut;
+  // 揃っていない・逆順・0秒の範囲は尺にならない。理由は帯の尺の欄(#cut-len)が既に
+  // 名乗っているので、ここでは送らないだけにする。
+  if (start === null || end === null || end <= start) return;
+  if (state.markRangeTimer) clearTimeout(state.markRangeTimer);
+  // 予約は中身だけで送れる形にする。手が止まるまでの間に別の行へ移っても、挟んだ範囲は
+  // 挟んだ時の見どころのものである。
+  state.markRangePending = {
+    markId: mark.id,
+    recordingId: mark.recording_id,
+    ptsMapped: mark.pts_mapped,
+    start,
+    end,
   };
-  if (mark.pts_mapped === 0) {
-    say("配信中に記録した見どころです。位置は録画の確定後に定まります。", "error");
+  state.markRangeTimer = setTimeout(flushMarkRange, MARK_RANGE_SEND_DELAY_MS);
+}
+
+// 予約を捨てる。観ている見どころが画面から下りたとき(閉じる・削除)に呼ぶ ——
+// 消した行へ後から範囲を書き込むと、消えたはずの見どころが404で名乗り直す。
+// 直前0.4秒ぶんの詰めは捨てることになるが、一覧には直す前の値が残っているので
+// 「保存されたのかどうか判らない」状態にはならない。
+function cancelMarkRangeSave() {
+  if (state.markRangeTimer) clearTimeout(state.markRangeTimer);
+  state.markRangeTimer = null;
+  state.markRangePending = null;
+}
+
+// 溜めた範囲を1回だけ送る。ストーリーの区間編集(story.jsのflushCut)と同じ流儀。
+async function flushMarkRange() {
+  const pending = state.markRangePending;
+  if (!pending) return;
+  if (state.markRangeTimer) clearTimeout(state.markRangeTimer);
+  state.markRangeTimer = null;
+  state.markRangePending = null;
+  // 名乗りは2箇所。toastはこの面を離れていても届き、欄は次に開き直すまで残る。
+  // 欄の方は**まだその見どころを観ているときだけ**書く(別の行へ移った後に前の行の結末を
+  // 出すと、画面の見出しと欄が別の見どころを名乗る)。
+  const seen = markPlayer.watching();
+  const onScreen = Boolean(seen && seen.id === pending.markId);
+  const say = (text, level) => {
+    if (onScreen) $("mark-play-status").textContent = text;
+    showToast(text, level || null, { title: "見どころの範囲" });
+  };
+  if (pending.ptsMapped === 0) {
+    say("録画の確定前は位置を直せません", "error");
     return;
   }
-  const now = $("mark-video").currentTime;
-  let body;
-  let message;
-  if (kind === "in") {
-    const span = isRanged(mark) ? mark.end - mark.start : null;
-    body = span === null ? { start: now } : { start: now, end: now + span };
-    message = `頭を ${fmtCutTime(now)} にしました。`;
-  } else {
-    if (now <= mark.start) {
-      say("今の再生位置が頭より前です。頭より後ろで押してください。", "error");
-      return;
-    }
-    body = { end: now };
-    message = `尺を ${fmtCutTime(now - mark.start)} にしました（mp4にできます）。`;
-  }
+  const { start, end } = pending;
   try {
-    await apiSend("PATCH", `/api/bookmarks/${mark.id}`, body);
+    await apiSend("PATCH", `/api/bookmarks/${pending.markId}`, { start, end });
   } catch (err) {
-    say(err.message);
+    if (onScreen) $("mark-play-status").textContent = err.message;
     showError(err, "見どころの範囲");
     return;
   }
+  const message = `${fmtCutTime(start)} - ${fmtCutTime(end)}（${fmtDuration(end - start)}）`;
   showToast(message, null, { title: "見どころの範囲" });
-  if (state.current && state.current.recording_id === mark.recording_id) {
-    await loadBookmarks(mark.recording_id);
+  if (state.current && state.current.recording_id === pending.recordingId) {
+    await loadBookmarks(pending.recordingId);
   }
   await loadMarks();
-  // 観ている対象の範囲が変わった。手元のitemは古い値のままなので、引き直したlistの行で
-  // 観直す(終端で止まる位置が古いままだと、直したはずの尺で再生が止まらない)。
-  const fresh = (state.marks || []).find((row) => row.id === mark.id);
-  if (fresh) await markPlayer.play(fresh);
-  // 名乗りは観直した後に置く。playが読み込みの状態でこの欄を書き直すので、先に書くと
-  // 直した結果が同じtickで消える。
-  say(message);
+  // 観ている対象の範囲が変わった。playerが持つitemは古い値のままなので、引き直したlistの
+  // 行へ差し替える(終端で止まる位置が古いままだと、直したはずの尺で再生が止まらない)。
+  // **観直しはしない** —— 端を詰めるたびに頭から再生し直すと、詰めている最中に画面が
+  // 毎回巻き戻る(以前は確定buttonを押した時だけの動きだった)。
+  const fresh = (state.marks || []).find((row) => row.id === pending.markId);
+  if (fresh) markPlayer.retarget(fresh);
+  // 名乗りは差し替えた後に置く。retargetが見出しを書き直すので、先に書くと同じtickで消える。
+  if (markPlayer.watching() && markPlayer.watching().id === pending.markId) {
+    $("mark-play-status").textContent = message;
+  }
 }
 
 
@@ -3281,7 +3155,8 @@ async function setMarkEdgeFromPlayer(kind) {
 // 片方で観ている録画は、もう片方のtabを触っても読み込み直しにならない。
 // prefixはHTML側のid接頭辞("mark" / "cut")、nounは終端で止めた時に名乗る対象。
 // onWatchは観ている行が入れ替わった時に呼ぶ(一覧側で今の行に印を付け直すため)。
-function createInlinePlayer(prefix, noun, onWatch) {
+// onOpenは観る対象が決まった時点で呼ぶ(そのtabの時間軸が読む物を入れ替えるため)。
+function createInlinePlayer(prefix, noun, onWatch, onOpen) {
   const el = (name) => $(`${prefix}-${name}`);
   const say = (text) => { el("play-status").textContent = text; };
   let hls = null;
@@ -3301,6 +3176,16 @@ function createInlinePlayer(prefix, noun, onWatch) {
   function stage(on) {
     el("play").classList.toggle("hidden", !on);
     el("play-empty").classList.toggle("hidden", on);
+  }
+
+  // 観ている対象の名乗り。素材版が元録画固定であることも併せて出す —— シーン検索側で
+  // 「焼き込み」を選んで作業した後、ここで出来を確かめるつもりで観ると素のままの映像が
+  // 出て、焼き込みが失敗していると誤読する。
+  function head(item, hasRange) {
+    el("play-head").textContent =
+      `${item.unique_id} / ${fmtDateTime(item.recording_started_at)} / ${fmtDuration(item.start)}`
+      + (hasRange ? ` - ${fmtDuration(item.end)}` : "")
+      + ` / ${VARIANT_LABELS.source}`;
   }
 
   function close() {
@@ -3351,9 +3236,7 @@ function createInlinePlayer(prefix, noun, onWatch) {
   async function open(recordingId, at, { resume = true, recovering = false } = {}) {
     const video = el("video");
     if (!recovering) gate.reset();
-    say(recovering
-      ? "素材の置き場所が変わりました。再生listを取り直しています…"
-      : "読み込み中…");
+    say("読み込み中…");
     const want = (token += 1);
     let playback;
     try {
@@ -3405,7 +3288,7 @@ function createInlinePlayer(prefix, noun, onWatch) {
       video.src = playback.url;
     }
     loadedId = recordingId;
-    say(playback.mode === "hls" ? "" : "この録画は.tsが残っていないため、mp4を再生しています。");
+    say(playback.mode === "hls" ? "" : "MP4");
     seekTo(at, want, resume);
   }
 
@@ -3419,15 +3302,10 @@ function createInlinePlayer(prefix, noun, onWatch) {
     // 印は読み込みの前に移す。HLSを張り直す数秒のあいだ前の行が「今の行」を名乗ったままだと、
     // 見出し(play-head)と表の印が別々の行を指す。
     if (onWatch) onWatch();
-    // 素材版が元録画固定であることを名乗る。シーン検索側で「焼き込み」を選んで作業した後、
-    // ここで出来を確かめるつもりで観ると素のままの映像が出て、焼き込みが失敗していると
-    // 誤読する。切り替えて確かめる先(シーン検索視聴)も同じ場所で案内する。
-    const head = el("play-head");
-    head.textContent =
-      `${item.unique_id} / ${fmtDateTime(item.recording_started_at)} / ${fmtDuration(item.start)}`
-      + (hasRange ? ` - ${fmtDuration(item.end)}` : "")
-      + ` / 素材: ${VARIANT_LABELS.source}`;
-    head.title = "この場での再生は常に元録画です（焼き込み・Up出力の出来は確かめられません）。";
+    // 時間軸が読む物も、映像より先にこの録画のものへ入れ替える(読み込みの数秒のあいだ
+    // 別の録画の波形が出たままにならない)。
+    if (onOpen) onOpen(item);
+    head(item, hasRange);
     // 同じ録画の中を移るだけなら読み込み直さない(HLSを張り直すと数秒待たされる)。
     if (loadedId === item.recording_id) {
       say("");
@@ -3437,9 +3315,23 @@ function createInlinePlayer(prefix, noun, onWatch) {
     await open(item.recording_id, item.start);
   }
 
+  // 観ている行の**値だけ**を新しいものへ差し替える(読み込みもseekもしない)。範囲を
+  // 直した直後に使う —— play()で観直すと頭から再生し直すため、端を詰めている最中に
+  // 画面が毎回巻き戻る。ここで直すのは終端で止める位置と見出しの名乗りで、どちらも
+  // 古いままだと「直したはずの尺で止まらない」「見出しが前の範囲を名乗る」になる。
+  function retarget(item) {
+    if (!watching || watching.id !== item.id) return;
+    watching = item;
+    const hasRange = item.end !== null && item.end !== undefined;
+    stopAt = hasRange ? item.end : null;
+    head(item, hasRange);
+    if (onWatch) onWatch();
+  }
+
   return {
     play,
     close,
+    retarget,
     // tabを移るときは音だけが残らないよう止める。読み込みは捨てない(戻ってきたら続きから)。
     pause() { if (watching) el("video").pause(); },
     // 今観ている行。消えた行を観たまま残さないための身元照合と、「シーン検索視聴」の
@@ -3453,7 +3345,7 @@ function createInlinePlayer(prefix, noun, onWatch) {
       if (video.currentTime < stopAt) return;
       stopAt = null;
       video.pause();
-      say(`${noun}の終端です。再生を押すと続きを観られます。`);
+      say(`${noun}の終端`);
     },
     // mp4経路の失敗は<video>のerror eventにしか出ない。小さなplayerなので、browserの
     // 壊れた枠だけだと「押しても何も起きなかった」と読める。src除去(閉じる)でもerrorは
@@ -3477,9 +3369,13 @@ function paintPlayingRows(tbodyId, key) {
 function paintPlayingMarks() {
   const seen = markPlayer.watching();
   paintPlayingRows("mark-rows", seen ? seen.id : null);
+  // 観ている見どころが画面から下りた(閉じる・削除)。挟みかけの範囲を後から書き戻すと、
+  // 消したはずの行へ書き込むことになる(cancelMarkRangeSave参照)。
+  if (!seen) cancelMarkRangeSave();
 }
 
-const markPlayer = createInlinePlayer("mark", "見どころ", paintPlayingMarks);
+const markPlayer = createInlinePlayer(
+  "mark", "見どころ", paintPlayingMarks, adoptMarkContext);
 
 // tabを離れる時は、そのtabのplayerだけを止める。
 function pauseInlinePlayers(name) {
@@ -3514,8 +3410,42 @@ function bindInlinePlayer(prefix, player, toSearch) {
   });
 }
 
+// ===== 時間軸を出す面 =====
+// 時間軸(#timeline)は**画面に1つだけ**持ち、面を移るときは要素ごと移す。シーン検索と
+// 見どころで別々に組むと、波形の畳み方もhandleの掴み幅もIN/OUTの吸着も2箇所に分かれ、
+// 片方を直した日にもう片方が別の操作感のまま残る。描く相手(<video>)だけを差し替える。
+// 読む対象(波形・盛り上がり・gift・見どころ)はstate側の1組で、どちらの面でも
+// state.currentの録画のものを指す(adoptMarkContext参照)。
+let timelineOwner = "search";
+
+function tlVideo() {
+  return $(timelineOwner === "marks" ? "mark-video" : "video");
+}
+
+function moveTimelineTo(owner) {
+  if (owner === timelineOwner) return;
+  // 見どころtabで観ていた位置は、シーン検索のplayerを読み込み直すときの飛び先になる
+  // (2つのplayerは別instanceで、観た位置は互いに知らない)。
+  if (timelineOwner === "marks" && state.current) {
+    const seen = $("mark-video");
+    if (isFinite(seen.currentTime) && seen.currentTime > 0) {
+      state.current.video_time = seen.currentTime;
+    }
+  }
+  // 挟んだ範囲は面を離れた時点で確定させる。予約のtimerは離れても発火するが、待たせると
+  // 「直したのに一覧が古いまま」の数百msが残る。
+  if (timelineOwner === "marks") flushMarkRange();
+  timelineOwner = owner;
+  const host = $(owner === "marks" ? "view-marks" : "search-split");
+  host.appendChild($("timeline"));
+  // 移した先では実寸が変わる(幅が違えば波形の畳み込みからやり直しになる)。移動と同時に
+  // 引き直さないと、前の面の幅で描いた絵が残る。
+  drawTimeline();
+  updateTimeLabel();
+}
+
 function updateTimeLabel() {
-  const video = $("video");
+  const video = tlVideo();
   const duration = isFinite(video.duration) ? video.duration : null;
   $("time-now").textContent = duration
     ? `${fmtDuration(video.currentTime)} / ${fmtDuration(duration)}`
@@ -3537,13 +3467,13 @@ function drawHeat() {
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, width, height);
   const points = state.heat;
-  const duration = $("video").duration;
+  const duration = tlVideo().duration;
   if (!isFinite(duration) || duration <= 0) return;
 
   // 上端はIN/OUT handleを掴む専用lane、下端は見どころmarker専用lane。波形とheatはその間
   // だけを使う。ここでlaneを差し引かないとheatの山にmarkerが埋もれる。
   const bodyTop = RANGE_LANE_PX;
-  const bodyBottom = height - BOOKMARK_LANE_PX;
+  const bodyBottom = height - MARKER_LANE_PX;
   const bodyH = bodyBottom - bodyTop;
 
   // 記録済みの見どころの面は最初に敷く。波形もheatもこの上へ載るので、「もう採ってある区間」
@@ -3591,15 +3521,15 @@ function drawHeat() {
     const top = folded ? bodyTop + bodyH * 0.45 + 2 : bodyTop + 1;
     const size = Math.max(6, Math.min(GIFT_ICON_FULL_PX, bodyBottom - top - 2));
     drawGiftIcons(ctx, giftIconsFull(ctx, duration, width, size),
-                  { top, size, rowH: size, tickBottom: bodyBottom, names: false });
+                  { top, size, rowH: size, tickBottom: bodyBottom, names: false, width });
   }
 
-  drawRangeLane(ctx, width, height, toXFull);
+  drawRangeLane(ctx, width, height, toXFull, state.cutIn, state.cutOut);
   drawBookmarks(ctx, width, height, duration);
   drawZoomIndicator(ctx, width, height, duration);
   drawMarkFlash(ctx, width, height, toXFull);
 
-  const video = $("video");
+  const video = tlVideo();
   if (video.currentTime > 0) {
     drawPlayhead(ctx, (video.currentTime / duration) * width, height);
   }
@@ -3615,48 +3545,7 @@ function drawZoomIndicator(ctx, width, height, duration) {
   ctx.strokeStyle = "rgba(29, 27, 22, 0.55)";
   ctx.lineWidth = 1;
   ctx.strokeRect(x0 + 0.5, RANGE_LANE_PX + 0.5,
-                 Math.max(2, x1 - x0) - 1, height - RANGE_LANE_PX - BOOKMARK_LANE_PX - 1);
-}
-
-// 再生位置。panelと同系色の細線だと波形にもheatにも沈んで見失うので、暗い実線を
-// 明色の縁で挟んでどの背景でも浮かせ、上端のknobで現在地を掴めるようにする。
-function drawPlayhead(ctx, x, height) {
-  const left = Math.round(x) - 1;
-  ctx.fillStyle = "rgba(248, 245, 235, 0.9)";
-  ctx.fillRect(left - 1, 0, 4, height);
-  ctx.fillStyle = "#1d1b16";
-  ctx.fillRect(left, 0, 2, height);
-  ctx.beginPath();
-  ctx.moveTo(left + 1 - PLAYHEAD_KNOB_PX, 0);
-  ctx.lineTo(left + 1 + PLAYHEAD_KNOB_PX, 0);
-  ctx.lineTo(left + 1, PLAYHEAD_KNOB_PX);
-  ctx.closePath();
-  ctx.fill();
-}
-
-// IN/OUTで挟んだ範囲を帯で示す。切り出し前にどこを抜くのか目で確かめられる。
-// heatより後に描かないと帯のtintにhandleが沈んで掴み所が見えなくなる。
-// toXは秒→x座標の写像で、全尺barと拡大窓が別の写像を渡してくる。
-function drawRangeLane(ctx, width, height, toX) {
-  ctx.fillStyle = cssTokenAlpha("--line", 0.18);
-  ctx.fillRect(0, 0, width, RANGE_LANE_PX);
-
-  const inX = state.cutIn === null ? null : toX(state.cutIn);
-  const outX = state.cutOut === null ? null : toX(state.cutOut);
-  if (inX !== null && outX !== null && outX > inX) {
-    ctx.fillStyle = "rgba(120, 150, 120, 0.28)";
-    ctx.fillRect(inX, 0, Math.max(1, outX - inX), height);
-    ctx.fillStyle = "rgba(120, 150, 120, 0.6)";
-    ctx.fillRect(inX, 0, Math.max(1, outX - inX), RANGE_LANE_PX);
-  }
-  [[inX, "rgba(90, 130, 90, 0.95)"], [outX, "rgba(150, 90, 70, 0.95)"]].forEach(
-    ([x, color]) => {
-      if (x === null || x < -HANDLE_DRAW_PX || x > width + HANDLE_DRAW_PX) return;
-      ctx.fillStyle = color;
-      ctx.fillRect(x - 1, 0, 2, height);
-      ctx.fillRect(x - HANDLE_DRAW_PX / 2, 0, HANDLE_DRAW_PX, RANGE_LANE_PX);
-    },
-  );
+                 Math.max(2, x1 - x0) - 1, height - RANGE_LANE_PX - MARKER_LANE_PX - 1);
 }
 
 // ===== 拡大窓 =====
@@ -3680,7 +3569,7 @@ function zoomWindow(duration) {
   if (!isFinite(duration) || duration <= 0) return null;
   const span = zoomSpanFor(duration);
   const base = state.zoomStart === null
-    ? $("video").currentTime - span * ZOOM_FOLLOW_ANCHOR
+    ? tlVideo().currentTime - span * ZOOM_FOLLOW_ANCHOR
     : state.zoomStart;
   const start = clampZoomStart(base, span, duration);
   return { start, end: start + span, span };
@@ -3690,7 +3579,7 @@ function zoomWindow(duration) {
 // 波形もrulerも常に流れていて読めず、飛び先を狙う操作もできない。
 // 窓の中に居る間は動かさないので、拡大したまま再生しても画面が落ち着く。
 function followZoom() {
-  const video = $("video");
+  const video = tlVideo();
   const duration = video.duration;
   if (!isFinite(duration) || duration <= 0) return;
   const span = zoomSpanFor(duration);
@@ -3710,7 +3599,7 @@ function followZoom() {
 // 窓の左右移動。追従を外すのは「見たい場所を自分で選んだ」からで、切らないと次の
 // 置き直しで再生位置へ引き戻される。
 function panZoom(direction) {
-  const duration = $("video").duration;
+  const duration = tlVideo().duration;
   const win = zoomWindow(duration);
   if (!win) return;
   $("zoom-follow").checked = false;
@@ -3723,7 +3612,7 @@ function panZoom(direction) {
 // 窓の拡縮。ratioは窓の中で動かしたくない点(左端からの割合)。追従中は再生位置を動かない
 // 点にする — cursorを軸にすると再生位置が窓から出て、直後の置き直しで窓が跳ぶ。
 function zoomBy(factor, ratio) {
-  const video = $("video");
+  const video = tlVideo();
   const duration = video.duration;
   const win = zoomWindow(duration);
   if (!win) return;
@@ -3807,23 +3696,6 @@ function foldWave(startSec, endSec, columns) {
   return out;
 }
 
-// 拡大窓の時刻目盛りの間隔。目盛りが6〜12本になる「切りの良い」秒数を選ぶ。
-const RULER_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
-
-function rulerStep(span) {
-  const target = span / 8;
-  return RULER_STEPS.find((step) => step >= target) || 7200;
-}
-
-// 目盛りは分秒だけで足りる場面が多い。1時間を超える録画だけ時を付ける。
-function fmtTick(seconds) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  const ms = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return h > 0 ? `${h}:${ms}` : ms;
-}
-
 function drawZoom() {
   const canvas = $("zoom");
   const width = canvas.clientWidth;
@@ -3833,7 +3705,7 @@ function drawZoom() {
   if (canvas.height !== height) canvas.height = height;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, width, height);
-  const video = $("video");
+  const video = tlVideo();
   const duration = video.duration;
   const win = zoomDragWindow || zoomWindow(duration);
   // 毎frame書き戻すとDOMが再計算に入る。値が変わったときだけ触る。
@@ -3883,7 +3755,7 @@ function drawZoom() {
   // 波形は中央線対称。全尺barより濃くするのは、この窓が波形を読む場所だから。下端の
   // 見どころlaneぶんは全尺barと同じく最初から空けておく — 描いた後で帯を被せると、
   // 見どころを1件足すたびに波形の下端が欠けて形が変わって見える。
-  const waveBottom = bodyBottom - BOOKMARK_LANE_PX;
+  const waveBottom = bodyBottom - MARKER_LANE_PX;
   const waveH = waveBottom - bodyTop;
   const folded = foldWave(win.start, win.end, width);
   if (folded) {
@@ -3913,7 +3785,7 @@ function drawZoom() {
     if (x1 < 0 || x0 > width) return;
     const left = Math.max(0, x0);
     const right = Math.min(width, x1);
-    ctx.fillRect(left, markLaneTop, Math.max(2, right - left), BOOKMARK_LANE_PX);
+    ctx.fillRect(left, markLaneTop, Math.max(2, right - left), MARKER_LANE_PX);
   });
 
   // giftのicon。窓の中は件数が少ないので全尺barより大きく置け、送り主(avatarと名前の頭)
@@ -3925,23 +3797,13 @@ function drawZoom() {
     const rows = Math.max(1, Math.min(GIFT_MAX_ROWS,
                                       Math.floor((bodyH * GIFT_LANE_RATIO) / rowH)));
     drawGiftIcons(ctx, giftIconsInWindow(ctx, win, toX, width, size, rows),
-                  { top: bodyTop + 1, size, rowH, tickBottom: bodyBottom, names: true });
+                  { top: bodyTop + 1, size, rowH, tickBottom: bodyBottom, names: true, width });
   }
 
   // 時刻ruler。拡大中に全尺barへ目を往復せず「今どこか」を読めるようにする。
-  ctx.fillStyle = cssTokenAlpha("--line", 0.35);
-  ctx.fillRect(0, bodyBottom, width, 1);
-  const step = rulerStep(win.span);
-  ctx.fillStyle = "rgba(90, 85, 70, 0.9)";
-  ctx.font = '9px "JetBrains Mono", monospace';
-  ctx.textBaseline = "top";
-  for (let t = Math.ceil(win.start / step) * step; t <= win.end; t += step) {
-    const x = toX(t);
-    ctx.fillRect(x, bodyBottom - 3, 1, 3);
-    ctx.fillText(fmtTick(t), Math.min(x + 2, width - 34), bodyBottom + 2);
-  }
+  drawRuler(ctx, { width, bodyBottom, from: win.start, to: win.end, toX });
 
-  drawRangeLane(ctx, width, height - RULER_LANE_PX, toX);
+  drawRangeLane(ctx, width, height - RULER_LANE_PX, toX, state.cutIn, state.cutOut);
   drawMarkFlash(ctx, width, height - RULER_LANE_PX, toX);
   if (video.currentTime >= win.start && video.currentTime <= win.end) {
     drawPlayhead(ctx, toX(video.currentTime), height - RULER_LANE_PX);
@@ -3956,10 +3818,14 @@ function drawTimelineFrame() {
   timelineFrame = null;
   // 無音skipはtimeupdate(250ms級)ではなくここで見る。250msでは飛び始めが遅れて
   // 「無音が一瞬鳴ってから飛ぶ」になり、飛ばした意味が薄れる。
-  applySilenceSkip();
-  applyTalkPace();
+  // 無音飛ばし・無言早送りはシーン検索側のcontrolなので、そちらが時間軸の持ち主の間だけ
+  // 回す(見どころtabのplayerには対応するcontrolが無く、勝手に速度と音量を触ることになる)。
+  if (timelineOwner === "search") {
+    applySilenceSkip();
+    applyTalkPace();
+  }
   drawTimeline();
-  const video = $("video");
+  const video = tlVideo();
   if (!video.paused && !video.ended) timelineFrame = requestAnimationFrame(drawTimelineFrame);
 }
 
@@ -3998,7 +3864,7 @@ async function loadWaveform(recordingId) {
   }
   state.wave = null;
   state.silences = [];
-  $("wave-note").textContent = "波形を生成中…（初回は長い録画で90秒程度）";
+  $("wave-note").textContent = "生成中…";
   drawTimeline();
   try {
     // 解像度はserver側の時間刻みで固定(cacheと1対1)。無音区間も同じresponseで届く。
@@ -4116,7 +3982,7 @@ async function loadGainCurve(recordingId) {
   if (!state.current || state.current.recording_id !== recordingId) return;
   if (data.enabled === false) {
     // 設定で切ってある。checkboxだけが有効に見えている状態を残さない。
-    renderGainNote("設定で「再生時に音量を揃える」が無効です。");
+    renderGainNote("設定で無効");
     return;
   }
   const failure = buildGainGraph();
@@ -4129,7 +3995,7 @@ async function loadGainCurve(recordingId) {
   const gains = data.gains || [];
   const low = Math.min(...gains);
   const high = Math.max(...gains);
-  renderGainNote(gains.length ? `音量を揃えています（${low.toFixed(1)}〜${high.toFixed(1)} dB）` : "");
+  renderGainNote(gains.length ? `${low.toFixed(1)}〜${high.toFixed(1)} dB` : "");
   applyGainNow();
   startGain();
 }
@@ -4171,26 +4037,21 @@ function renderSkipNote() {
       : null;
     const rate = skipEffectiveRate(plan);
     text = `無音 ${fmtDuration(plan.skip_seconds)}`;
-    if (share !== null) text += `（尺の${share}%）`;
-    text += ` を飛ばします`;
-    if (rate) text += `・全体で約 ${rate}倍速`;
-    if (!plan.has_reactions) text += "・反応は未解析";
-    if (state.skippedSeconds > 0) text += `（済 ${fmtDuration(state.skippedSeconds)}）`;
+    if (share !== null) text += `（${share}%）`;
+    if (rate) text += ` 約${rate}倍`;
+    if (!plan.has_reactions) text += " 反応未解析";
+    if (state.skippedSeconds > 0) text += ` 済${fmtDuration(state.skippedSeconds)}`;
     // 読み込み待ちで見送った跳躍。黙って飛ばさないと、機能が効いていないのと区別が付かない。
-    if (state.skipDeferred > 0) text += `・読み込み待ちで ${fmtNum(state.skipDeferred)}回 見送り`;
+    if (state.skipDeferred > 0) text += ` 見送り${fmtNum(state.skipDeferred)}`;
   } else if (!plan.speech_spans) {
     // 声が1つも取れていない録画で「飛ばせる無音が無い」と描くと、実際には全編が無音扱いで
     // ある状態を「何も起きない」と読み違える。
-    text = "声の区間が見つかりませんでした";
+    text = "声なし";
   } else {
-    text = `${plan.min_gap_seconds}秒以上の無音がありません`;
+    text = "";
   }
   note.textContent = text;
-  note.title = plan
-    ? `声の手前 ${plan.guard_seconds}秒・後ろ ${plan.lead_seconds}秒は飛ばさない`
-      + ` / ${plan.min_gap_seconds}秒未満の無音は飛ばさない`
-      + ` / 声とみなす確率 ${plan.voice_threshold}`
-    : "";
+  note.removeAttribute("title");
 }
 
 // 選んでいる速度で観たときに録画1本が縮む倍率。server側の effective_rate と同じ式で、
@@ -4273,7 +4134,7 @@ async function loadSkipPlan(recordingId) {
   } catch (err) {
     if (state.current && state.current.recording_id === recordingId) {
       // 取得できなかったのを「飛ばせる無音が無い」と描くと、飛ぶつもりで観ていて飛ばない。
-      $("skip-note").textContent = `無音の判定を取得できませんでした。${errorDetailText(err)}`;
+      $("skip-note").textContent = `取得失敗: ${errorDetailText(err)}`;
       showError(err, "無音の判定");
       return;
     }
@@ -4367,21 +4228,17 @@ function renderPaceNote() {
     text = "声の区間を解析中…";
   } else if (plan.fast && plan.fast.length) {
     const rate = paceEffectiveRate(plan);
-    text = `無言 ${fmtDuration(plan.fast_seconds)} を ${plan.fast_rate}x`;
-    if (rate) text += `（全体で約 ${rate}倍速）`;
-    if (!plan.has_reactions) text += "・反応は未解析";
-    if (plan.speech_spans) text += `・声 ${fmtNum(plan.speech_spans)}区間`;
+    text = `無言 ${fmtDuration(plan.fast_seconds)} ${plan.fast_rate}x`;
+    if (rate) text += `（約${rate}倍）`;
+    if (!plan.has_reactions) text += " 反応未解析";
+    if (plan.speech_spans) text += ` 声${fmtNum(plan.speech_spans)}`;
   } else if (!plan.speech_spans) {
-    text = "声の区間が見つかりませんでした";
+    text = "声なし";
   } else {
-    text = "早送りできる無言がありません";
+    text = "";
   }
   note.textContent = text;
-  note.title = plan && plan.fast_seconds
-    ? `声の手前 ${plan.onset_guard_seconds}秒・後ろ ${plan.lead_seconds}秒は等速のまま`
-      + ` / ${plan.min_fast_seconds}秒未満の隙間は速度を変えない`
-      + ` / 速い間は音量 ${Math.round(plan.fast_volume * 100)}%`
-    : "";
+  note.removeAttribute("title");
 }
 
 // 選んでいる速度で観たときに録画1本が縮む倍率。server側の effective_rate と同じ式で、
@@ -4412,7 +4269,7 @@ async function loadPacePlan(recordingId) {
     if (state.current && state.current.recording_id === recordingId) {
       // 取得できなかったのを「早送りできる無言が無い」と描くと、効いていないのに
       // 効いているつもりで観ることになる。
-      $("pace-note").textContent = `速度計画を取得できませんでした。${errorDetailText(err)}`;
+      $("pace-note").textContent = `取得失敗: ${errorDetailText(err)}`;
       showError(err, "速度計画の取得");
       return;
     }
@@ -4445,8 +4302,7 @@ async function loadGifts(recordingId) {
     // wave-noteは波形loaderの欄なので割り込まず、panelのnoteとtoastで名乗る。
     if (state.current && state.current.recording_id === recordingId) {
       renderPkPanel(true);
-      $("pk-note").textContent =
-        `ギフトとPKを取得できませんでした（0件という意味ではありません）。${errorDetailText(err)}`;
+      $("pk-note").textContent = `取得失敗: ${errorDetailText(err)}`;
       drawTimeline();
       showError(err, "ギフト・PKの取得");
     }
@@ -4456,7 +4312,7 @@ async function loadGifts(recordingId) {
   state.gifts = data.items || [];
   state.giftIcons = data.icons || {};
   state.battles = data.battles || [];
-  preloadGiftIcons(state.giftIcons);
+  preloadIcons(Object.values(state.giftIcons));
   $("pk-note").textContent = pkNoteText();
   renderPkPanel(true);
   drawTimeline();
@@ -4472,37 +4328,11 @@ function pkNoteText() {
   return `${fmtNum(battles.length)}戦 ${wins}勝${losses}敗 / ${gifts}`;
 }
 
-// iconはgift_id別の不変な画像なので、録画を跨いで使い回す(同じgiftは配信を跨いで飛ぶ)。
-const giftIconImages = new Map();
-
-// 読み込みが終わったiconを載せるための描き直し。1件ずつ描き直すと、開いた直後に
-// 数十回の再描画が並ぶので1 frameへまとめる。
-let giftIconRedraw = false;
-
-function scheduleGiftRedraw() {
-  if (giftIconRedraw) return;
-  giftIconRedraw = true;
-  requestAnimationFrame(() => {
-    giftIconRedraw = false;
-    drawTimeline();
-  });
-}
-
-function preloadGiftIcons(icons) {
-  Object.keys(icons).forEach((giftId) => {
-    if (giftIconImages.has(giftId)) return;
-    const img = new Image();
-    // 取れなかったiconは描かないだけにする(errorでもcompleteは立つので、
-    // 描く側はnaturalWidthで実体の有無を見る)。
-    img.addEventListener("load", scheduleGiftRedraw);
-    img.src = icons[giftId];
-    giftIconImages.set(giftId, img);
-  });
-}
-
+// giftのiconはgift_id別の不変な画像で、URLはserverが解決して返す(state.giftIcons)。
+// 絵そのものの持ち方(cacheと読み込み後の描き直し)は timeline.js が持つ —— ここは
+// gift_idからURLへの引き直しだけを名乗る。
 function giftIconImage(giftId) {
-  const img = giftIconImages.get(String(giftId));
-  return img && img.complete && img.naturalWidth > 0 ? img : null;
+  return iconImage(state.giftIcons[String(giftId)]);
 }
 
 // 描ける(server側がURLを出せた)giftだけを残す。iconを出せないgiftを場所取りに
@@ -4520,44 +4350,16 @@ function giftSenderName(gift) {
   return Array.from(base).slice(0, GIFT_NAME_CHARS).join("");
 }
 
-// 1件が時間軸上で占める幅。名前を出すときは名前の幅も含める — iconの幅だけで場所を
-// 取ると、iconは離れているのに名前どうしが重なる。
-function giftEntryWidth(ctx, gift, size, withName) {
-  if (!withName) return size;
-  const label = giftSenderName(gift);
-  if (!label) return size;
-  return Math.max(size, ctx.measureText(label).width + 2);
-}
-
-// [from, to)の秒範囲のgiftを、重ならない位置へ間引いて返す。残すのは高額なものから
-// (盛り上がりの主因が先に見える)。同じ列に置けないものはrowsで許した段まで下ろし、
-// どの段にも入らないものだけを捨てる。返り値は描画順に並べ替えた [{gift, x, row, label, w}]。
-function pickGiftIcons(ctx, gifts, toX, width, size, rows, withName) {
-  // 幅の実測に使うfontは、実際に名前を描くときと同じものにする(違うfontで測ると、
-  // 測った幅より広い名前が並んで重なる)。
-  ctx.font = giftNameFont();
-  const ranked = gifts
-    .map((gift) => ({
-      gift,
-      x: toX(gift.t),
-      label: withName ? giftSenderName(gift) : "",
-      w: giftEntryWidth(ctx, gift, size, withName),
-    }))
-    .filter((item) => item.x >= -item.w && item.x <= width + item.w)
-    .sort((a, b) => b.gift.diamonds - a.gift.diamonds);
-  const lanes = [];
-  for (let i = 0; i < Math.max(1, rows); i += 1) lanes.push([]);
-  const kept = [];
-  ranked.forEach((item) => {
-    const row = lanes.findIndex((lane) => lane.every(
-      (other) => Math.abs(other.x - item.x)
-        >= (other.w + item.w) / 2 + GIFT_ICON_GAP_PX));
-    if (row < 0) return;
-    item.row = row;
-    lanes[row].push(item);
-    kept.push(item);
+// 重なりの間引き(pickIcons)へ渡す形。時間軸の秒はt、重い順に残す物差しは🪙。
+function pickGifts(ctx, gifts, toX, width, size, rows, withName) {
+  return pickIcons(ctx, gifts, {
+    toX: (gift) => toX(gift.t),
+    width,
+    size,
+    rows,
+    labelOf: withName ? giftSenderName : null,
+    rankOf: (gift) => gift.diamonds,
   });
-  return kept.sort((a, b) => a.x - b.x);
 }
 
 // 全尺barの間引きは録画1本分のgiftを毎frame舐めることになる。窓も列数も変わらない
@@ -4572,7 +4374,7 @@ function giftIconsFull(ctx, duration, width, size) {
   }
   // 全尺barは1px≈数秒で、送り主の名前を足しても隣のgiftが落ちるばかりで読めるように
   // はならない。誰が送ったかは拡大窓で読む。
-  const picked = pickGiftIcons(
+  const picked = pickGifts(
     ctx, giftsWithIcons(), (seconds) => (seconds / duration) * width, width, size, 1, false);
   giftLayout = { gifts: state.gifts, duration, width, size, picked };
   return picked;
@@ -4588,15 +4390,11 @@ function giftIconsInWindow(ctx, win, toX, width, size, rows) {
     if (gift.t > win.end) break;
     if (state.giftIcons[String(gift.gift_id)]) visible.push(gift);
   }
-  return pickGiftIcons(ctx, visible, toX, width, size, rows, true);
+  return pickGifts(ctx, visible, toX, width, size, rows, true);
 }
 
 function giftIconsShown() {
   return $("show-gifts").checked && state.gifts.length > 0;
-}
-
-function giftNameFont() {
-  return `${GIFT_NAME_FONT_PX}px "JetBrains Mono", monospace`;
 }
 
 // 送り主のavatar。gift iconと違い人数ぶん在るので、実際に描く物だけを引く(窓に映って
@@ -4611,60 +4409,38 @@ function giftSenderImage(uid) {
     img = new Image();
     // poolに無ければ404で終わる。errorでもcompleteは立つので、描く側はnaturalWidthで
     // 実体の有無を見て頭文字へ落とす(別人の絵を代わりに置かない)。
-    img.addEventListener("load", scheduleGiftRedraw);
+    img.addEventListener("load", scheduleIconRedraw);
     img.src = avatarSrc("", uid);
     giftSenderImages.set(uid, img);
   }
   return img.complete && img.naturalWidth > 0 ? img : null;
 }
 
-// iconを段へ並べ、そこから真下へ細い線を落とす。iconは横に広く、絵の中心がそのまま
-// 時刻には読めないため、線が無いと「いつ飛んだか」が数秒ぶれる。
-// 線を先に全部引いてからiconを載せるのは、上の段から落ちる線が下の段のiconを横切る
-// ため — 絵の側が勝つ順に描く。
+// 段への並べ方・時刻へ落とす線・地色の敷き方は timeline.js が持つ(ストーリーの時間軸と
+// 同じ絵にするため)。この画面が足すのは**送り主**で、iconの左下へavatar、下に名前の頭を
+// 添える。
 // layout: {top, size, rowH, tickBottom, names}
 function drawGiftIcons(ctx, picked, layout) {
-  const { top, size, rowH, tickBottom, names } = layout;
-  const entryH = size + (names ? GIFT_NAME_LANE_PX : 0);
-  ctx.fillStyle = "rgba(122, 106, 60, 0.35)";
-  picked.forEach((item) => {
-    if (!giftIconImage(item.gift.gift_id)) return;
-    const bottom = top + (item.row || 0) * rowH + entryH;
-    if (tickBottom > bottom) {
-      ctx.fillRect(Math.round(item.x), bottom, 1, tickBottom - bottom);
-    }
-  });
-  // tokenの読み出しは1回の描画につき1度だけ。窓は再生中ずっと毎frame描き直すので、
-  // 1件ずつ:rootを読むと件数ぶんのstyle参照が毎frame走る。
-  const ink = names ? {
-    disc: cssTokenAlpha("--line", 0.9),
-    discInk: cssToken("--sand-panel"),
-    edge: cssTokenAlpha("--sand-panel", 0.95),
-    chip: cssTokenAlpha("--sand-panel", 0.85),
-    name: cssToken("--ink-strong"),
-  } : null;
-  picked.forEach((item) => {
-    const img = giftIconImage(item.gift.gift_id);
-    if (!img) return;
-    const y = top + (item.row || 0) * rowH;
-    ctx.drawImage(img, item.x - size / 2, y, size, size);
-    if (names) drawGiftSender(ctx, item, y, size, ink);
+  drawIcons(ctx, picked, {
+    ...layout,
+    imageOf: (entry) => giftIconImage(entry.data.gift_id),
+    decorate: layout.names ? drawGiftSender : null,
   });
 }
 
 // 送り主をgiftの絵に添える。avatarはiconの左下へ重ねて1件ぶんの幅を増やさず、名前の頭は
 // icon幅に収まらないぶんだけ横へ出す(その幅は間引き側が場所として数えてある)。
-function drawGiftSender(ctx, item, top, size, ink) {
+function drawGiftSender(ctx, item, top, size, ink, width) {
   // 送り主が判らない行(名前もidも残っていない)は何も添えない。頭文字の「?」だけを
   // 置くと、誰かが居るのに読めていないように見える。
-  if (!item.label && !item.gift.uid) return;
+  if (!item.label && !item.data.uid) return;
   const d = Math.max(8, Math.round(size * GIFT_AVATAR_RATIO));
   drawSenderAvatar(ctx, item, item.x - size / 2, top + size - d, d, ink);
-  if (item.label) drawSenderName(ctx, item.label, item.x, top + size, ink);
+  if (item.label) drawIconLabel(ctx, item.label, item.x, top + size, ink, width);
 }
 
 function drawSenderAvatar(ctx, item, x, y, d, ink) {
-  const img = giftSenderImage(item.gift.uid);
+  const img = giftSenderImage(item.data.uid);
   const cx = x + d / 2;
   const cy = y + d / 2;
   ctx.save();
@@ -4693,20 +4469,6 @@ function drawSenderAvatar(ctx, item, x, y, d, ink) {
   ctx.stroke();
 }
 
-function drawSenderName(ctx, label, cx, top, ink) {
-  ctx.save();
-  ctx.font = giftNameFont();
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  // 名前は波形の上に載る。字だけだと線に紛れて読めないので、地色を敷いてから置く。
-  const w = ctx.measureText(label).width;
-  ctx.fillStyle = ink.chip;
-  ctx.fillRect(cx - w / 2 - 1, top, w + 2, GIFT_NAME_LANE_PX);
-  ctx.fillStyle = ink.name;
-  ctx.fillText(label, cx, top + 1);
-  ctx.restore();
-}
-
 // ===== seek barのサムネイル =====
 // spriteは1枚の大画像で、tile i が時刻 i*interval に対応する。background-positionをずらして
 // 1枚だけ見せる。初回生成は長尺で十数秒かかるので、hoverの瞬間ではなく録画を開いた時点で頼む。
@@ -4724,23 +4486,10 @@ async function loadThumbnails(recordingId) {
   }
 }
 
-// 測ったbarの矩形とx座標から動画の秒を出す。矩形を引数に取るのは、1回の描画で同じbarを
-// 何度も測り直さないため(測り直しはstyleを書いた後だとlayoutの再計算を伴う)。
-// 基準はcontent box(clientLeft/clientWidth)にする。描画側は canvas.clientWidth を全尺として
-// 描くので、border込みのrectで換算すると描いてある絵と当たる場所が最大1pxずれる。
-// 全尺barは3時間×1600pxで1px≒6.7秒あり、端では「山を押したのに数秒ずれた所へ飛ぶ」になる。
-function secondsFromRect(el, rect, clientX) {
-  const duration = $("video").duration;
-  if (!isFinite(duration) || duration <= 0) return null;
-  const width = el.clientWidth || rect.width;
-  const ratio = Math.min(1, Math.max(0, (clientX - rect.left - el.clientLeft) / width));
-  return ratio * duration;
-}
-
 // bar上のx座標を動画の秒へ写す。thumbnail・seek・range dragが同じ換算を使う。
 function secondsFromClientX(clientX) {
   const heat = $("heat");
-  return secondsFromRect(heat, heat.getBoundingClientRect(), clientX);
+  return secondsFromRect(heat, heat.getBoundingClientRect(), clientX, tlVideo().duration);
 }
 
 // 全尺barと拡大窓で1つのthumbを使い回す。2枚持つと、片方を隠し忘れたときに2枚出る。
@@ -4758,7 +4507,7 @@ function showThumb(barId, clientX) {
   const rect = bar.getBoundingClientRect();
   const seconds = barId === "zoom"
     ? zoomSecondsFromClientX(clientX)
-    : secondsFromRect(bar, rect, clientX);
+    : secondsFromRect(bar, rect, clientX, tlVideo().duration);
   if (!spec || seconds === null) {
     thumb.classList.add("hidden");
     return;
@@ -4788,12 +4537,12 @@ function hideThumb() {
 function seekFromHeat(clientX) {
   const seconds = secondsFromClientX(clientX);
   if (seconds === null) return;
-  $("video").currentTime = seconds;
+  tlVideo().currentTime = seconds;
 }
 
 // 拡大窓上のx座標を動画の秒へ写す。drag中は凍結した窓で換算する(zoomDragWindow参照)。
 function zoomSecondsFromClientX(clientX) {
-  const win = zoomDragWindow || zoomWindow($("video").duration);
+  const win = zoomDragWindow || zoomWindow(tlVideo().duration);
   if (!win) return null;
   // 全尺bar(secondsFromRect)と同じくcontent boxを基準にする。拡大窓は1px≒数十msなので
   // 実害は小さいが、2つのbarで基準が違うと直した側だけが正しいという状態になる。
@@ -4809,33 +4558,18 @@ function dragSecondsFromClientX(clientX) {
   return dragOnZoom ? zoomSecondsFromClientX(clientX) : secondsFromClientX(clientX);
 }
 
-// pointerに一番近いhandleを返す(許容幅の外ならnull)。IN側を先に判定して即returnすると、
-// 短い範囲ではOUTがIN側の許容幅に飲まれて永久に掴めない。距離で決める。
-function nearestHandle(x, toX, tolerance) {
-  let mode = null;
-  let best = Infinity;
-  if (state.cutIn !== null) {
-    best = Math.abs(x - toX(state.cutIn));
-    mode = "in";
-  }
-  if (state.cutOut !== null && Math.abs(x - toX(state.cutOut)) <= best) {
-    best = Math.abs(x - toX(state.cutOut));
-    mode = "out";
-  }
-  return best <= tolerance ? mode : null;
-}
-
 // IN/OUT線は全高で掴める。範囲の新規作成と平行移動は上端lane限定で、それより下は
 // 従来通りseek。範囲未設定ならlane内は必ず"new"(押した点から伸ばす)へ落ちる。
 function hitTestHeat(clientX, clientY, pointerType) {
   const rect = $("heat").getBoundingClientRect();
-  const duration = $("video").duration;
+  const duration = tlVideo().duration;
   if (!isFinite(duration) || duration <= 0) return "seek";
   const x = clientX - rect.left;
   const inLane = clientY - rect.top <= RANGE_LANE_PX;
   const toX = (seconds) => (seconds / duration) * rect.width;
   const base = pointerType === "mouse" ? HANDLE_HIT_PX : HANDLE_HIT_TOUCH_PX;
-  const handle = nearestHandle(x, toX, inLane ? base : base * HANDLE_HIT_BODY_RATIO);
+  const handle = nearestHandle(x, toX, inLane ? base : base * HANDLE_HIT_BODY_RATIO,
+                               state.cutIn, state.cutOut);
   if (handle) return handle;
   if (!inLane) return "seek";
   if (state.cutIn !== null && state.cutOut !== null
@@ -4850,14 +4584,14 @@ function hitTestHeat(clientX, clientY, pointerType) {
 // 「押しっぱなしで送る」形しか無く、狙った場所へ一息で寄れない。
 function hitTestZoom(event) {
   const rect = $("zoom").getBoundingClientRect();
-  const win = zoomDragWindow || zoomWindow($("video").duration);
+  const win = zoomDragWindow || zoomWindow(tlVideo().duration);
   if (!win) return "seek";
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
   if (event.shiftKey || y > rect.height - RULER_LANE_PX) return "zoompan";
   const toX = (seconds) => ((seconds - win.start) / win.span) * rect.width;
   const tolerance = event.pointerType === "mouse" ? HANDLE_HIT_PX : HANDLE_HIT_TOUCH_PX;
-  const handle = nearestHandle(x, toX, tolerance);
+  const handle = nearestHandle(x, toX, tolerance, state.cutIn, state.cutOut);
   if (handle) return handle;
   if (y <= RANGE_LANE_PX) {
     if (state.cutIn !== null && state.cutOut !== null
@@ -4941,7 +4675,7 @@ function scheduleBarMove(barId, event) {
 function dragRange(event) {
   // 窓の移動だけは再生位置に触らない(掴んだ場所を保ったまま景色を動かす操作のため)。
   if (dragMode === "zoompan") {
-    const duration = $("video").duration;
+    const duration = tlVideo().duration;
     if (!isFinite(duration) || duration <= 0) return;
     const span = zoomSpanFor(duration);
     state.zoomStart = clampZoomStart(
@@ -4951,7 +4685,7 @@ function dragRange(event) {
   }
   const seconds = dragSecondsFromClientX(event.clientX);
   if (seconds === null) return;
-  const video = $("video");
+  const video = tlVideo();
   if (dragMode === "seek") {
     video.currentTime = seconds;
     return;
@@ -5009,7 +4743,11 @@ function writeCutField(id, seconds) {
   input.value = seconds === null ? "" : fmtCutTime(seconds);
 }
 
-function setCut(inSec, outSec) {
+// silentは「画面が値を入れ直しただけ」の印。**見どころtabのIN/OUTはその見どころの尺
+// そのもの**なので、既定では人が動かしたものとして書き戻しの予約に入る(queueMarkRangeSave)。
+// 観る対象を開いた時にその範囲でIN/OUTを埋めるadoptMarkContextだけがこれを立てる ——
+// 立てないと、見どころを1件開くたびに同じ値のPATCHが飛ぶ。
+function setCut(inSec, outSec, { silent = false } = {}) {
   state.cutIn = inSec;
   state.cutOut = outSec;
   writeCutField("cut-in", inSec);
@@ -5028,6 +4766,7 @@ function setCut(inSec, outSec) {
   syncAddMarkButton();
   syncControlGroupNotes();
   drawTimeline();
+  if (!silent) queueMarkRangeSave();
 }
 
 // 同じ範囲の見どころが既に在るか。IN/OUTはframe未満のずれで入ることがあるので、1 frame
@@ -5058,11 +4797,6 @@ function syncAddMarkButton() {
   button.textContent = twin
     ? "記録済"
     : (ranged ? "見どころ記録（尺あり）" : "見どころ記録（点）");
-  button.title = twin
-    ? `この範囲は既に見どころ（${groupNameOf(twin.group_id) || "未分類"}）にあります。`
-    : (ranged
-      ? "今のIN/OUTを見どころに記録します。尺があるのでそのままmp4にできます（mp4はまだ作りません）。"
-      : "今の再生位置を点として記録します。尺が無いのでmp4にはできません（一覧の尺の欄で後から与えられます）。");
 }
 
 // 見どころのメモ。書き出しfile名にもなるので、入力欄の値をそのまま使う
@@ -5086,8 +4820,8 @@ function syncControlGroupNotes() {
   const outNote = $("output-group-note");
   if (!clipNote || !outNote) return;
   if (!state.current) {
-    clipNote.textContent = "録画を開くと使えます";
-    outNote.textContent = "録画を開くと使えます";
+    clipNote.textContent = "";
+    outNote.textContent = "";
     return;
   }
   clipNote.textContent = "";
@@ -5109,23 +4843,23 @@ function applyCutField(id, kind) {
     // 黙って巻き戻すと、打った値が消えただけに見える(一覧側の位置・尺の欄は
     // 同じ場面で理由を出しており、経路によって作法が違っていた)。
     input.value = current === null ? "" : fmtCutTime(current);
-    $("player-status").textContent = "時刻を読めません（例: 1:23:45.6）。";
-    showToast("時刻を読めません（例: 1:23:45.6）。", "error",
+    $("player-status").textContent = "時刻を読めません（例 1:23:45.6）";
+    showToast("時刻を読めません（例 1:23:45.6）", "error",
       { title: kind === "in" ? "IN" : "OUT" });
     return;
   }
-  const duration = $("video").duration;
+  const duration = tlVideo().duration;
   if (isFinite(duration)) seconds = Math.min(seconds, duration);
   if (kind === "in") setCut(seconds, state.cutOut);
   else setCut(state.cutIn, seconds);
   // 打った位置をその場で確かめられるよう再生位置も合わせる(I/O keyやdragと同じ挙動)。
-  $("video").currentTime = seconds;
+  tlVideo().currentTime = seconds;
 }
 
 // IN/OUTをframe単位で詰める([ ] / shift+[ ] key)。動かした側へ再生位置を合わせ、
 // 止めた絵で境界を確かめられるようにする。
 function nudgeCut(kind, direction) {
-  const video = $("video");
+  const video = tlVideo();
   const step = direction * FRAME_STEP_SECONDS;
   let next;
   if (kind === "in") {
@@ -5149,7 +4883,7 @@ function nudgeCut(kind, direction) {
 function previewBoundary(kind) {
   const target = kind === "in" ? state.cutIn : state.cutOut;
   if (target === null) return;
-  const video = $("video");
+  const video = tlVideo();
   video.currentTime = Math.max(0, target - PREVIEW_BEFORE_SECONDS);
   previewStopAt = target + PREVIEW_AFTER_SECONDS;
   // 再生が弾かれたら状態を戻すだけでなく理由も出す。黙って戻すと、押しても何も起きない
@@ -5165,7 +4899,7 @@ function previewBoundary(kind) {
 // timeupdateは250ms級の粒度で境界を大きく行き過ぎるため、確認再生の停止だけはrAFで見る。
 function tickPreview() {
   if (previewStopAt === null) return;
-  const video = $("video");
+  const video = tlVideo();
   if (video.currentTime >= previewStopAt) {
     previewStopAt = null;
     video.pause();
@@ -5194,7 +4928,7 @@ function sceneBounds(seconds, duration) {
 
 // dblclickで発話塊をまるごとIN/OUTへ。1シーンの切り出しが1動作になる。
 function selectSceneAt(seconds) {
-  const duration = $("video").duration;
+  const duration = tlVideo().duration;
   if (seconds === null || !isFinite(duration) || duration <= 0) return;
   if (!state.silences.length) {
     // 空になる経路は3つあり、対処が違う。一律に「有効にすると使えます」と案内すると、
@@ -5202,17 +4936,14 @@ function selectSceneAt(seconds) {
     const waveOn = $("show-wave").checked;
     const note = $("wave-note").textContent;
     $("player-status").textContent = !waveOn
-      ? "無音区間がまだありません（音声波形を有効にすると使えます）。"
-      : note.includes("生成中")
-        ? "波形を生成中です。終わると無音区間で選べるようになります。"
-        : "無音区間を取得できていません（無音が無いという意味ではありません）。";
+      ? "波形OFF"
+      : (note.includes("生成中") ? "波形を生成中…" : "無音区間なし");
     return;
   }
   const bounds = sceneBounds(seconds, duration);
   if (bounds.end - bounds.start < FRAME_STEP_SECONDS) return;
   setCut(bounds.start, bounds.end);
-  $("player-status").textContent =
-    `無音間を選択しました（尺 ${fmtDuration(bounds.end - bounds.start)}）`;
+  $("player-status").textContent = fmtDuration(bounds.end - bounds.start);
 }
 
 // 切り出しの共通指定。単発の切り出しと一括書き出しで同じ値を使う(画面で2箇所に持つと
@@ -5276,8 +5007,7 @@ async function runClip() {
     // queueへ載せ、job行だけを返す(route="render")。ここを見ずにresult.pathを読んでいたため、
     // 画面は「出力: undefined」と言い、その後の完了もどこにも出ないままだった。
     if (result.route === "render") {
-      const queued = "この範囲だけを焼き込みます（順番待ちに入れました）。進み具合はJob画面と、"
-        + "出来上がりは「出力済みclip」tabに出ます。";
+      const queued = "焼き込み 順番待ちへ";
       $("player-status").textContent = queued;
       showToast(queued, null, { title: "切り出し", duration: JOB_TOAST_MS });
       button.disabled = false;
@@ -5288,7 +5018,7 @@ async function runClip() {
     // 理由が利用者から見えなかった。
     const lead = result.keyframe_lead_seconds;
     const note = lead
-      ? `（実開始 ${fmtDuration(result.actual_start_seconds)} / 要求より ${lead.toFixed(1)}秒手前）`
+      ? `（実開始 ${fmtDuration(result.actual_start_seconds)} / -${lead.toFixed(1)}s）`
       : "";
     // pathはNLEへ渡す実体なのでcopyの経路は要るが、押していないcopyでclipboardを奪わない
     // (直前に控えていた内容が黙って消える)。次のstatus更新でbuttonごと消える。
@@ -5299,12 +5029,13 @@ async function runClip() {
       ? ` / 字幕: ${subs.files.join("・")}`
       : (subs.message ? ` / ${subs.message}` : "");
     const status = $("player-status");
-    status.textContent = `出力: ${result.path}${note}${subNote} `;
+    status.textContent = `→ ${result.path}${note}${subNote} `;
     const copy = document.createElement("button");
     copy.className = "btn btn-small";
     copy.type = "button";
-    copy.textContent = "pathをcopy";
-    copy.addEventListener("click", () => copyText(result.path, "切り出しpathをcopyしました。"));
+    copy.textContent = "⧉";
+    copy.setAttribute("aria-label", "pathをcopy");
+    copy.addEventListener("click", () => copyText(result.path, "copy"));
     status.appendChild(copy);
   } catch (err) {
     $("player-status").textContent = err.message;
@@ -5335,7 +5066,7 @@ async function saveStill(recordingId, at, variant, label, say) {
   if (recordingId === null || recordingId === undefined) return;
   // 秒はplayerの現在位置そのまま。再生経路(HLS/mp4)によって軸が違うが、serverは同じ
   // 経路の素材から抜くので、画面で止めている絵と同じ位置になる。
-  say("スクショを保存しています…");
+  say("スクショ 保存中…");
   try {
     await apiSend("POST", `/api/recordings/${recordingId}/still`, {
       at, variant, label: label || null,
@@ -5451,6 +5182,8 @@ function renderGroupBar(hostId, kind) {
     }
     const item = document.createElement("div");
     item.className = "vd-group-item";
+    // 行のグループ欄から入れた時に、入った先の棚へ線を飛ばすための目印。
+    item.dataset.group = entry.value;
 
     const pick = document.createElement("button");
     pick.type = "button";
@@ -5501,12 +5234,12 @@ function renderGroupBar(hostId, kind) {
   ops.className = "vd-gbar-ops";
   const hint = document.createElement("span");
   hint.className = "vd-group-hint";
-  hint.textContent = picked ? `${fmtNum(picked)}件を選択中` : "グループ＝切り抜き動画1本";
+  hint.textContent = picked ? String(fmtNum(picked)) : "";
   const create = document.createElement("button");
   create.className = "btn btn-compact";
   create.type = "button";
-  create.textContent = "＋ 新規";
-  create.title = "新しいグループを作ります（切り抜き動画1本の単位）。";
+  create.textContent = "＋";
+  create.setAttribute("aria-label", "グループを作る");
   create.addEventListener("click", () => createGroup(false));
   ops.append(create, hint);
   host.appendChild(ops);
@@ -5557,11 +5290,7 @@ function selectGroup(value) {
   // 操作が「表示中の全件」へ戻ったことに気付けないまま次のbuttonを押すことになる。
   const dropped = droppedSelectionCount("marks");
   renderMarksView();
-  if (dropped) {
-    $("marks-status").textContent =
-      `別のグループへ移ったので選択（${fmtNum(dropped)}件）を解除しました。`
-      + "書き出し・連結の対象は表示中の全件に戻ります。";
-  }
+  if (dropped) $("marks-status").textContent = `選択 ${fmtNum(dropped)}件を解除`;
 }
 
 // 今の絞り込みでは表示されない選択の件数。
@@ -5594,8 +5323,7 @@ function pickBoxFor(kind, ids, index, rerender) {
   const pick = document.createElement("input");
   pick.type = "checkbox";
   pick.checked = selected.has(id);
-  pick.setAttribute("aria-label", "まとめて動かす対象に選ぶ");
-  pick.title = "shift+クリックで、直前に選んだ行からここまでをまとめて選びます。";
+  pick.setAttribute("aria-label", "選ぶ");
   pick.addEventListener("click", (event) => {
     // 行clickは再生画面へ移る操作なので、選択は行へ伝播させない。
     event.stopPropagation();
@@ -5641,9 +5369,24 @@ function bindRowDrag(tr, kind, id) {
   });
 }
 
+// 入った先の棚へ線を飛ばす。棚は左端にあり、押した場所(行のグループ欄)からは遠いので、
+// 線が無いと「入った」と言われても入った先を目で探し直すことになる。棚がその時に
+// 描かれていない(絞り込みで出ていない)場合は飛ばさない ―― 着地点の無い線は、
+// 存在しない場所を指すことになる。
+function flyToGroupShelf(fromEl, value) {
+  if (!fromEl) return;
+  const shelf = document.querySelector(`.vd-group-item[data-group="${CSS.escape(String(value))}"]`);
+  if (!shelf) return;
+  const box = shelf.getBoundingClientRect();
+  if (!box.width || !box.height) return;
+  flyTo(fromEl, shelf, () => ackPress(shelf));
+}
+
 // 指定した行をグループへ入れる。行のグループ欄とtabへのドラッグの2経路がここを通るので、
 // どちらの経路でも結果が同じになる。複製はグループ操作tabが持つ(gopsAssign)。
-async function assignIds(kind, value, ids) {
+// fromEl は押した場所。渡されると、入った先の棚へ線を1本飛ばして「どこへ入ったか」を
+// 指す(dropで入れた時は人が自分で運んでいるので渡さない)。
+async function assignIds(kind, value, ids, fromEl) {
   if (!ids || !ids.length) return;
   const selected = selectionSetOf(kind);
   const status = $("marks-status");
@@ -5652,8 +5395,9 @@ async function assignIds(kind, value, ids) {
     const result = await apiSend(
       "POST", "/api/bookmarks/bulk", { op: "move", ids, group_id: groupId },
     );
-    const where = groupId === null ? "未分類" : `グループ「${groupNameOf(groupId)}」`;
-    status.textContent = `${fmtNum(result.affected)}件を${where}へ入れました。`;
+    const where = groupId === null ? "未分類" : groupNameOf(groupId);
+    status.textContent = `${fmtNum(result.affected)}件 → ${where}`;
+    flyToGroupShelf(fromEl, value);
     // 行が移った時点で選択の意味が変わるので、動かした行だけ選択から外す
     // (行のグループ欄で1件だけ直したときに、残り全部の選択まで消さない)。
     ids.forEach((id) => selected.delete(id));
@@ -5662,6 +5406,8 @@ async function assignIds(kind, value, ids) {
     // 直後のrefreshGroupData/renderGroupViewsが<select>を元のグループへ描き直す。
     // 選んだ値が黙って戻るので、戻った理由を押した場所から離れないtoastで出す。
     status.textContent = err.message;
+    // 選んだ値は直後の描き直しで元へ戻る。戻る事を押した場所でも返す。
+    denyPress(fromEl);
     showError(err, "グループへの割り当て");
   }
   // 今開いている録画の見どころ(seek barのmarkerとplayer直下の一覧)は別に持っている。
@@ -5695,9 +5441,7 @@ function inheritAddGroup(groupId) {
   if (state.addGroup === value) return;
   setAddGroup(value);
   const group = (state.groups || []).find((g) => String(g.id) === value);
-  showToast(group
-    ? `記録先を「${group.name}」にしました（開いた行の所属）。`
-    : "記録先を未分類にしました（開いた行の所属）。");
+  showToast(`記録先 → ${group ? group.name : "未分類"}`);
 }
 
 // 見どころ・切り出しの記録先group_id。未分類はnull。
@@ -5736,9 +5480,6 @@ function renderDestButton() {
   caret.setAttribute("aria-hidden", "true");
   caret.textContent = "▾";
   button.append(key, val, count, caret);
-  button.title = none
-    ? "記録先: 未分類（グループに入れずに記録します）。押すと選べます。"
-    : `記録先: ${name}。押すと選べます。`;
 
   // 開いている一覧は今の選択と件数を映している。裏で引き直した結果を反映しないと、
   // 消えたグループや古い件数のまま選ばせることになる。
@@ -5785,7 +5526,7 @@ function openDestPicker() {
 
   const empty = document.createElement("div");
   empty.className = "vd-pick-empty";
-  empty.textContent = "該当するグループがありません";
+  empty.textContent = "—";
   empty.hidden = true;
   panel.appendChild(empty);
 
@@ -5809,18 +5550,13 @@ function openDestPicker() {
     count.className = "vd-pick-count";
     count.textContent = fmtNum(stats.marks);
     item.append(tick, name, count);
-    item.title = entry.value === "none"
-      ? "グループに入れずに記録します。後から一覧のグループ欄で仕分けられます。"
-      : `以後の「見どころ記録」を「${entry.label}」へ入れます。`;
 
     item.addEventListener("click", () => {
       closeRowMenu();
       setAddGroup(entry.value);
       // 今どこへ入るかはbuttonの名乗りが常時示している。ここで player-status を使うと、
       // 直前に出した切り出しpathが記録先を変えただけで消える。
-      showToast(entry.value === "none"
-        ? "記録先を未分類にしました。"
-        : `記録先を「${entry.label}」にしました。`);
+      showToast(`記録先 → ${entry.value === "none" ? "未分類" : entry.label}`);
     });
     list.appendChild(item);
     return item;
@@ -5830,21 +5566,17 @@ function openDestPicker() {
   foot.className = "vd-pick-foot";
   panel.appendChild(foot);
 
-  const act = (label, title, onSelect) => {
+  const act = (label, onSelect) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "vd-pick-act";
     button.textContent = label;
-    button.title = title;
     button.addEventListener("click", () => { closeRowMenu(); onSelect(); });
     foot.appendChild(button);
     return button;
   };
-  act("＋ 新規グループ", "新しいグループを作り、そのまま記録先にします。",
-    () => createGroup(true));
-  act("＋ 検索語で作る",
-    "今の検索語を名前にしたグループを作って記録先にします（同名があればそれを選びます）。",
-    groupFromQuery);
+  act("＋ 新規", () => createGroup(true));
+  act("＋ 検索語", groupFromQuery);
 
   // 打鍵で絞る。名前だけを見る(件数で絞れても探し方にならない)。
   filter.addEventListener("input", () => {
@@ -5907,7 +5639,7 @@ function openDestPicker() {
 async function groupFromQuery() {
   const name = (state.query || "").trim();
   if (!name) {
-    const empty = "検索語が空です。シーン検索の検索語がグループ名になります。";
+    const empty = "検索語が空です";
     $("player-status").textContent = empty;
     showToast(empty, "error", { title: "検索語でグループを作る" });
     return;
@@ -5919,8 +5651,8 @@ async function groupFromQuery() {
     renderGroupViews();
     // 記録先を変える操作はinheritAddGroupがtoastで名乗る。同じ事実をここだけ別の流儀で
     // 出すと、記録先が変わったかどうかを経路ごとに確かめ直すことになる。
-    $("player-status").textContent = `記録先を「${group.name}」にしました。`;
-    showToast(`記録先を「${group.name}」にしました。`);
+    $("player-status").textContent = `記録先 → ${group.name}`;
+    showToast(`記録先 → ${group.name}`);
   } catch (err) {
     $("player-status").textContent = err.message;
     showError(err, "検索語でグループを作る");
@@ -5947,9 +5679,7 @@ async function createGroup(asDestination) {
   if (asDestination) setAddGroup(String(group.id));
   else setGroupFilter(String(group.id));
   renderGroupViews();
-  const text = asDestination
-    ? `記録先を「${group.name}」にしました。`
-    : `グループ「${group.name}」を作りました。`;
+  const text = asDestination ? `記録先 → ${group.name}` : `＋ ${group.name}`;
   status.textContent = text;
   showToast(text);
 }
@@ -5964,9 +5694,7 @@ function groupSelectFor(row, kind) {
   const current = id === null ? "none" : String(id);
   const select = document.createElement("select");
   select.className = "vd-gsel" + (id === null ? " vd-gsel-none" : "");
-  // 欄の幅には上限があり長い名前は省略される。今の所属はhoverでも読めるようにする。
-  select.title = `所属: ${id === null ? "未分類" : groupNameOf(id)}（選ぶとその場で移ります）`;
-  select.setAttribute("aria-label", "この行の所属グループ");
+  select.setAttribute("aria-label", "所属グループ");
   const entries = [
     { value: "none", label: "未分類" },
     ...(state.groups || []).map((group) => ({ value: String(group.id), label: group.name })),
@@ -5994,10 +5722,12 @@ function groupSelectFor(row, kind) {
       // 作れなかった/やめた場合に、行が入っていない先を名乗ったままにしない。
       select.value = current;
       const group = await createGroupFor(kind);
-      if (group) await assignIds(kind, String(group.id), [row.id]);
+      if (group) await assignIds(kind, String(group.id), [row.id], select);
       return;
     }
-    await assignIds(kind, value, [row.id]);
+    // <select>には::afterが描かれないので、受付の輪はここでは出せない。押した結果は
+    // 入った先の棚へ飛ぶ線が指す。
+    await assignIds(kind, value, [row.id], select);
   });
   return select;
 }
@@ -6198,7 +5928,6 @@ function renderGopsShelf() {
     const no = document.createElement("span");
     no.className = "vd-gcard-no";
     no.textContent = String(index + 1);
-    no.title = "棚の表示順です（グループ内の書き出し順とは別物です）。";
 
     const name = document.createElement("input");
     name.type = "text";
@@ -6255,7 +5984,6 @@ function renderGopsShelf() {
       button.className = "btn btn-small";
       button.type = "button";
       button.textContent = GOPS_LABELS[side];
-      button.title = `このグループを${GOPS_LABELS[side]}のpaneに出します。`;
       button.setAttribute("aria-pressed", String(state.gops[side] === value));
       button.disabled = state.gops[side] === value;
       button.addEventListener("click", () => {
@@ -6274,7 +6002,7 @@ function renderGopsShelf() {
       button.className = "btn btn-small";
       button.type = "button";
       button.textContent = label;
-      button.title = "棚の表示順を入れ替えます（グループ内の書き出し順とは別物です）。";
+      button.setAttribute("aria-label", delta < 0 ? "棚で上へ" : "棚で下へ");
       button.disabled = index + delta < 0 || index + delta >= groups.length;
       button.addEventListener("click", () => nudgeGroupOrder(index, delta));
       actions.appendChild(button);
@@ -6283,7 +6011,6 @@ function renderGopsShelf() {
     remove.className = "btn btn-small btn-danger";
     remove.type = "button";
     remove.textContent = "削除";
-    remove.title = "グループだけを消します。中の見どころは未分類へ戻ります。";
     remove.addEventListener("click", () => deleteGroup(group));
     actions.appendChild(remove);
 
@@ -6299,13 +6026,13 @@ async function renameGroup(group, input) {
   const name = input.value.trim();
   if (!name) {
     input.value = group.name;
-    $("gops-status").textContent = "グループ名は空にできません。";
+    $("gops-status").textContent = "名前は空にできません";
     return;
   }
   if (name === group.name) return;
   try {
     await apiSend("PATCH", `/api/groups/${group.id}`, { name });
-    $("gops-status").textContent = `「${group.name}」を「${name}」に変えました。`;
+    $("gops-status").textContent = "";
   } catch (err) {
     // 入力欄が元の名前へ戻るので、失敗を出さないと「打った名前が黙って消えた」になる。
     input.value = group.name;
@@ -6319,7 +6046,7 @@ async function renameGroup(group, input) {
 async function saveGroupMemo(groupId, memo) {
   try {
     await apiSend("PATCH", `/api/groups/${groupId}`, { memo });
-    showToast("メモを保存しました。", null, { title: "グループのメモ" });
+    showToast("保存", null, { title: "グループのメモ" });
   } catch (err) {
     $("gops-status").textContent = err.message;
     showError(err, "グループのメモ保存");
@@ -6352,17 +6079,16 @@ async function deleteGroup(group) {
   const inside = stats.marks;
   const ok = await confirmDialog(
     inside
-      ? `グループ「${group.name}」を削除します。中の見どころ ${fmtNum(inside)}件は消えず、`
-        + "未分類へ戻ります（書き出し順は失われます）。"
-      : `グループ「${group.name}」を削除します。`,
+      ? `「${group.name}」を削除（見どころ ${fmtNum(inside)}件は未分類へ）`
+      : `「${group.name}」を削除`,
     { title: "グループの削除", confirmLabel: "削除する", danger: true },
   );
   if (!ok) return;
   try {
     await apiSend("DELETE", `/api/groups/${group.id}`);
     $("gops-status").textContent = inside
-      ? `グループ「${group.name}」を削除し、${fmtNum(inside)}件を未分類へ戻しました。`
-      : `グループ「${group.name}」を削除しました。`;
+      ? `${group.name} を削除 / ${fmtNum(inside)}件 → 未分類`
+      : `${group.name} を削除`;
   } catch (err) {
     // 札は残るので、理由を出さないと「押せなかった」に見える。
     $("gops-status").textContent = err.message;
@@ -6410,7 +6136,7 @@ function renderGopsHead(side) {
   // 「全て」「未分類」はグループの実体が無いのでメモを持てない。書ける欄を出したまま
   // 保存先が無い状態にしない。
   memo.disabled = !group;
-  memo.placeholder = group ? "このグループのメモ（狙い・投稿先など）" : "グループを選ぶと書けます";
+  memo.placeholder = group ? "メモ" : "";
   if (document.activeElement !== memo) memo.value = group ? (group.memo || "") : "";
   memo.dataset.groupId = group ? String(group.id) : "";
 }
@@ -6444,9 +6170,6 @@ function renderGopsRows(side) {
       // 「全て」は所属の指定にならない。押せる形で残すと、押しても何も起きない
       // buttonが並ぶことになる。
       send.disabled = state.gops[other] === "";
-      send.title = send.disabled
-        ? `${GOPS_LABELS[other]}が「全て」なので行き先になりません。グループか未分類を選んでください。`
-        : `この1件を${gopsTargetName(other)}へ入れます。`;
       send.addEventListener("click", () => gopsAssign(side, "move", [mark.id]));
       actions.appendChild(send);
       // 身元は配信者と配信日で1つ。左右2つの表を並べる画面なので、突き合わせに要る
@@ -6476,9 +6199,6 @@ function renderGopsRows(side) {
       // 仕事なので、そちらの再生画面へ移す)。
       tr.classList.add("row-clickable");
       tr.tabIndex = 0;
-      tr.title = isRanged(mark)
-        ? "シーン検索の再生画面で開きます（波形・IN/OUT・文字起こしつき）。"
-        : "シーン検索の再生画面で開きます（尺がありません。IN/OUTは入りません）。";
       tr.addEventListener("click", (event) => {
         if (event.target.closest("button, input, select, a")) return;
         openMark(mark);
@@ -6501,27 +6221,21 @@ function updateGopsSelection(side) {
   const rows = gopsRows(state.gops[side], gopsFilter());
   const selected = state.gops.selected[side];
   const count = selected.size;
-  $(`gops-${side}-selected`).textContent = count ? `選択 ${fmtNum(count)}件` : "";
+  $(`gops-${side}-selected`).textContent = count ? String(fmtNum(count)) : "";
   $(`gops-${side}-all`).checked = rows.length > 0 && count === rows.length;
   const other = GOPS_OTHER[side];
   const blocked = state.gops[other] === "";
   const where = gopsTargetName(other);
   const move = $(`gops-${side}-move`);
   move.disabled = !count || blocked;
-  move.textContent = count ? `${where}へ移動（${fmtNum(count)}件）` : `${GOPS_LABELS[other]}へ移動`;
-  move.title = blocked
-    ? `${GOPS_LABELS[other]}が「全て」なので行き先になりません。グループか未分類を選んでください。`
-    : `選んだ行を${where}へ入れます。`;
+  move.textContent = count ? `${where}へ移動 ${fmtNum(count)}` : `${GOPS_LABELS[other]}へ移動`;
   const copy = $(`gops-${side}-copy`);
   // 複製は「同じ場面をグループごとに別々の詰め方で持つ」ための操作。所属は排他なので、
   // 共用ではなく行ごと複製することでしか表せない。
   copy.disabled = !count || blocked;
-  copy.textContent = count ? `${where}へ複製（${fmtNum(count)}件）` : `${GOPS_LABELS[other]}へ複製`;
-  copy.title = blocked
-    ? `${GOPS_LABELS[other]}が「全て」なので行き先になりません。グループか未分類を選んでください。`
-    : `選んだ行を複製して${where}へ入れます（元は残ります。書き出しの記録は複製しません）。`;
+  copy.textContent = count ? `${where}へ複製 ${fmtNum(count)}` : `${GOPS_LABELS[other]}へ複製`;
   $(`gops-${side}-delete`).disabled = !count;
-  $(`gops-${side}-delete`).textContent = count ? `削除（${fmtNum(count)}件）` : "削除";
+  $(`gops-${side}-delete`).textContent = count ? `削除 ${fmtNum(count)}` : "削除";
 }
 
 function updateGopsMerge() {
@@ -6534,9 +6248,6 @@ function updateGopsMerge() {
   button.textContent = ready
     ? `「${groupNameOf(Number(left))}」を「${groupNameOf(Number(right))}」へ統合`
     : "左を右へ統合";
-  button.title = ready
-    ? "左の中身を全て右へ移し、左のグループを削除します。"
-    : "左右それぞれに別の実体のあるグループを選んでください（「全て」「未分類」は統合できません）。";
 }
 
 // paneからもう片方のpaneへ移す／複製する。idsを渡せばその行だけ、省略すれば選択ぶん。
@@ -6559,8 +6270,7 @@ async function gopsAssign(side, op, ids) {
     showError(err, op === "copy" ? "選択の複製" : "選択の移動");
     return;
   }
-  status.textContent = `${fmtNum(affected)}件を${where}へ`
-    + `${op === "copy" ? "複製しました" : "入れました"}。`;
+  status.textContent = `${fmtNum(affected)}件 ${op === "copy" ? "複製" : "移動"} → ${where}`;
   // moveは行が移った時点で選択の意味が変わるので外す。copyは元が残るので選択を保つ。
   if (op !== "copy") picked.forEach((id) => state.gops.selected[side].delete(id));
   state.lastPick[`gops:${side}`] = null;
@@ -6573,8 +6283,7 @@ async function gopsDeleteSelected(side) {
   const picked = [...state.gops.selected[side]];
   if (!picked.length) return;
   const ok = await confirmDialog(
-    `${GOPS_LABELS[side]}で選んだ見どころ ${fmtNum(picked.length)}件を削除しますか？`
-    + "この操作は取り消せません。",
+    `${GOPS_LABELS[side]}で選んだ見どころ ${fmtNum(picked.length)}件を削除`,
     { title: "選択の削除", confirmLabel: "削除", danger: true },
   );
   if (!ok) return;
@@ -6588,7 +6297,7 @@ async function gopsDeleteSelected(side) {
     showError(err, "選択の削除");
     return;
   }
-  status.textContent = `見どころ ${fmtNum(picked.length)}件を削除しました。`;
+  status.textContent = `${fmtNum(picked.length)}件削除`;
   // 消えた範囲を別tabのplayerが観たまま残さない。
   const seen = markPlayer.watching();
   if (seen && picked.includes(seen.id)) markPlayer.close();
@@ -6607,16 +6316,13 @@ async function mergeGopsGroups() {
   const into = groupNameOf(Number(right));
   const stats = gopsStats(left);
   const ok = await confirmDialog(
-    `グループ「${from}」の見どころ ${fmtNum(stats.marks)}件を「${into}」へ移し、`
-    + `「${from}」を削除します。`
-    + `「${into}」の並びの後ろへ順番を保ったまま付きます。`,
+    `「${from}」の ${fmtNum(stats.marks)}件を「${into}」の末尾へ移し、「${from}」を削除`,
     { title: "グループの統合", confirmLabel: "統合する", danger: true },
   );
   if (!ok) return;
   try {
     const result = await apiSend("POST", `/api/groups/${left}/merge`, { into: Number(right) });
-    $("gops-status").textContent =
-      `「${from}」を「${into}」へ統合しました（見どころ ${fmtNum(result.bookmarks)}件）。`;
+    $("gops-status").textContent = `${from} → ${into}（${fmtNum(result.bookmarks)}件）`;
   } catch (err) {
     $("gops-status").textContent = err.message;
     showError(err, "グループの統合");
@@ -6652,7 +6358,7 @@ function bindGroupOps() {
     // 左から流し込めるようにする。
     setGopsSide("right", String(group.id));
     state.gops.selected.right.clear();
-    const text = `グループ「${group.name}」を作り、右のpaneに出しました。`;
+    const text = `＋ ${group.name} → 右`;
     $("gops-status").textContent = text;
     showToast(text);
     renderGroupViews();
@@ -6700,6 +6406,9 @@ function bindGroupOps() {
 const CLIP_KIND_LABELS = {
   clip: "切り出し", overlay: "焼き込み切り抜き", nobgm: "BGM除去", reel: "連結",
   work: "作品", still: "スクショ", subtitle: "字幕file", unknown: "規約外の名前",
+  // gifter 1人ぶんのハイライトを繋いだ1本(<配信者>/LiveHightlite_マージ済み)。録画1本に
+  // 属さないので録画の欄は空で、範囲の欄も「—」になる。素性は週とコイン数で名乗る。
+  highlight: "ハイライト連結",
 };
 
 // 素材版の印を持つのはスクショだけ(切り出しは種別そのものが版を名乗る)。どの版から撮った
@@ -6716,6 +6425,11 @@ function clipFileKindLabel(item) {
   // 字幕fileは書式で使い道が違う（SRTは装飾なし・ASSは焼き込みと同じテロップの装飾つき）。
   if (item.kind === "subtitle" && item.subtitle_format) {
     return `${label}（${item.subtitle_format.toUpperCase()}）`;
+  }
+  // highlightの束は範囲を持たないので、種別の欄で週とコイン数を名乗る。ここで名乗らないと
+  // 「誰の・いつの・いくらぶん」が一覧のどこにも出ない。
+  if (item.kind === "highlight" && item.week) {
+    return `${label}（${item.week}${item.coin ? ` / 🪙${fmtNum(item.coin)}` : ""}）`;
   }
   const variant = STILL_VARIANT_LABELS[item.variant];
   return item.kind === "still" && variant ? `${label}（${variant}）` : label;
@@ -6833,10 +6547,11 @@ function renderClipFiles() {
       const copy = document.createElement("button");
       copy.className = "btn btn-small";
       copy.type = "button";
-      copy.textContent = "pathをcopy";
+      copy.textContent = "⧉";
+      copy.setAttribute("aria-label", "pathをcopy");
       copy.addEventListener("click", (e) => {
         e.stopPropagation();
-        copyText(item.path, "切り出しpathをcopyしました。");
+        copyText(item.path, "copy");
       });
       const remove = document.createElement("button");
       remove.className = "btn btn-small btn-danger";
@@ -6867,15 +6582,9 @@ function renderClipFiles() {
       tr.dataset.playKey = item.path;
       // 字幕fileの行は押しても再生する物が無いので、押せる行にしない(押せる見た目にして
       // 何も起きないのは、壊れているのと見分けが付かない)。
-      if (item.kind === "subtitle") {
-        tr.title = "この切り抜きに添えた字幕fileです。「保存」で取り出せます。";
-        return;
-      }
+      if (item.kind === "subtitle") return;
       tr.classList.add("row-clickable");
       tr.tabIndex = 0;
-      tr.title = item.kind === "still"
-        ? "このスクショをこのtabのまま表示します。"
-        : "この切り出しをこのtabのまま再生します。";
       tr.addEventListener("click", (event) => {
         if (event.target.closest("button, input, select, a")) return;
         playClipFile(item);
@@ -6941,9 +6650,8 @@ function closeClipFilePlayer() {
 
 async function deleteClipFile(item) {
   const ok = await confirmDialog(
-    `この切り出しfileを消します（${item.filename}）。\n${item.path}\n`
-    + "元録画と見どころの行は残るので、同じ範囲を出し直せます。"
-    + (item.kind === "subtitle" ? "" : "\n添えた字幕fileも一緒に消えます。"),
+    `${item.filename}\n${item.path}`
+    + (item.kind === "subtitle" ? "" : "\n字幕fileも消えます"),
     { title: "切り出しfileの削除", confirmLabel: "削除する", danger: true },
   );
   if (!ok) return;
@@ -6951,8 +6659,8 @@ async function deleteClipFile(item) {
     const params = `root=${encodeURIComponent(item.root)}&name=${encodeURIComponent(item.name)}`;
     const result = await apiSend("DELETE", `/api/clips/file?${params}`);
     const subs = (result.subtitle_files || []).length;
-    showToast(`切り出し ${item.filename}（${fmtBytes(result.freed_bytes)}）を削除しました。`
-      + (subs ? `字幕file ${fmtNum(subs)}件も消しました。` : ""));
+    showToast(`削除 ${item.filename}（${fmtBytes(result.freed_bytes)}）`
+      + (subs ? ` / 字幕 ${fmtNum(subs)}` : ""));
     // 観ていたfileを消したまま再生枠へ残さない(実体の無いものを指し続けることになる)。
     if ($("clip-file-head").textContent === item.filename) closeClipFilePlayer();
     loadClipFiles();
@@ -6972,9 +6680,8 @@ async function exportCuts() {
   // 書き出すと、見えていない行が黙ってqueueへ入る。
   const cuts = targetMarks();
   if (!cuts.length) {
-    $("cuts-status").textContent = "尺のある見どころが表示中にありません。";
-    showToast("尺のある見どころが表示中にありません。", "error",
-      { title: "切り出しの一括書き出し" });
+    $("cuts-status").textContent = "";
+    showToast("尺のある見どころなし", "error", { title: "切り出しの一括書き出し" });
     return;
   }
   const button = $("cuts-export");
@@ -6992,8 +6699,7 @@ async function exportCuts() {
       })),
       ...clipOptions(),
     });
-    const text =
-      `${fmtNum(result.total)}件を${fmtNum(result.jobs.length)}個のjobで書き出します（Job画面で進み具合を確認できます）。`;
+    const text = `${fmtNum(result.total)}件 / job ${fmtNum(result.jobs.length)}`;
     $("cuts-status").textContent = text;
     showToast(text, null, { title: "切り出しの一括書き出し", duration: JOB_TOAST_MS });
   } catch (err) {
@@ -7008,8 +6714,8 @@ async function makeReel() {
   // 繋がる(選択した分だけを繋ぐ場合もその順序のまま)ので、並び=完成の構成になる。
   const cuts = targetMarks();
   if (!cuts.length) {
-    $("cuts-status").textContent = "尺のある見どころが表示中にありません。";
-    showToast("尺のある見どころが表示中にありません。", "error", { title: "切り出しの連結" });
+    $("cuts-status").textContent = "";
+    showToast("尺のある見どころなし", "error", { title: "切り出しの連結" });
     return;
   }
   const button = $("cuts-reel");
@@ -7026,7 +6732,7 @@ async function makeReel() {
       })),
       variant: $("cuts-variant").dataset.value || "source",
     });
-    const text = `${fmtNum(result.parts)}件を1本に連結します（Job画面で進み具合を確認できます）。`;
+    const text = `${fmtNum(result.parts)}件 → 1本`;
     $("cuts-status").textContent = text;
     showToast(text, null, { title: "切り出しの連結", duration: JOB_TOAST_MS });
   } catch (err) {
@@ -7041,9 +6747,6 @@ async function makeReel() {
 // 型が1つも無ければ作品は作れない。可否はここだけが知っているので、押せるかどうかを決める
 // renderMarksHead から読めるよう外に置く(あちらが毎回書き直すため、局所変数では消える)。
 let workPresetsReady = false;
-// 型の一覧を引けたか。引けていない状態を「型がありません」と名乗ると、buttonのtooltipが
-// 間違った対処(設定画面で型を作れ)を指示することになる — selectの文言とも食い違う。
-let workPresetsKnown = false;
 
 async function loadWorkPresets() {
   const select = $("cuts-preset");
@@ -7051,7 +6754,6 @@ async function loadWorkPresets() {
     const result = await apiSend("GET", "/api/clip-presets");
     const presets = result.presets || [];
     workPresetsReady = presets.length > 0;
-    workPresetsKnown = true;
     fillSpanPresets(presets);
     select.replaceChildren(
       ...(workPresetsReady
@@ -7061,12 +6763,11 @@ async function loadWorkPresets() {
           option.textContent = preset.name;
           return option;
         })
-        // 空のまま押させると、queueへ載ってから落ちる。理由と直し方をその場に出す。
-        : [new Option("型がありません（設定画面で作成）", "")]),
+        // 空のまま押させると、queueへ載ってから落ちる。
+        : [new Option("型なし", "")]),
     );
   } catch (err) {
     workPresetsReady = false;
-    workPresetsKnown = false;
     select.replaceChildren(new Option(`型を読めません（${err.message}）`, ""));
   }
   renderMarksHead();
@@ -7131,8 +6832,7 @@ function bindRowReorder(tr, mark, rows) {
       showError(err, "書き出し順の並べ替え");
       return;
     }
-    $("marks-status").textContent =
-      `${fmtNum(carried.length)}件を並べ替えました（書き出し順が変わります）。`;
+    $("marks-status").textContent = `${fmtNum(carried.length)}件を並べ替え`;
     await loadMarks();
   });
 }
@@ -7142,8 +6842,8 @@ function bindRowReorder(tr, mark, rows) {
 async function previewWork(announce) {
   const group = selectedGroup();
   if (!group) {
-    $("cuts-status").textContent = "グループを選んでください。";
-    if (announce) showToast("グループを選んでください。", "error", { title: "作品の下見" });
+    $("cuts-status").textContent = "グループ未選択";
+    if (announce) showToast("グループ未選択", "error", { title: "作品の下見" });
     return;
   }
   const presetId = $("cuts-preset").value;
@@ -7153,18 +6853,16 @@ async function previewWork(announce) {
       `/api/groups/${group.id}/work-plan${presetId ? `?preset_id=${presetId}` : ""}`,
     );
     const bits = [
-      `${fmtNum(plan.scene_count)}シーン / 合計 ${fmtDuration(plan.requested_seconds)}`,
-      `焼く: ${plan.burns.length ? plan.burns.join("・") : "なし（素材のまま繋ぎます）"}`,
+      `${fmtNum(plan.scene_count)}シーン / ${fmtDuration(plan.requested_seconds)}`,
+      `焼く: ${plan.burns.length ? plan.burns.join("・") : "なし"}`,
     ];
-    if (plan.tighten) bits.push("間を詰めます");
-    if (plan.upscale) bits.push("高画質化します（GPUを長時間使います）");
+    if (plan.tighten) bits.push("詰め");
+    if (plan.upscale) bits.push("高画質化");
     // 「前回の中間が在る」は事実で、「焼き直さない」ではない。焼き込みは設定・event・
     // 文字起こしまで見る別のcache判定を持つので、そちらが焼き直すと決めればこの数は当てにならない。
     const ready = plan.scenes.filter((s) => s.part_ready).length;
-    if (ready) bits.push(`前回の中間が在る: ${fmtNum(ready)}シーン（${fmtBytes(plan.cache_bytes)}）`);
-    if (plan.blocking.length) {
-      bits.push(`作れないシーン: ${plan.blocking.join("・")}番目（素材かSessionがありません）`);
-    }
+    if (ready) bits.push(`中間 ${fmtNum(ready)}（${fmtBytes(plan.cache_bytes)}）`);
+    if (plan.blocking.length) bits.push(`不可: ${plan.blocking.join("・")}番目`);
     $("cuts-status").textContent = bits.join(" / ");
     if (announce) showToast(bits, null, { title: `作品の下見（${group.name}）` });
     return plan;
@@ -7180,8 +6878,8 @@ async function makeWork() {
   // 組み立てた並びが食い違う余地が生まれる)。
   const group = selectedGroup();
   if (!group) {
-    $("cuts-status").textContent = "グループを選んでください。";
-    showToast("グループを選んでください。", "error", { title: "作品の書き出し" });
+    $("cuts-status").textContent = "グループ未選択";
+    showToast("グループ未選択", "error", { title: "作品の書き出し" });
     return;
   }
   const button = $("cuts-work");
@@ -7191,8 +6889,7 @@ async function makeWork() {
     // 再描画がそれを消してしまう(同じ形の退行を型の有無で一度出している)。
     const plan = await previewWork();
     if (plan && plan.blocking.length) {
-      const blocked =
-        `${plan.blocking.join("・")}番目のシーンに素材がありません。直してから押してください。`;
+      const blocked = `${plan.blocking.join("・")}番目のシーンに素材なし`;
       $("cuts-status").textContent = blocked;
       showToast(blocked, "error", { title: "作品の書き出し" });
       button.disabled = false;
@@ -7203,7 +6900,7 @@ async function makeWork() {
     const result = await apiSend("POST", `/api/groups/${group.id}/work`, {
       preset_id: presetId ? Number(presetId) : null,
     });
-    const text = `${fmtNum(result.scenes)}シーンを1本の作品にします（Job画面で進み具合を確認できます）。`;
+    const text = `${fmtNum(result.scenes)}シーン → 作品1本`;
     $("cuts-status").textContent = text;
     showToast(text, null, { title: "作品の書き出し", duration: JOB_TOAST_MS });
   } catch (err) {
@@ -7252,16 +6949,31 @@ function shuttleStop() {
   $("video").pause();
 }
 
-// 枠を録画の実比率に合わせる。枠を列いっぱいに広げていた頃は、横長の録画は上下に、
+// 枠を素材の実比率に合わせる。枠を列いっぱいに広げていた頃は、横長の録画は上下に、
 // 縦動画は左右に黒帯が出て、画は枠の半分ほどしか使えなかった。比率が読めるのは
 // metadataが届いてからなので、それまでは枠いっぱい(vd-has-arを付けない)。
-function applyVideoAspect() {
-  const video = $("video");
-  const w = video.videoWidth;
-  const h = video.videoHeight;
+//
+// **比率(--vd-ar)だけでは枠の大きさが決まらない。** 置換要素は両寸autoだと実寸で出るため、
+// 上限に届かない素材(320x640)だけ一回り小さく出ていた。列の実幅から高さの上限を出すのに
+// 高さ/幅(--vd-ar-inv)が要る(CSS: .vd-video.vd-has-ar の但し書き)。
+function applyMediaAspect(el) {
+  const w = el.videoWidth || el.naturalWidth || 0;
+  const h = el.videoHeight || el.naturalHeight || 0;
   const known = w > 0 && h > 0;
-  video.style.setProperty("--vd-ar", known ? `${w} / ${h}` : "");
-  video.classList.toggle("vd-has-ar", known);
+  el.style.setProperty("--vd-ar", known ? `${w} / ${h}` : "");
+  el.style.setProperty("--vd-ar-inv", known ? String(h / w) : "");
+  el.classList.toggle("vd-has-ar", known);
+}
+
+// **解像度は配信中に変わる。** 配信者側の適応bitrateで1本の録画の中でも320x640〜640x1280が
+// 入れ替わる(実例で約100回)ので、metadataの1回だけでは枠が切替のたび実寸へ戻る。
+// 内在寸法が変わったことは<video>のresizeが知らせる。emptiedは閉じた時に印を落とす役。
+function bindMediaAspect(el) {
+  if (!el) return;
+  ["loadedmetadata", "resize", "load", "emptied"].forEach((ev) =>
+    el.addEventListener(ev, () => applyMediaAspect(el)),
+  );
+  applyMediaAspect(el);
 }
 
 // ===== 倍速再生 =====
@@ -7403,9 +7115,8 @@ async function copyText(text, message) {
   } catch {
     // clipboard APIはhttp origin等で拒否されることがある。手動copyできるよう値を出す。
     // 本文はそのままstatusへ(toastへ流すと長文が画面を覆う)。
-    $("player-status").textContent = `copyできませんでした: ${text}`;
-    showToast("copyできませんでした。値は再生画面の状態欄に出しています。", "error",
-      { title: "clipboardへのcopy" });
+    $("player-status").textContent = `copy失敗: ${text}`;
+    showToast("copy失敗（値は状態欄に）", "error", { title: "clipboardへのcopy" });
   }
 }
 
@@ -7482,7 +7193,6 @@ function streamerNameCell(streamer) {
   const gone = document.createElement("span");
   gone.className = "vd-src vd-src-none";
   gone.textContent = "実体なし";
-  gone.title = "素材(.ts)もmp4も残っていないため、文字起こしも再生もできません。";
   wrap.appendChild(gone);
   return wrap;
 }
@@ -7496,19 +7206,17 @@ function renderSemantic(status) {
   if (!status) {
     button.disabled = false;
     note.textContent = "";
-    button.title = "";
     return;
   }
   let reason = "";
   if (!status.enabled) {
-    reason = "意味検索が無効です（TICTOK_SEMANTIC_ENABLED を確認してください）。";
+    reason = "無効（TICTOK_SEMANTIC_ENABLED）";
   } else if (!status.available) {
-    reason = `埋め込みmodelに接続できません（${status.base_url || "接続先未設定"}）。`;
+    reason = `model未接続（${status.base_url || "接続先未設定"}）`;
   } else if (status.building) {
-    reason = "意味検索indexを更新中です。完了までお待ちください。";
+    reason = "更新中…";
   }
   button.disabled = Boolean(reason);
-  button.title = reason;
   // 押せない理由が無いときは「押す理由」を出す。indexが取り残されたぶんは検索結果から
   // 落としているので、更新しない限り出てこないことがuserに見えていないと押されない。
   const stale = status.stale_passages || 0;
@@ -7517,10 +7225,9 @@ function renderSemantic(status) {
     note.textContent = reason;
   } else if (stale || unindexed) {
     const parts = [];
-    if (stale) parts.push(`${fmtNum(stale)}件が張り直し後で検索から除外中`);
-    if (unindexed) parts.push(`${fmtNum(unindexed)}件が未index`);
-    // 自動でも埋まる(sweepの周期)ので、今すぐ要るかどうかをuserが決められるように書く。
-    note.textContent = `${parts.join(" / ")}。自動生成のsweepでも埋まりますが、今すぐ検索対象へ戻すならindexを更新してください。`;
+    if (stale) parts.push(`除外中 ${fmtNum(stale)}`);
+    if (unindexed) parts.push(`未index ${fmtNum(unindexed)}`);
+    note.textContent = parts.join(" / ");
   } else {
     note.textContent = "";
   }
@@ -7564,37 +7271,6 @@ const BULK_SKIP_LABELS = {
 // (順序を持たないobjectに表の並びを預けると、種別を足したときに列が任意の位置へ入る)。
 const BULK_KIND_ORDER = ["transcribe", "laugh", "voice", "gain", "overlay", "upscale",
   "reprocess", "audionorm", "pack", "delete_mp4"];
-// 種別ごとの「何に触れて何を残すか」。列見出しのhoverと、投入前の確認に出す。恒常的な
-// 説明を確認paneだけに置くと、押す前(=どの列を押すか選ぶとき)には読めない。
-const BULK_KIND_NOTES = {
-  transcribe: "字幕の焼き込みにも使います。GPUを1本ずつ直列に使うため、まとめて投入しても"
-    + "同時には走りません。",
-  laugh: "音声から笑い声を検出し、シーン検索の探し方「笑い声」で一覧できるようにします。語では"
-    + "なく音が根拠なので、文字起こしに「笑」と書かれていなくても拾います（文字起こしは笑い声を"
-    + "文字にしません）。コラボ・Battle中は数えません（相手の声が混ざり、どの笑いが配信者の"
-    + "ものかを音から決められないため）。解析済みでも一覧へ入っていない録画・共演を外す前に"
-    + "数えた録画は対象になり、その場合は数十msで終わります。",
-  voice: "音声から「誰か喋っているか」を解析します（VAD）。再生画面の「無音飛ばし」と"
-    + "「無言早送り」がこの解析を使い、無ければ最初に使った人がその場で待ちます"
-    + "（40〜84分の録画で6〜13秒）。GPUは使わず、残すのは録画1本あたり数百kBのsidecarだけ"
-    + "です。判定の閾値は使うたびに掛けるので、設定を変えても解析はやり直しになりません。",
-  gain: "再生時に音量を揃えるためのgain曲線を作ります。録画のfileは書き換えず、当てるべき音量の"
-    + "時系列だけをsidecarへ残すので、原本の音声はそのままです。無ければその録画は音量が"
-    + "揃わないまま再生されます（再生画面のcheckboxで切り替えられます）。GPUは使わず、"
-    + "2.9時間の録画で17秒・573kBです。目標ラウドネスを変えると作り直しになります。",
-  overlay: "コメント・ギフトを映像へ焼き込んだmp4を作ります。再encodeのため、元動画と同程度"
-    + "以上の容量を出力先に使います。",
-  upscale: "AIで高画質化したmp4を作ります。再encodeのため、元動画と同程度以上の容量を"
-    + "出力先に使います。",
-  reprocess: "保持している.tsから録画を作り直します。設定「再mp4化: 元録画の音量も正規化する」"
-    + "がONなら、同時に音量も揃います。",
-  audionorm: "映像をそのまま複製し、音声だけを作り直して元のmp4と差し替えます。元のmp4は"
-    + "_backup/へ退避するので、一時的に2本分の容量を使います。",
-  pack: "素材の.tsを解像度の切れ目ごとに1 fileへ束ね直します。再encodeしないbyte連結なので、"
-    + "映像も再生も変わりません。file数だけが減ります。",
-  delete_mp4: "queueには載らず即座に消えます。対象は.tsが残っている録画だけで、作り直せない"
-    + "録画は自動で対象から外します。焼き込み・Up出力・名前を変えたfileは残ります。",
-};
 // 作らずに消す種別。queueへは載せず専用APIで即時に実行するので、文言もbuttonも分ける。
 const BULK_DELETE_KIND = "delete_mp4";
 // 出力を作らない種別。元mp4の容量も所要の実測比も意味を持たないので、見積りの出し方を分ける。
@@ -7630,7 +7306,7 @@ const BULK_NO_REDO_KINDS = [BULK_PACK_KIND, BULK_DELETE_KIND];
 async function loadBulk() {
   // 集計は録画数ぶんのfile確認を伴うので数秒かかることがある。待っている間に古い/空の表を
   // そのまま出すと「表示しようとしているのか、対象が無いのか」が読めない。先に集計中を出す。
-  $("bulk-summary").textContent = "集計中…（録画数が多いと数秒かかります）";
+  $("bulk-summary").textContent = "集計中…";
   if (!state.bulk.length) setListState($("bulk-empty"), "loading");
   let data;
   try {
@@ -7732,20 +7408,19 @@ function bulkDetailRow(streamer, kind) {
   // 「この配信者の録画はありません。」と断定していた(理由は表の上端の薄字1行のみ)。
   if (rows === false) {
     cell.className = "list-failed";
-    cell.textContent = "録画一覧を取得できませんでした（0件という意味ではありません）。";
+    cell.textContent = "取得失敗";
     return tr;
   }
   if (!rows.length) {
-    cell.textContent = "この配信者の録画はありません。";
+    cell.textContent = "—";
     return tr;
   }
 
-  // 何をする場所なのかを名乗らせる。tool列が「投入できる全て / 選択を解除」から始まって
-  // いた頃は、この一覧が「まるごと投入の対象を眺める場所」なのか「選んで投入する場所」なのか
-  // が読めず、上に開いているまるごと投入のbuttonがそのまま押されていた。
+  // 何をする場所なのかを名乗らせる。この一覧が「まるごと投入の対象を眺める場所」なのか
+  // 「選んで投入する場所」なのかが読めないと、上のまるごと投入がそのまま押される。
   const title = document.createElement("div");
   title.className = "bulk-confirm-head";
-  title.textContent = `録画を選んで${kind === BULK_DELETE_KIND ? "削除" : "投入"}`;
+  title.textContent = kind === BULK_DELETE_KIND ? "選んで削除" : "選んで投入";
   cell.appendChild(title);
 
   const tools = document.createElement("div");
@@ -7753,11 +7428,13 @@ function bulkDetailRow(streamer, kind) {
   const selectAll = document.createElement("button");
   selectAll.className = "btn btn-small";
   selectAll.type = "button";
-  selectAll.textContent = "投入できる全て";
+  selectAll.textContent = "全";
+  selectAll.setAttribute("aria-label", "投入できる全てを選ぶ");
   const clear = document.createElement("button");
   clear.className = "btn btn-small";
   clear.type = "button";
-  clear.textContent = "選択を解除";
+  clear.textContent = "✕";
+  clear.setAttribute("aria-label", "選択を解除");
   const count = document.createElement("span");
   count.className = "vd-summary";
   const spacer = document.createElement("span");
@@ -7782,8 +7459,7 @@ function bulkDetailRow(streamer, kind) {
 
   const eligible = rows.filter((r) => r.eligible);
   const paint = () => {
-    count.textContent =
-      `選択 ${fmtNum(state.bulkSelected.size)} / 投入できる ${fmtNum(eligible.length)}本`;
+    count.textContent = `${fmtNum(state.bulkSelected.size)}/${fmtNum(eligible.length)}`;
     run.textContent = kind === BULK_DELETE_KIND
       ? `選んだ${fmtNum(state.bulkSelected.size)}本のmp4を削除`
       : `選んだ${fmtNum(state.bulkSelected.size)}本を投入`;
@@ -7816,7 +7492,7 @@ function bulkDetailRow(streamer, kind) {
       });
     }
     const statusText = row.eligible
-      ? "投入できます"
+      ? ""
       : (BULK_SKIP_LABELS[row.reason] || row.reason || "対象外");
     // seconds=0は「尺が0の録画」ではなく未測定。0:00と出すと見積りの母数から抜けている
     // ことが読めなくなるので、測っていないことをそのまま出す。
@@ -7862,7 +7538,7 @@ async function askBulk(uniqueId, recordingIds, kind) {
   // (多くは「未処理すべて」)を名乗り続け、そこで「この内容で投入」を押すと選んだ数本では
   // なく全件が投入される。押した側は右上の薄字1行しか見ていないので気付けない。
   hideBulkConfirm();
-  $("bulk-summary").textContent = "見積りを計算中…";
+  $("bulk-summary").textContent = "見積り中…";
   const params = new URLSearchParams({ kind, redo: redo ? "1" : "0" });
   if (uniqueId) params.set("unique_id", uniqueId);
   (recordingIds || []).forEach((id) => params.append("recording_id", id));
@@ -7895,22 +7571,13 @@ function appendBulkConfirm(tbody) {
 
   const head = document.createElement("div");
   head.className = "bulk-confirm-head";
-  // 何を投入しようとしているのかは、確認の見出しで名乗らせる。「この内容で投入」だけが
-  // 出ていた頃は、その内容がどこにも書かれていなかった。
-  head.textContent = "投入前の確認 — "
-    + [BULK_LABELS[estimate.kind],
-       estimate.unique_id ? `@${estimate.unique_id}` : "全配信者",
-       pending.recordingIds ? `選んだ${fmtNum(pending.recordingIds.length)}本` : "未処理すべて",
-       estimate.redo ? "処理済みも作り直す" : null,
-      ].filter(Boolean).join(" / ");
+  // 何を投入しようとしているのかは、確認の見出しで名乗らせる。
+  head.textContent = [BULK_LABELS[estimate.kind],
+    estimate.unique_id ? `@${estimate.unique_id}` : "全配信者",
+    pending.recordingIds ? `選んだ${fmtNum(pending.recordingIds.length)}本` : "未処理すべて",
+    estimate.redo ? "作り直す" : null,
+  ].filter(Boolean).join(" / ");
   cell.appendChild(head);
-
-  // その種別が何をするか。列見出しのhoverと同じ文で、押す直前にもう一度出す(hoverは
-  // pointerを外すと消えるので、確認の場に残らない)。
-  const what = document.createElement("div");
-  what.className = "result-sub-note";
-  what.textContent = BULK_KIND_NOTES[estimate.kind] || "";
-  cell.appendChild(what);
 
   const chips = document.createElement("div");
   chips.className = "a-kpibar";
@@ -7925,48 +7592,14 @@ function appendBulkConfirm(tbody) {
     : "";
   cell.appendChild(skipped);
 
-  // 容量は「合計」ではなく空きと突き合わせて出す。jobは同時実行数ぶんしか走らないので、
-  // 山になるのは中間fileを抱えるその本数ぶんで、合計値だけ見せると判断を誤らせる。
+  // 空き容量が下限を割っていると投入は通らない。押せないbuttonの理由だけを残す。
   const disk = estimate.disk || {};
-  const volumes = Object.entries(disk.volumes || {});
-  const free = volumes.length ? Math.min(...volumes.map(([, v]) => v.free_bytes)) : null;
-  const notes = [];
-  // 文字起こしはfileを作らない(書くのはDBのtranscript行だけ)。空き容量を並べると、
-  // 確かめる必要の無い数字を確かめさせることになる。
-  if (free !== null && !BULK_NO_DISK_KINDS.includes(estimate.kind)) {
-    // ts結合が要るのは素材と同じだけの空きで、元mp4の容量とは関係が無い。ここへ元動画の
-    // 合計を並べると、確かめるべき数字を取り違える。
-    notes.push(estimate.kind === BULK_PACK_KIND
-      ? `書き込み先の最小空き容量は ${fmtBytes(free)} です。`
-      : `書き込み先の最小空き容量は ${fmtBytes(free)}、`
-        + `同時に走るぶんの元動画は ${fmtBytes(estimate.largest_source_bytes)} です。`);
-  }
-  if ((disk.low_volumes || []).length && !BULK_NO_DISK_KINDS.includes(estimate.kind)) {
-    notes.push(`空き容量が下限を下回っているvolumeがあります（${disk.low_volumes.join(", ")}）。`
-      + "この状態では投入できません。");
-  }
-  // 「何が起きるか」の恒常的な説明は列見出しのhoverと同じ文(BULK_KIND_NOTES)を使う。
-  // 押す前と押した後で違う言葉になると、確認しているものが同じだと読めない。
-  if (estimate.kind === "overlay" || estimate.kind === "upscale") {
-    notes.push("処理中は出力とは別に中間fileの領域も必要です。");
-  }
-  if (estimate.kind === BULK_PACK_KIND) {
-    notes.push("束ねる間は元segmentを残したまま検証するため、その録画の素材と同じだけの"
-      + "空きが一時的に要ります（足りない録画はjobが空き容量不足として止まります）。");
-  }
-  if (estimate.kind === BULK_DELETE_KIND) {
-    notes.push("削除後は同じ.tsから再mp4化で作り直せます。");
-    // .tsが無い録画は、そのmp4が唯一の再取得不能資産。対象から外していることを、
-    // 内訳の1行ではなく警告として名指しで出す。
-    const noHls = (estimate.skipped || {}).no_hls || 0;
-    if (noHls) {
-      notes.push(`⚠ .tsが残っていない録画が${fmtNum(noHls)}本あります。`
-        + "これらのmp4は作り直せないため削除しません（対象から外しています）。");
-    }
-  }
+  const low = !BULK_NO_DISK_KINDS.includes(estimate.kind) && (disk.low_volumes || []).length
+    ? `空き不足: ${disk.low_volumes.join(", ")}`
+    : "";
   const warn = document.createElement("div");
   warn.className = "form-message";
-  warn.textContent = notes.join(" ");
+  warn.textContent = low;
   cell.appendChild(warn);
 
   const tools = document.createElement("div");
@@ -8009,10 +7642,6 @@ function appendBulkConfirm(tbody) {
     // 全配信者ぶんの確認からは開けない。録画一覧は配信者1人ぶんを引くもので、ここで
     // 勝手に1人へ絞ると、確認に出ている本数と開く一覧の母集合が食い違う。
     pick.disabled = !pending.uniqueId;
-    pick.title = pending.uniqueId
-      ? `@${pending.uniqueId}の録画を1本ずつ選んで${estimate.kind === BULK_DELETE_KIND
-        ? "削除" : "投入"}します（表の本数を押すのと同じ一覧が開きます）。`
-      : "上の「配信者」で1人を選ぶと、録画を1本ずつ選べます。";
     pick.addEventListener("click", () => {
       if (!pending.uniqueId) return;
       toggleBulkCell(pending.uniqueId, pending.kind);
@@ -8033,15 +7662,15 @@ function appendBulkConfirm(tbody) {
     ["対象", `${fmtNum(estimate.recordings)}本`],
     ["総録画時間", fmtDuration(estimate.seconds)],
     ["所要(実測比)", estimate.eta_seconds === null
-      ? "実績が無いため不明"
-      : `約${fmtDuration(estimate.eta_seconds)}（過去${fmtNum(estimate.eta_samples)}件から）`],
+      ? "—"
+      : `約${fmtDuration(estimate.eta_seconds)}（n=${fmtNum(estimate.eta_samples)}）`],
   ] : [
     ["対象", `${fmtNum(estimate.recordings)}本`],
     ["総録画時間", fmtDuration(estimate.seconds)],
     ["元mp4の合計", fmtBytes(estimate.source_bytes)],
     ["所要(実測比)", estimate.eta_seconds === null
-      ? "実績が無いため不明"
-      : `約${fmtDuration(estimate.eta_seconds)}（過去${fmtNum(estimate.eta_samples)}件から）`],
+      ? "—"
+      : `約${fmtDuration(estimate.eta_seconds)}（n=${fmtNum(estimate.eta_samples)}）`],
   ]);
 }
 
@@ -8086,16 +7715,10 @@ function bulkCountCell(streamer, kind, redo) {
   return wrap;
 }
 
-// 押せない理由。押してから409や503で知るのでは遅いので、buttonの状態と同じ場所で決める。
-function bulkCellBlockReason(streamer, kind, count) {
-  if (kind === BULK_TRANSCRIBE_KIND && state.sttAvailable === false) {
-    return "文字起こし機能が無効です。設定を確認してください。";
-  }
-  if (!count) {
-    return `${BULK_LABELS[kind]}の対象がありません`
-      + ((streamer.done || {})[kind] ? "（すべて処理済みです）。" : "。");
-  }
-  return "";
+// 押せるcellか。押してから409や503で知るのでは遅いので、buttonの状態と同じ場所で決める。
+function bulkCellBlocked(kind, count) {
+  if (kind === BULK_TRANSCRIBE_KIND && state.sttAvailable === false) return true;
+  return !count;
 }
 
 function bulkHeadRow(rows, redo) {
@@ -8108,7 +7731,7 @@ function bulkHeadRow(rows, redo) {
     return th;
   };
   head("配信者");
-  head("録画", "num").title = "この配信者の録画の行数です（実体の無い録画も含みます）。";
+  head("録画", "num");
   BULK_KIND_ORDER.forEach((kind) => {
     const th = document.createElement("th");
     // 消す種別の列は列ごと印を付ける(btn-dangerだけではhoverするまで見分けが付かない)。
@@ -8123,19 +7746,9 @@ function bulkHeadRow(rows, redo) {
       : "btn btn-compact bulk-head-btn";
     button.type = "button";
     const total = rows.reduce((sum, s) => sum + bulkTargetCount(s, kind, redo), 0);
-    const scope = state.bulkOnly ? `@${state.bulkOnly}` : "全配信者";
     button.textContent = BULK_LABELS[kind];
     button.disabled = total === 0
       || (kind === BULK_TRANSCRIBE_KIND && state.sttAvailable === false);
-    button.title = button.disabled
-      ? (kind === BULK_TRANSCRIBE_KIND && state.sttAvailable === false
-        ? "文字起こし機能が無効です。設定を確認してください。"
-        : `${scope}に${BULK_LABELS[kind]}の対象がありません。`)
-      : `${scope}の${BULK_LABELS[kind]} ${fmtNum(total)}本をまとめて処理します`
-        + "（押すと投入前の確認が開きます）。"
-        // 見出しは「まるごと」しか持たない。1本ずつ選ぶ道が別に在ることを、押す前に
-        // 名乗っておく(確認paneにも同じ操作を並べている)。
-        + `1本ずつ選ぶときは、この列の本数を押します。${BULK_KIND_NOTES[kind] || ""}`;
     button.addEventListener("click", () => {
       closeBulkRows();
       askBulk(state.bulkOnly, null, kind);
@@ -8146,9 +7759,7 @@ function bulkHeadRow(rows, redo) {
     th.append(button, count);
     tr.appendChild(th);
   });
-  head("comment索引", "num").title =
-    "コメントをシーン検索で引ける録画の数です。索引は録画の確定時に作られるので、"
-    + "ここから投入する操作はありません。";
+  head("comment索引", "num");
   head("総時間", "num");
   return tr;
 }
@@ -8162,13 +7773,7 @@ function renderBulk() {
     ? state.bulk.filter((s) => s.unique_id === state.bulkOnly)
     : state.bulk;
 
-  // 恒常的な説明はここに1つだけ置く。種別ごとの説明は列見出しのhoverと確認paneが持つ
-  // (8種別ぶんを常時並べると、読むべき数字が文章に埋もれる)。
-  $("bulk-note").textContent =
-    "表の本数はそのまま押せます。cellを押すとその配信者ぶんの見積りと録画一覧が開き、"
-    + "録画を選んで投入できます（列見出しを押すと表示中の全配信者ぶんをまとめて投入します）。"
-    + "所要時間はこのserverで実際に完了した"
-    + "同種jobの実測から出しています（実績が無い種別は不明と表示します）。";
+  $("bulk-note").textContent = "";
   // 投入結果や失敗の文言(bulkNote)は、次に条件を変えるまで残す。renderのたびに既定の
   // 集計文へ戻していた頃は、投入した瞬間に「入れました」が消えて何も起きていないように
   // 見えていた。
@@ -8177,8 +7782,8 @@ function renderBulk() {
     .filter(([, total]) => total > 0);
   $("bulk-summary").textContent = state.bulkNote
     || (totals.length
-      ? `未処理: ${totals.map(([kind, total]) => `${BULK_LABELS[kind]} ${fmtNum(total)}本`).join(" / ")}`
-      : "未処理の対象はありません。");
+      ? `未処理: ${totals.map(([kind, total]) => `${BULK_LABELS[kind]} ${fmtNum(total)}`).join(" / ")}`
+      : "");
 
   $("bulk-head").replaceChildren(bulkHeadRow(rows, redo));
 
@@ -8201,12 +7806,8 @@ function renderBulk() {
       button.classList.toggle("bulk-cell-open", open);
       button.setAttribute("aria-expanded", open ? "true" : "false");
       button.appendChild(bulkCountCell(streamer, kind, redo));
-      const blocked = bulkCellBlockReason(streamer, kind, count);
-      button.disabled = Boolean(blocked);
-      button.title = blocked
-        || `${BULK_LABELS[kind]} ${fmtNum(count)}本 / 処理済 `
-          + `${fmtNum((streamer.done || {})[kind] || 0)}本。`
-          + "押すと見積りと録画一覧が開き、録画を選んで投入できます。";
+      button.disabled = bulkCellBlocked(kind, count);
+      button.setAttribute("aria-label", `${BULK_LABELS[kind]} ${fmtNum(count)}`);
       button.addEventListener("click", () => toggleBulkCell(streamer.unique_id, kind));
       cells.push(button);
     });
@@ -8239,8 +7840,7 @@ async function runBulk(button) {
   const deleting = pending.kind === BULK_DELETE_KIND;
   // 削除は取り消せない。確認行だけで実行させず、もう一段だけ明示的に確かめる。
   if (deleting && !await confirmDialog(
-    `${fmtNum(pending.estimate.recordings)}本の元mp4を削除します。`
-    + "この操作は取り消せません（同じ.tsから再mp4化で作り直せます）。",
+    `元mp4 ${fmtNum(pending.estimate.recordings)}本を削除（.tsから作り直せます）`,
     { title: "元mp4の削除", confirmLabel: "削除する" })) return;
   button.disabled = true;
   try {
@@ -8256,8 +7856,8 @@ async function runBulk(button) {
     hideBulkConfirm();
     state.bulkSelected = new Set();
     state.bulkNote = deleting
-      ? `元mp4を${fmtNum(result.deleted)}本削除しました（${fmtBytes(result.freed_bytes)}）。`
-      : `${BULK_LABELS[pending.kind]} ${fmtNum(result.total)}本を投入しました。`;
+      ? `元mp4 ${fmtNum(result.deleted)}本削除（${fmtBytes(result.freed_bytes)}）`
+      : `${BULK_LABELS[pending.kind]} ${fmtNum(result.total)}本投入`;
     // 確認paneが閉じる見た目は中止と同じ。取り消せない削除の結果まで#bulk-summaryの
     // 0.68remの1行だけに置くと、何本消えたのかが押した本人にも残らない。
     showToast(state.bulkNote, null,
@@ -8410,6 +8010,8 @@ function bindDisplayPrefs() {
 }
 
 function bind() {
+  // iconの絵は後から届く。読めた時点で時間軸を引き直す入口を共通側へ預ける。
+  bindTimelineRedraw(drawTimeline);
   SEGMENTED.forEach(initSegmented);
   SEG_BARS.forEach(initSegBar);
   bindDisplayPrefs();
@@ -8449,11 +8051,12 @@ function bind() {
   });
 
   const video = $("video");
+  // IN/OUTは時間軸barの上に在る。barは面ごと移るので、掴む相手も今の持ち主にする。
   $("mark-in").addEventListener("click", () =>
-    setCut(snapToSegments(video.currentTime, "in"), state.cutOut),
+    setCut(snapToSegments(tlVideo().currentTime, "in"), state.cutOut),
   );
   $("mark-out").addEventListener("click", () =>
-    setCut(state.cutIn, snapToSegments(video.currentTime, "out")),
+    setCut(state.cutIn, snapToSegments(tlVideo().currentTime, "out")),
   );
   $("do-clip").addEventListener("click", runClip);
   $("do-still").addEventListener("click", runStill);
@@ -8597,9 +8200,11 @@ function bind() {
   // 録画を切り替えると<video>はplaybackRateを1へ戻す。選択中の倍率を入れ直す。
   video.addEventListener("loadedmetadata", () => {
     applyRate();
-    applyVideoAspect();
     onTick();
   });
+  // 枠の大きさを素材のpixel数に依らせない。4面とも同じ寸法で出す約束なので、見どころ・
+  // 出力済みclip(スクショの<img>を含む)も同じ扱いにする。
+  [video, $("mark-video"), $("clip-file-video"), $("clip-file-image")].forEach(bindMediaAspect);
   // 幅が1px変わるだけで波形の畳み込みcacheが外れ、全尺(0.1秒刻みで3時間なら10万点超)を
   // 畳み直すことになる。掴んで動かしている間ずっとそれを繰り返さないよう、手が止まってから
   // 1回だけ描き直す。
@@ -8727,7 +8332,7 @@ function bind() {
   // 拡大窓。drag中は窓を凍結する(追従が生きたままだとpointerの下の時刻が滑る)。
   const zoom = $("zoom");
   zoom.addEventListener("pointerdown", (event) => {
-    const win = zoomWindow(video.duration);
+    const win = zoomWindow(tlVideo().duration);
     if (!win) return;
     const mode = hitTestZoom(event);
     // 窓の移動は窓自体を凍結しない(凍結すると動かした結果が描かれない)。掴んだ時点の
@@ -8792,7 +8397,7 @@ function bind() {
   // 横scrollできるdeviceでは「押しただけで勝手に拡縮する」挙動になっていた。
   // shift+wheelはbrowserによって横成分で届く(Chrome)ぶんも拾う。
   zoom.addEventListener("wheel", (event) => {
-    if (!zoomWindow(video.duration)) return;
+    if (!zoomWindow(tlVideo().duration)) return;
     event.preventDefault();
     const pan = event.shiftKey ? (event.deltaY || event.deltaX) : event.deltaX;
     if (pan) {
@@ -8856,9 +8461,27 @@ function bind() {
   // 見どころtabのplayer。範囲の終端で止めるのはtimeupdateで見る(seek済みの位置から
   // 飛び越えることがあるので、等号ではなく通過で判定する)。
   bindInlinePlayer("mark", markPlayer, (mark) => openMark(mark));
-  // 観ている位置で端を決める2つ。時刻を打ち直すより速くて正しい。
-  $("mark-play-setin").addEventListener("click", () => setMarkEdgeFromPlayer("in"));
-  $("mark-play-setout").addEventListener("click", () => setMarkEdgeFromPlayer("out"));
+  // 見どころtabでも時間軸は同じ物を出す。描き直しの合図はこのtabのplayerから受ける ——
+  // その間シーン検索側の<video>は止めてあり、あちらのtimeupdateは来ない。
+  const markVideo = $("mark-video");
+  const onMarkTick = () => {
+    if (timelineOwner !== "marks") return;
+    drawTimeline();
+    updateTimeLabel();
+  };
+  ["timeupdate", "seeked", "loadedmetadata", "emptied"].forEach((type) =>
+    markVideo.addEventListener(type, onMarkTick));
+  // 再生線だけはframeに載せる(timeupdateは約250ms間隔で、拡大窓では1秒が数十pxあるため
+  // 線が飛び飛びに描かれる)。シーン検索側と同じ理由・同じ扱い。
+  ["play", "playing"].forEach((type) => markVideo.addEventListener(type, () => {
+    if (timelineOwner === "marks") startTimelineFrames();
+  }));
+  ["pause", "ended"].forEach((type) => markVideo.addEventListener(type, () => {
+    if (timelineOwner === "marks") stopTimelineFrames();
+  }));
+  // 手で止めたら確認再生(IN確認/OUT確認)の停止予約も解除する。残すと次の再生が境界で
+  // 勝手に止まる。
+  markVideo.addEventListener("pause", () => { previewStopAt = null; });
   // グループのメモ。入力欄から離れた時点で確定する(打鍵ごとには投げない)。
   bindGroupMemo("marks-group-memo", "marks-status");
   bindGroupOps();
@@ -8869,12 +8492,12 @@ function bind() {
     button.disabled = true;
     // 押した本人が見ているのはシーン検索tabなので、結果もここへ出す。別tabの欄へ書くと
     // 成功も失敗も画面に現れず、数時間かかる処理が始まったかどうかも判らない。
-    $("semantic-result").textContent = "意味検索indexを更新中…";
+    $("semantic-result").textContent = "更新中…";
     try {
       // serverは受け付けた時点で返す(構築は数時間かかることがある)。完了の件数は
       // WSのsemantic_indexで届くので、ここでは開始したことだけを出す。
       await apiSend("POST", "/api/search/semantic/build");
-      const text = "意味検索indexの構築を開始しました。進捗はJob画面で確認できます。";
+      const text = "構築を開始";
       $("semantic-result").textContent = text;
       showToast(text, null, { title: "意味検索index", duration: JOB_TOAST_MS });
     } catch (err) {
@@ -8958,11 +8581,11 @@ function onMessage(message) {
     // semantic-resultの親(#semantic-inline)はflt-modeがsemanticのときしか出ない。構築は
     // 最も長くかかる処理で、待つ間に検索modeを戻せば結果も失敗も見る手段が無くなる。
     if (message.error) {
-      $("semantic-result").textContent = `意味検索indexの構築に失敗しました: ${message.error}`;
+      $("semantic-result").textContent = `構築失敗: ${message.error}`;
       showToast(message.error, "error", { title: "意味検索indexの構築" });
     } else if (message.result) {
-      const text = `意味検索index: ${fmtNum(message.result.passages ?? 0)} passage / `
-        + `${fmtNum(message.result.hits ?? 0)}件から構築しました。`;
+      const text = `${fmtNum(message.result.passages ?? 0)} passage / `
+        + `${fmtNum(message.result.hits ?? 0)}件`;
       $("semantic-result").textContent = text;
       showToast(text);
     }
@@ -8976,10 +8599,10 @@ function onMessage(message) {
       const where = (job.result || {}).output_dir;
       const subs = (job.result || {}).subtitle_files || [];
       const subNote = subs.length
-        ? ` 字幕file ${fmtNum(subs.length)}件も出しました。`
-        : ((job.result || {}).subtitle_note ? ` ${job.result.subtitle_note}` : "");
-      const text = `一括書き出しが終わりました（${fmtNum(job.result.count ?? 0)}件）。`
-        + (where ? `出力先: ${where}` : "") + subNote;
+        ? ` / 字幕 ${fmtNum(subs.length)}`
+        : ((job.result || {}).subtitle_note ? ` / ${job.result.subtitle_note}` : "");
+      const text = `一括書き出し ${fmtNum(job.result.count ?? 0)}件`
+        + (where ? ` → ${where}` : "") + subNote;
       $("cuts-status").textContent = text;
       // cuts-statusは見どころtabの中で、他のviewへ移ると見えない。分単位で待つ処理なので
       // 待つ間に画面を離れるのが普通で、そこへだけ書くと終わったこと自体が届かない。
@@ -8998,11 +8621,11 @@ function onMessage(message) {
       const r = job.result || {};
       // 指定尺と前置きを両方出す。実録画では30秒の範囲に37秒の前置きが付いた例があるので、
       // 実尺だけを見せると「90秒のつもりが134秒」の理由が分からない。
-      const parts = [`連結しました（${fmtNum(r.parts ?? 0)}件）`];
+      const parts = [`連結 ${fmtNum(r.parts ?? 0)}件`];
       if (r.requested_seconds != null && r.lead_seconds != null) {
-        parts.push(`指定尺 ${fmtDuration(r.requested_seconds)}`
-          + ` ＋ 前置き ${fmtDuration(r.lead_seconds)}`
-          + ` ＝ 実尺 ${fmtDuration(r.output_duration_seconds ?? 0)}`);
+        parts.push(`${fmtDuration(r.requested_seconds)}`
+          + ` ＋ ${fmtDuration(r.lead_seconds)}`
+          + ` ＝ ${fmtDuration(r.output_duration_seconds ?? 0)}`);
       }
       const text = `${parts.join(" / ")}: ${r.output_path || r.filename || ""}`;
       $("cuts-status").textContent = text;
@@ -9019,11 +8642,11 @@ function onMessage(message) {
       const r = job.result || {};
       // 指定尺と実尺を両方出す。間の詰めが効くと成果物は短くなるので、実尺だけを見せると
       // 「90秒のつもりが72秒」の理由が分からない。
-      const parts = [`作品にしました（${fmtNum(r.scenes ?? 0)}シーン）`];
+      const parts = [`作品 ${fmtNum(r.scenes ?? 0)}シーン`];
       if (r.requested_seconds != null) {
-        parts.push(`指定尺 ${fmtDuration(r.requested_seconds)}`
-          + ` − 詰め ${fmtDuration(r.tightened_seconds ?? 0)}`
-          + ` ＝ 実尺 ${fmtDuration(r.output_duration_seconds ?? 0)}`);
+        parts.push(`${fmtDuration(r.requested_seconds)}`
+          + ` − ${fmtDuration(r.tightened_seconds ?? 0)}`
+          + ` ＝ ${fmtDuration(r.output_duration_seconds ?? 0)}`);
       }
       // 検品に落ちても成果物は残る。合格していないことを名乗るだけで、消しはしない。
       if (r.gate_ok === false) {
@@ -9051,7 +8674,7 @@ function onMessage(message) {
         && r.at_seconds - r.requested_seconds > 0.3
         ? `（要求 ${fmtDuration(r.requested_seconds)} / 実際 ${fmtDuration(r.at_seconds)}）`
         : "";
-      const text = `スクショを保存しました${moved}: ${r.output_path || r.filename || ""}`;
+      const text = `スクショ${moved}: ${r.output_path || r.filename || ""}`;
       setStillStatus(text);
       showToast(text);
       // 「出力済みclip」tabを開いたまま撮ったなら、撮った1枚がその場で並ぶ。
@@ -9069,7 +8692,7 @@ function onMessage(message) {
       status.textContent = `焼き込み切り抜き ${job.stage || ""} ${job.pct}%`.trim();
     } else if (job.state === "completed") {
       const r = job.result || {};
-      const text = `焼き込み切り抜きができました: ${r.output_path || r.filename || ""}`;
+      const text = `焼き込み切り抜き → ${r.output_path || r.filename || ""}`;
       status.textContent = text;
       showToast(text);
       if (!$("view-clips").classList.contains("hidden")) loadClipFiles();
@@ -9192,3 +8815,20 @@ runSearch(true);
 // tabを開くまで読まないと、録画を開いた直後だけ空の一覧になる。
 loadMarks();
 connectWS(onMessage);
+
+
+// ---- paneの割り方 ----
+// 面ごとに何を左右へ置いているかが違うので、覚える先も面ごとに分ける(1つのkeyへ
+// まとめると、シーン検索を広げた分だけ見どころ一覧が狭くなる)。
+// 時間軸(波形・seek bar)はどの面でも左右2列にまたがる全幅rowに居るため、割り方を
+// 変えても幅が変わらない。描き直しは要らない。
+[
+  ["#search-split", "--vd-split", "videos.split.search"],
+  [".vd-msplit-marks", "--vd-msplit", "videos.split.marks"],
+  [".vd-gops-split", "--vd-msplit", "videos.split.groups"],
+  [".vd-msplit-wide", "--vd-msplit", "videos.split.clips"],
+].forEach(([selector, varName, prefName]) => {
+  const box = document.querySelector(selector);
+  if (!box) return;
+  bindSplitter(box, box.querySelector(":scope > .split-bar"), varName, prefName);
+});

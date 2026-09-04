@@ -35,12 +35,16 @@ class MediaJobsMixin:
         item["stages"] = json.loads(item.pop("stages_json", None) or "[]")
         return item
 
-    def enqueue_media_job(self, job_id: str, kind: str, recording_id: int, *,
+    def enqueue_media_job(self, job_id: str, kind: str,
+                          recording_id: Optional[int] = None, *,
                           session_id: Optional[int] = None, group_id: str = "",
                           title: str = "", priority: int = 0,
                           params: Optional[dict] = None, sweep: bool = False) -> dict:
         """1件投入して行を返す。重複投入の抑止は呼び出し側(pending_media_job_for)で行う:
         「同じ焼き込みをもう一度」は再出力として正当な要求なので、ここでは拒まない。
+
+        ``recording_id`` はNone可。録画1本に属さないjob(highlightの突き合わせ)のためで、
+        無関係な録画idで埋めない理由は media_job_queue のschema comment を参照。
 
         ``sweep`` はsweepが自動で積んだ行の目印。workerはこの印の付いた行の同時実行
         本数を人の投入と別枠で絞る(claim_next_pending_media_job)。"""
@@ -156,10 +160,14 @@ class MediaJobsMixin:
                 ).fetchone()["n"]
                 if running_sweeps >= sweep_limit:
                     sweep_clause = " AND sweep = 0"
+            # 録画を持たないjob(highlightの突き合わせ)は、この排他の対象ではない ——
+            # 掴む録画が無いので誰の足元も抜かない。``NULL NOT IN (...)`` はNULLになり、
+            # 条件としては偽と同じ扱いになるので、明示的に通しておかないとそういうjobは
+            # 通常のlaneで**永久に拾われない**(黙って待機列に残り続ける)。
             busy_clause = "" if allow_busy_recording else (
-                " AND recording_id NOT IN ("
+                " AND (recording_id IS NULL OR recording_id NOT IN ("
                 "   SELECT recording_id FROM media_job_queue"
-                "   WHERE state = 'running' AND recording_id IS NOT NULL)")
+                "   WHERE state = 'running' AND recording_id IS NOT NULL))")
             kind_clause = ""
             params: list = [time.time()]
             if kinds:

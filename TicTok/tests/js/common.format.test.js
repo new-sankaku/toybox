@@ -204,7 +204,7 @@ describe("common.js のHTTP error文言", () => {
 
   it("英語のdetailはstatusから引いた日本語へ置き換え、生文言はdetailへ残す", () => {
     const err = win.httpError(404, "Not Found");
-    expect(err.message).toBe("対象が見つかりませんでした（Serverのcodeが古い可能性があります）。");
+    expect(err.message).toBe("対象が見つかりません");
     expect(err.status).toBe(404);
     expect(err.detail).toBe("Not Found");
     expect(warn).toHaveBeenCalled();
@@ -217,7 +217,7 @@ describe("common.js のHTTP error文言", () => {
   });
 
   it("表に無いstatusはstatusを添えた汎用文言になる", () => {
-    expect(win.httpError(418, "").message).toBe("Serverが処理できませんでした（HTTP 418）。");
+    expect(win.httpError(418, "").message).toBe("Server Error（HTTP 418）");
   });
 
   it("errorDetailText は status と生文言を繋ぐ", () => {

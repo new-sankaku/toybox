@@ -14,6 +14,7 @@ import asyncio
 import json
 import secrets
 import shutil
+import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,6 +26,8 @@ from tictok.record.recorder import (disk_free_by_volume, ffmpeg_available, ffmpe
 from tictok.record.transcription import STTError, stt_available
 from tictok.record.stt_worker import run_transcribe as stt_transcribe
 from tictok.media import clip_range, clip_subtitles, hls_source
+from tictok.media import highlight_export
+from tictok.media import highlight_match
 from tictok.media import laugh_audio
 from tictok.media import short as short_media
 from tictok.media import voice
@@ -300,7 +303,14 @@ def _preview_sources(recording_id: int) -> tuple:
 # 取り合っているのに「動いているのにjobが無い」と読める状態だった。
 MEDIA_JOB_KINDS = ("overlay", "upscale", "reprocess", "audionorm", "pack",
                    "waveform", "gain", "sprite", "voice", "overlay_preview", "clip_batch",
-                   "reel", "clip_overlay", "short", "stt", "laugh", "still")
+                   "reel", "clip_overlay", "short", "stt", "laugh", "still",
+                   "highlight_match", "highlight_export")
+
+# highlightの突き合わせで受け取る設定。**既定値はここに書かない** ——
+# ``highlight_match.match_highlight`` の署名が唯一の出所で、渡さなかった項目はそちらの
+# 既定になる。2箇所に書けば、片方だけが更新された日に「画面で見た条件と違う結果」が出る。
+MATCH_OPTION_KEYS = ("days", "scope", "gift_lead", "gift_tail", "min_diamonds",
+                     "window", "hop")
 
 # 台帳に出る種別名。訳語の出所はops_labelsの1箇所だけにする(同じ語を2箇所に置くと、job
 # titleと種別labelがずれる — ops_labelsのmodule docstringと同じ約束)。
@@ -314,7 +324,24 @@ QUEUED_JOB_DOMAINS = MEDIA_JOB_KINDS + tuple(ops_labels.GROUP_DOMAIN_LABELS)
 # 録画単位の二重投入judgeを通さないkind。reelは複数録画にまたがり、同じ先頭録画でも範囲listが
 # 違えば別の成果物なので、(kind, recording_id)で弾くと2本目が永久に投げられない。stillも同じで、
 # 位置が違えば別の1枚である(同じ録画から続けて撮る操作を弾いてはならない)。
-_NO_PER_RECORDING_DEDUPE = ("reel", "still")
+# highlightの突き合わせは録画idを持たないので、この判定に掛ける鍵が無い(``pending_for``は
+# recording_idで引く)。二重投入の抑止はhighlightの行のstatusで行う(routes/highlights.py)。
+# highlightの書き出しも録画idを持たない上に、同じhighlightの組でも並びや下限が違えば別の
+# 成果物である(出力名がそれを名乗る)。鍵が無いので抑止に掛けない。
+_NO_PER_RECORDING_DEDUPE = ("reel", "still", "highlight_match", "highlight_export")
+
+# highlightの突き合わせのpriority。スクショと同じで人がその場で待つ操作なので、待機列の
+# 末尾ではなく前へ出す(同時実行の枠はmedia_queueのinstant laneが別に持つ)。
+HIGHLIGHT_MATCH_JOB_PRIORITY = 20
+
+# highlightの書き出しで受け取る設定。**既定値はここに書かない** ——
+# ``highlight_export.export_highlights`` の署名が唯一の出所である(MATCH_OPTION_KEYSと同じ約束)。
+EXPORT_OPTION_KEYS = ("week", "order", "min_diamonds", "pad_lead", "pad_tail", "precise")
+
+# highlightの書き出しのpriority。突き合わせと同じく人が待つ操作だが、**即時laneには入れない**
+# (``media_queue.INSTANT_KINDS``) —— 1週間ぶんではgift演出が数百になり数分かかるので、数秒の操作の
+# ために空けてある枠を塞いでしまう。順番だけを前へ出す。
+HIGHLIGHT_EXPORT_JOB_PRIORITY = 15
 
 # スクショは人がその場で待っている1 clickの操作で、実処理は数秒のffmpeg 1本である。待機列の
 # 末尾に付けると、長い焼き込みが数十本並んでいる間ずっと保存されない。順番だけを前へ出す
@@ -327,7 +354,8 @@ STILL_JOB_PRIORITY = 20
 SWEEP_JOB_PRIORITY = -10
 
 
-async def _enqueue_media_job(kind: str, recording_id: int, *, group_id: str = "",
+async def _enqueue_media_job(kind: str, recording_id: Optional[int] = None, *,
+                             group_id: str = "",
                              recording: Optional[dict] = None,
                              stem: str = "", params: Optional[dict] = None,
                              priority: int = 0, sweep: bool = False) -> dict:
@@ -339,22 +367,27 @@ async def _enqueue_media_job(kind: str, recording_id: int, *, group_id: str = ""
 
     ``sweep`` はsweepからの自動投入。人の投入と同じ台帳・同じworkerで走らせつつ、
     順番(priority)と同時実行本数だけを別枠にするための印。
+
+    ``recording_id`` はNone可(録画1本に属さないjob)。その場合この関数は二重投入を見ない ——
+    見る鍵が無いので、抑止は投入する側が自分の台帳で行う。
     """
-    if (kind not in _NO_PER_RECORDING_DEDUPE
-            and media_job_queue.pending_for(kind, recording_id) is not None):
-        raise HTTPException(
-            status_code=409,
-            detail=f"この録画の{MEDIA_JOB_TITLES[kind]}は既にqueueにあります（jobで確認できます）。",
-        )
-    if kind in ("overlay", "upscale", "overlay_preview", "clip_overlay"):
-        # 字幕焼き込みが有効なら、文字起こしが揃っているかを投入時に確かめる。workerで初めて
-        # 落とすと、GPUの順番を待った末に失敗することになる。
-        _subtitle_transcript(recording_id)
-    if kind == "short":
-        # shortは字幕の有無を型が決めるので、その型の指定で同じ確認をする。
-        preset = _short_preset(params or {})
-        _subtitle_transcript(
-            recording_id, short_media.ShortSettings(runtime.settings, preset))
+    # 投入前の確認はどれも「その録画について」の問いなので、録画を持つjobだけが通る。
+    if recording_id is not None:
+        if (kind not in _NO_PER_RECORDING_DEDUPE
+                and media_job_queue.pending_for(kind, recording_id) is not None):
+            raise HTTPException(
+                status_code=409,
+                detail=f"この録画の{MEDIA_JOB_TITLES[kind]}は既にqueueにあります（jobで確認できます）。",
+            )
+        if kind in ("overlay", "upscale", "overlay_preview", "clip_overlay"):
+            # 字幕焼き込みが有効なら、文字起こしが揃っているかを投入時に確かめる。workerで
+            # 初めて落とすと、GPUの順番を待った末に失敗することになる。
+            _subtitle_transcript(recording_id)
+        if kind == "short":
+            # shortは字幕の有無を型が決めるので、その型の指定で同じ確認をする。
+            preset = _short_preset(params or {})
+            _subtitle_transcript(
+                recording_id, short_media.ShortSettings(runtime.settings, preset))
     job_id = secrets.token_hex(4)
     row = await media_job_queue.enqueue(
         job_id, kind, recording_id,
@@ -578,8 +611,7 @@ async def _enqueue_laugh_jobs(recordings: list, priority: int = 0,
                 "recording_id": recording_id,
                 "session_id": recording.get("session_id"), "group_id": "",
                 "title": f"{MEDIA_JOB_TITLES['laugh']} {stem}".strip(),
-                "params": {"corrections": corrections}, "priority": priority,
-                "sweep": sweep,
+                "priority": priority, "sweep": sweep,
             })
         return specs, already, skipped_no_media
 
@@ -1275,6 +1307,135 @@ async def _run_still_job(job: dict, report) -> dict:
             "variant": variant, "label": label}
 
 
+async def _run_highlight_match_job(job: dict, report) -> dict:
+    """TikTok本体のhighlight 1本を録画へ音の指紋で突き合わせ、結果を台帳へ書く。
+
+    録画1本に属さないjobなので ``recording_id`` を持たない —— **どの録画のどこから来たのかを
+    求めるのがこのjob本体**である(media_job_queueのschema commentを参照)。
+
+    照合はDBを読むだけ・録画の.tsを読むだけで、書くのはhighlightの台帳と指紋のcacheだけ
+    である。読み出しは専用の**読み取り専用接続**を1本開いて渡す: 照合は候補の録画ぶん
+    (1週間で54本)のqueryを長い区間またいで撃つので、Storageの書き込み接続を借りると
+    その間 collector の書き出しが止まる。開く前に ``flush`` を通すのは、bufferに残った
+    eventが接続から見えないため(gifterを1人取りこぼす)。
+    """
+    params = job.get("params") or {}
+    highlight_id = int(params["highlight_id"])
+    highlight = await asyncio.to_thread(runtime.storage.get_highlight, highlight_id)
+    if highlight is None:
+        raise JobSkipped("highlightの行がありません（削除済み）。")
+    path = Path(highlight["path"])
+    if not path.is_file():
+        # 積み直しても結果は変わらない。走査がstatusをmissingへ倒すので、そちらで読める。
+        await asyncio.to_thread(runtime.storage.set_highlight_status, highlight_id,
+                                "missing", error="highlightのfileがありません。")
+        raise JobSkipped(f"highlightのfileがありません: {path}")
+    # 呼び出し側が指定した設定だけを渡す。既定値をここへ書き写すと、実際に使われる既定
+    # (match_highlight の署名)と2箇所に分かれ、片方だけが更新される。
+    options = {key: params[key] for key in MATCH_OPTION_KEYS
+               if params.get(key) is not None}
+    loop = asyncio.get_running_loop()
+    gate = IntervalGate(config.get_job_progress_min_interval_seconds())
+
+    def on_progress(done: int, total: int, message: str) -> None:
+        # ``total`` は段が進むほど増える(segmentの本数は走査を終えるまで判らない)ので、
+        # %は必ず現時点の分母で作り直す。増える分母を%へ直すと数字は戻ることがあるが、
+        # 進捗を100%へ張り付かせて待たせるよりは、動いている数字の方が読める。
+        if not gate.ready():
+            return
+        pct = int(done * 100 / total) if total > 0 else 0
+        asyncio.run_coroutine_threadsafe(
+            report(f"{message}（{done} / {total}）", max(0, min(99, pct))), loop)
+
+    def _match() -> dict:
+        runtime.storage.flush()
+        conn = sqlite3.connect(f"file:{config.get_db_path()}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            return highlight_match.match_highlight(
+                conn, path, highlight["unique_id"], progress=on_progress, **options)
+        finally:
+            conn.close()
+
+    await report("highlightの突き合わせ", 0)
+    try:
+        async with runtime._job_ops("highlight_match", None, stem=path.stem,
+                                    job_registry_id=job["job_id"],
+                                    highlight_id=highlight_id,
+                                    streamer=highlight["unique_id"]):
+            result = await asyncio.to_thread(_match)
+    except Exception as exc:
+        detail = getattr(exc, "detail", None)
+        message = detail if isinstance(detail, str) else str(exc)
+        await asyncio.to_thread(runtime.storage.set_highlight_status, highlight_id,
+                                "failed", error=message)
+        raise
+    await report("結果を保存中", 95)
+    stats = await asyncio.to_thread(
+        runtime.storage.save_highlight_match, highlight_id, result)
+    await report("highlightの突き合わせ", 100)
+    segments = result.get("segments") or []
+    scope = result.get("scope") or {}
+    return {"highlight_id": highlight_id, "streamer": highlight["unique_id"],
+            "filename": highlight["filename"], "segments": len(segments),
+            "seconds": result.get("seconds"), "pool": result.get("pool"),
+            "pool_hours": result.get("pool_hours"), "elapsed": result.get("elapsed"),
+            # **1本も当たらなかったことを結末そのものが名乗る。** 候補の窓は「今」から
+            # 遡って張るので、窓の外の配信のhighlightは当たらない —— それを「照合済 /
+            # gift演出0」としてだけ出すと、TikTokが選ばなかったのか窓の外だったのかを人が
+            # 切り分けられない。効いた窓と試した段も添える。
+            "matched_recordings": result.get("matched_recordings") or [],
+            "days": scope.get("days"), "days_tried": scope.get("days_tried") or [],
+            "window_start": scope.get("window_start"),
+            "window_end": scope.get("window_end"),
+            **stats}
+
+
+async def _run_highlight_export_job(job: dict, report) -> dict:
+    """照合済みhighlightのgift付きgift演出を、**gifterごとに1本ずつ**書き出す。
+
+    録画1本に属さないjobなので ``recording_id`` を持たない。素材はhighlightのmp4であって
+    録画ではない —— ギフト演出は視聴者のclientが描くもので、こちらのHLS録画には映らない
+    (``doc/HIGHLIGHT_MATCH.md``)。
+
+    **成果物は複数file**である。対象はその週に1,000💎以上投げたgifterで、人数ぶんのmp4が
+    出来る(実測でpomiiiipの1週間に8人)。突き合わせと違って**即時laneへは入れない**ので、
+    gift演出ごとのframe精度の再encodeを人数ぶん重ねても他の操作を塞がない
+    (``HIGHLIGHT_EXPORT_JOB_PRIORITY``)。
+    """
+    params = job.get("params") or {}
+    highlight_ids = [int(value) for value in (params.get("highlight_ids") or [])]
+    if not highlight_ids:
+        raise JobSkipped("書き出すhighlightが指定されていません。")
+    # 呼び出し側が指定した設定だけを渡す。既定値をここへ書き写すと、実際に使われる既定
+    # (export_highlights の署名)と2箇所に分かれ、片方だけが更新される。
+    options = {key: params[key] for key in EXPORT_OPTION_KEYS
+               if params.get(key) is not None}
+    await report("highlightの書き出し", 0)
+    async with runtime._job_ops("highlight_export", None,
+                                stem=str(len(highlight_ids)),
+                                job_registry_id=job["job_id"],
+                                highlight_ids=highlight_ids):
+        result = await highlight_export.export_highlights(
+            runtime.storage, highlight_ids, progress=report, **options)
+    # **成果物は1本ではない。** gifterごとに1本ずつ出来るので、jobのresultも本数を名乗る。
+    # 1本ぶんのfile名だけを返していると、画面は残りが在ることを知る手立てを持たない。
+    return {"highlight_ids": highlight_ids, "streamer": result["streamer"],
+            "week": result["week"], "week_label": result["week_label"],
+            "output_dir": result["directory"],
+            # ``provenance`` は隣に置いた素性のJSONのpath。**中身の出所を辿る唯一の鍵**なので、
+            # jobの結果からも名乗る(file名だけでは、後から見た人がどこを見ればよいか判らない)。
+            "files": [{k: f[k] for k in ("filename", "path", "nickname", "coin",
+                                         "parts", "bytes", "seconds", "provenance")}
+                      for f in result["files"]],
+            "verified": result["verified"],
+            "file_count": len(result["files"]),
+            "bytes": result["bytes"],
+            "order": result["order"], "post_min": result["post_min"],
+            "min_diamonds": result["min_diamonds"],
+            "counts": result["counts"], "skipped": result["skipped"]}
+
+
 @contextmanager
 def _input_precondition():
     """job runner内で、入力側の前提不成立(404)を失敗ではなくskipへ落とす。
@@ -1356,6 +1517,10 @@ async def _run_media_job(job: dict, report) -> dict:
         return await _run_work_job(job, report)
     if kind == "still":
         return await _run_still_job(job, report)
+    if kind == "highlight_match":
+        return await _run_highlight_match_job(job, report)
+    if kind == "highlight_export":
+        return await _run_highlight_export_job(job, report)
     if kind not in ("overlay", "upscale"):
         raise HTTPException(status_code=400, detail=f"未知のjob種別です: {kind}")
     with _input_precondition():
@@ -1500,9 +1665,9 @@ async def _reprocess_recording(recording_id: int, recording: dict, job_id: str,
     async def _restore_backup() -> None:
         """押す前の状態へ戻す。**書きかけのmp4を先に捨ててから**戻すこと。
 
-        ffmpegは走り出した瞬間に出力fileを作るので、失敗時にはほぼ必ず断片が残っている。
-        「最終mp4が無いときだけ戻す」条件だけで守ると、その断片のせいで復元が素通りし、
-        録画は断片を指したまま・原本は_backupに置き去りになる(実測: 3時間30分の録画が
+        ffmpegは走り出した瞬間に出力fileを作るので、失敗時にはほぼ必ずgift演出が残っている。
+        「最終mp4が無いときだけ戻す」条件だけで守ると、そのgift演出のせいで復元が素通りし、
+        録画はgift演出を指したまま・原本は_backupに置き去りになる(実測: 3時間30分の録画が
         117MBのmoov無しfileに、62分が12分に置き換わった)。"""
         if backup_path is None:
             return

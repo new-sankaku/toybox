@@ -84,50 +84,43 @@ class RecordingsMixin:
         return cursor.rowcount > 0
 
     def list_recordings(self, limit: int) -> list:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM recordings ORDER BY started_at DESC LIMIT ?", (limit,)
-            ).fetchall()
+        rows = self._read_connection().execute(
+            "SELECT * FROM recordings ORDER BY started_at DESC LIMIT ?", (limit,)
+        ).fetchall()
         return [dict(row) for row in rows]
 
     def recordings_for_session(self, session_id: int) -> list:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM recordings WHERE session_id = ? ORDER BY started_at", (session_id,)
-            ).fetchall()
+        rows = self._read_connection().execute(
+            "SELECT * FROM recordings WHERE session_id = ? ORDER BY started_at", (session_id,)
+        ).fetchall()
         return [dict(row) for row in rows]
 
     def recordings_for_user(self, unique_id: str) -> list:
         """配信者1人ぶんの全録画。容量整理の画面が対象を並べるための入力で、statusは
         絞らない(中断・失敗した録画こそHLSが残って容量を食っているため)。新しい順。"""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM recordings WHERE unique_id = ? ORDER BY started_at DESC",
-                (unique_id,),
-            ).fetchall()
+        rows = self._read_connection().execute(
+            "SELECT * FROM recordings WHERE unique_id = ? ORDER BY started_at DESC",
+            (unique_id,),
+        ).fetchall()
         return [dict(row) for row in rows]
 
     def get_recording(self, recording_id: int) -> Optional[dict]:
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM recordings WHERE id = ?", (recording_id,)
-            ).fetchone()
-        return dict(row) if row else None
+        """1件取得。読むだけなのでread接続で引く。
 
-    def get_recording_for_read(self, recording_id: int) -> Optional[dict]:
-        """読むだけの経路のための1件取得。集計read専用の接続を使う。
-
-        HLS segmentの配信は再生中ずっと毎秒叩かれる(実測で4.2時間に886 request)。writer接続で
-        引くとcollectorのevent書き出しと同じlockを取り合い、そのlock待ちがrouteの所要時間の
-        40%(最悪1本で9.4秒)を占めていた。recordingsの書き込みはどれも即commitなので、
-        read接続からも最新の行が見える。
-
-        read接続は重い集計と直列化される点だけ引き換えになるが、収集中は常時書き込みが続く
-        writer側と違い、集計は人が操作したときにしか走らない。"""
+        以前はwriter接続で引いていた。collectorのevent書き出しと同じlockを取り合うため、
+        見どころ一覧が録画ごとにこれを呼ぶと(1 requestで約50回)、所要時間の78%がlock待ち
+        だった。recordingsの書き込みはどれも即commitなので、read接続からも最新の行が見える。
+        一覧系(list_recordings / recordings_for_user / list_bookmarks等)も同じ理由で
+        read接続へ寄せてある。"""
         row = self._read_connection().execute(
             "SELECT * FROM recordings WHERE id = ?", (recording_id,)
         ).fetchone()
         return dict(row) if row else None
+
+    def get_recording_for_read(self, recording_id: int) -> Optional[dict]:
+        """``get_recording`` と同じ。HLS配信の経路が先にread接続へ移った名残で、今は
+        全ての1件取得がread接続なので区別は無い。"""
+        return self.get_recording(recording_id)
 
     def next_recording_start(self, session_id: int, after: float) -> Optional[float]:
         """同じsessionで``after``より後に始まった録画のうち、最も早い開始時刻。無ければNone。
@@ -156,6 +149,47 @@ class RecordingsMixin:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def latest_finished_recording_at(self) -> float:
+        """最後に確定した録画の終了時刻(epoch秒)。1本も無ければ0.0。
+
+        backupの発火をここから引くのは、process内の合図(``core.sweep_signal``)が
+        **再起動で消える**ためである。録画が終わった直後にserverを落とすと、その録画は
+        合図を失ったまま次の合図が来るまでbackupされない。DBに残る終了時刻なら、起動直後の
+        最初の周期がそのまま拾う。合図の側を直さないのは、あちらが「起きるのを早める」だけの
+        揮発でよい仕組みとして設計されているためで(sweep_signalのdocstring)、consumeを持つ
+        利用者が2つになると、片方が捨てた合図をもう片方が永久に見られなくなる。
+
+        中断(interrupted)も数えるのは、そこにも録画の実体が在り、写す価値が同じだからである。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MAX(ended_at) AS at FROM recordings"
+                " WHERE status IN ('completed', 'interrupted') AND ended_at IS NOT NULL"
+            ).fetchone()
+        return float(row["at"] or 0.0) if row else 0.0
+
+    def recordings_for_backup(self, since: float) -> list:
+        """backupの対象と除外を決めるための最小の行。
+
+        返すのは2種類だけ: **まだ終わっていない録画**(``ended_at IS NULL``)と、
+        ``since`` より後に終わった録画。前者は写してはならない対象(書き込み中の.tsを
+        写せば控えに途中の姿が残る)、後者は写すべき対象である。既に写した古い録画は
+        どちらでもないので引かない —— 数千本を毎回持ち回る理由が無い。
+
+        **「配信が終わった」を全体の状態として扱わない**のがここの要点である。配信者を
+        複数監視していれば、ある録画が終わった瞬間に他が走っているのが普通で、実測
+        (2026-09-02、確定録画529本)では終了の29.5%がそれに当たり、同時録画は最大5本
+        だった。全体が静かになるのを待つ設計は監視数が増えるほど成立しなくなる —— 同じ
+        実測を多重化すると、「最後の終了から15分静か」が成立する時間は4人で94.1%、
+        80人では30.6%まで落ちる。だから待つのではなく、**録画1本ずつを見て、落ち着いた
+        物だけを写す**。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, unique_id, status, filename, path, ended_at FROM recordings"
+                " WHERE ended_at IS NULL OR ended_at > ?", (float(since),)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def recordings_by_stem(self) -> dict:
         """file名のstem -> 録画の身元(id / 配信者 / 開始時刻)。
 
@@ -178,8 +212,7 @@ class RecordingsMixin:
 
     def transcribed_recording_ids(self) -> set:
         """Recording ids that have a stored transcript (existence only, no payload)."""
-        with self._lock:
-            rows = self._conn.execute("SELECT recording_id FROM transcripts").fetchall()
+        rows = self._read_connection().execute("SELECT recording_id FROM transcripts").fetchall()
         return {row["recording_id"] for row in rows}
 
     def current_transcript_recording_ids(self, timemap_version: int) -> set:
@@ -195,12 +228,11 @@ class RecordingsMixin:
         どちらも再文字起こしでしか直らないので、一括投入の「済み」から外す母集団をここで引く。
         ``transcribed_recording_ids`` は「行があるか」のままにする — 検索indexのbackfillは
         中身の新旧に関係なく全件を対象にする必要がある。"""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT recording_id FROM transcripts"
-                " WHERE timemap_version = ? AND word_times = 1",
-                (timemap_version,),
-            ).fetchall()
+        rows = self._read_connection().execute(
+            "SELECT recording_id FROM transcripts"
+            " WHERE timemap_version = ? AND word_times = 1",
+            (timemap_version,),
+        ).fetchall()
         return {row["recording_id"] for row in rows}
 
     def delete_recording(self, recording_id: int) -> Optional[dict]:

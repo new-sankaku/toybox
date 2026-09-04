@@ -259,25 +259,6 @@ describe("streamers.js の大口(実弾)日次人数", () => {
     expect(panelNames()).toEqual(["2K↑ 合計", "100〜2K", "2K↑"]);
   });
 
-  // 案内文の「N以上を投げた人数」の下限額も定義そのもの。画面に書くと、帯を足したとき
-  // ここだけ古い額を名乗る。合計の下限と最小帯の下限は別物なので、別の場所へ入れる。
-  it("案内文の下限額もserverの帯と合計下限から入れる", () => {
-    win.renderWhales({
-      days: [{ date: "2026-08-01", tiers: [1, 1], whales: 1 }],
-      tiers: [
-        { min: 100, max: 2000, label: "100〜2K", min_label: "100" },
-        { min: 2000, max: null, label: "2K↑", min_label: "2K" },
-      ],
-      total: { min: 2000, min_label: "2K", from_tier: 1 },
-    });
-    const floors = Array.from(doc.querySelectorAll(".sm-whale-floor")).map((el) => el.textContent);
-    expect(floors.length).toBeGreaterThan(0);
-    expect(floors.every((t) => t === "100")).toBe(true);
-    const tops = Array.from(doc.querySelectorAll(".sm-whale-total-floor")).map((el) => el.textContent);
-    expect(tops.length).toBeGreaterThan(0);
-    expect(tops.every((t) => t === "2K")).toBe(true);
-  });
-
   it("日数と最大人数を見出しに添える(どの下限の数かも名乗る)", () => {
     win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
     expect(doc.getElementById("sm-whale-note").textContent).toBe("3日 / 1K↑ 最大 4人");
@@ -294,18 +275,15 @@ describe("streamers.js の大口(実弾)日次人数", () => {
       ],
       total: { min: 2000, min_label: "2K", from_tier: 1 },
     });
-    expect(doc.getElementById("sm-whale-empty").classList.contains("hidden")).toBe(true);
     expect(doc.getElementById("sm-whale-panels").classList.contains("hidden")).toBe(false);
     expect(panelCharts()[0].data.datasets[0].data).toEqual([0]);
     expect(panelCharts()[1].data.datasets[0].data).toEqual([4]);
   });
 
-  it("1人も居なければ案内を出し、0の平線が並ぶだけのgraphは畳む", () => {
+  it("1人も居なければ0の平線が並ぶだけのgraphは畳む", () => {
     win.renderWhales({ days: [DAYS[2]], tiers: TIERS, total: TOTAL });
-    expect(doc.getElementById("sm-whale-empty").classList.contains("hidden")).toBe(false);
     expect(doc.getElementById("sm-whale-panels").classList.contains("hidden")).toBe(true);
     win.renderWhales({ days: DAYS, tiers: TIERS, total: TOTAL });
-    expect(doc.getElementById("sm-whale-empty").classList.contains("hidden")).toBe(true);
     expect(doc.getElementById("sm-whale-panels").classList.contains("hidden")).toBe(false);
   });
 
@@ -412,6 +390,6 @@ describe("streamers.js の大口(実弾)日次人数", () => {
   it("serverが古くて帯を返さなくても落ちない", () => {
     win.renderWhales({ days: [{ date: "2026-08-01", active: 10 }] });
     expect(panelNames()).toEqual([]);
-    expect(doc.getElementById("sm-whale-empty").classList.contains("hidden")).toBe(false);
+    expect(doc.getElementById("sm-whale-note").textContent).toBe("");
   });
 });
