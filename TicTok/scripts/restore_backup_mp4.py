@@ -14,7 +14,7 @@
 コメントを全編ずらす。消せば焼き込みはwall時計の概算へ落ちる。
 
 Usage (TicTok directory から venv で実行):
-    python scripts/restore_backup_mp4.py --stem 00243_pomiiiip_20260706_215757
+    python scripts/restore_backup_mp4.py --stem 00243_streamer_a_20260706_215757
     python scripts/restore_backup_mp4.py --stem <stem> --apply
     python scripts/restore_backup_mp4.py --stem <stem> --from K:/80_Tiktok/_backup/x.mp4 --apply
 """

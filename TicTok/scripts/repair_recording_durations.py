@@ -53,7 +53,7 @@ thumb sheet(``.thumbs.json``) > 既存のduration_seconds(文字起こし由来)
 Usage (TicTok directory から venv で実行):
     python scripts/repair_recording_durations.py                 # dry-run
     python scripts/repair_recording_durations.py --apply         # 書き込む
-    python scripts/repair_recording_durations.py --unique-id pomiiiip
+    python scripts/repair_recording_durations.py --unique-id streamer_a
     python scripts/repair_recording_durations.py --durations-only --apply
 """
 

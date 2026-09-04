@@ -91,7 +91,7 @@ whisperの出力は誤りを含む。上流（model・hotwords・VADの調整・
 
 ## 実績
 
-録画00478（recording 897 / pomiiiip・182分・3,306 segment）へ **1,070件（32.4%）** を投入。
+録画00478（recording 897 / streamer_a・182分・3,306 segment）へ **1,070件（32.4%）** を投入。
 根拠の内訳は commentと一致 323 / 文脈 219 / 言い直し 204 / 人名（event由来）202 /
 表記統一 121。
 

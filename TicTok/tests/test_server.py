@@ -2530,7 +2530,7 @@ def test_user_alias_route(server, client):
     session_id = storage.create_session("aliased", 60)
     storage.add_event(session_id, {
         "kind": "gift", "time": time.time(), "diamonds": 5000, "gift_count": 1,
-        "user": {"user_id": "914", "unique_id": "fan", "nickname": "あきと🐢💤",
+        "user": {"user_id": "914", "unique_id": "fan", "nickname": "視聴者A🐢💤",
                  "avatar": "", "identity_key": "914", "fans_level": 0,
                  "gifter_level": 0, "gifter_badge": "", "member_badge": ""},
     })
@@ -2538,17 +2538,17 @@ def test_user_alias_route(server, client):
 
     assert client.put(
         "/api/user-aliases",
-        json={"identity_key": "914", "alias": "あきと"}).json() == {
-            "identity_key": "914", "alias": "あきと"}
-    assert client.get("/api/user-aliases").json() == {"aliases": {"914": "あきと"}}
+        json={"identity_key": "914", "alias": "視聴者A"}).json() == {
+            "identity_key": "914", "alias": "視聴者A"}
+    assert client.get("/api/user-aliases").json() == {"aliases": {"914": "視聴者A"}}
 
     body = client.get("/api/streamers/aliased/mentions").json()
     day = body["days"][0]
-    assert "🥇 あきと" in day["post_text"]
-    assert day["roster_text"].startswith("1. あきと　")
+    assert "🥇 視聴者A" in day["post_text"]
+    assert day["roster_text"].startswith("1. 視聴者A　")
     # 表の名前は変えない。順位の根拠なので、省略形だけにすると誰のことか確かめられない。
-    assert day["roster"][0]["nickname"] == "あきと🐢💤"
-    assert day["roster"][0]["alias"] == "あきと"
+    assert day["roster"][0]["nickname"] == "視聴者A🐢💤"
+    assert day["roster"][0]["alias"] == "視聴者A"
 
     # 上限より長い省略形は受け取らない(貼る文面が1行に収まらなくなる)。
     assert client.put(
@@ -2561,7 +2561,7 @@ def test_user_alias_route(server, client):
         "/api/user-aliases", json={"identity_key": "914", "alias": ""}).json()["alias"] == ""
     assert client.get("/api/user-aliases").json() == {"aliases": {}}
     again = client.get("/api/streamers/aliased/mentions").json()["days"][0]
-    assert "🥇 あきと🐢💤" in again["post_text"]
+    assert "🥇 視聴者A🐢💤" in again["post_text"]
 
 
 def test_user_merge_route(server, client):
@@ -2572,7 +2572,7 @@ def test_user_merge_route(server, client):
     """
     storage = server.runtime.storage
     session_id = storage.create_session("merged", 60)
-    for user_id, nickname, coins in (("914", "あきと", 3000), ("915", "あきと2", 2500)):
+    for user_id, nickname, coins in (("914", "視聴者A", 3000), ("915", "視聴者A2", 2500)):
         storage.add_event(session_id, {
             "kind": "gift", "time": time.time(), "diamonds": coins, "gift_count": 1,
             "user": {"user_id": user_id, "unique_id": f"fan{user_id}",
@@ -2590,10 +2590,10 @@ def test_user_merge_route(server, client):
     body = client.get("/api/streamers/merged/mentions").json()
     day = body["days"][0]
     assert [(r["nickname"], r["diamonds"], r["accounts"]) for r in day["roster"]] == [
-        ("あきと", 5500, 2)]
+        ("視聴者A", 5500, 2)]
     # 週の一覧はアカウントごとのまま。外す相手は応答のmergesが名乗る。
-    assert [g["nickname"] for g in body["gifters"]] == ["あきと", "あきと2"]
-    assert [m["nickname"] for m in body["merges"][0]["members"]] == ["あきと2"]
+    assert [g["nickname"] for g in body["gifters"]] == ["視聴者A", "視聴者A2"]
+    assert [m["nickname"] for m in body["merges"][0]["members"]] == ["視聴者A2"]
 
     # 1人を指さないkeyは受け取らない(別人のコインが1人に積まれる)。
     assert client.put(

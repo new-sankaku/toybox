@@ -45,8 +45,8 @@ commentのみの視聴者は含めない旨を画面に明記している。
 `COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id))` の順。
 
 `MAX(e.user_unique_id)` は辞書順の最大を拾うだけで「最新のhandle」ではない。実測では
-改名前の自動生成handle `user5037930325926` が現handle `harehare12345` を押しのけ、
-`user9487377432719` が `chikudenchi0807` を押しのけた。`users` 表は毎eventで最新へ
+改名前の自動生成handle `user0000000000001` が現handle `viewer_01` を押しのけ、
+`user0000000000002` が `viewer_02` を押しのけた。`users` 表は毎eventで最新へ
 upsertされる唯一の真実なので、eventの値は users 側が空のときだけ使う。
 
 > 既存の `streamer_profile` のgifter集計は `COALESCE(NULLIF(MAX(e.user_unique_id),''), u.unique_id)`

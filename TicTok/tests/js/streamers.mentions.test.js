@@ -604,38 +604,38 @@ describe("streamers.js の週のメンション", () => {
   it("省略形を入れると保存し、文面を引き直す", async () => {
     const withAlias = payload({
       days: [{ ...DAY_LIVE,
-               roster: [{ ...DAY_LIVE.roster[0], alias: "あきと" },
+               roster: [{ ...DAY_LIVE.roster[0], alias: "視聴者A" },
                         ...DAY_LIVE.roster.slice(1)],
-               post_text: ["トップ3貢献", "🥇 あきと 🥈 FAN2 🥉 FAN3",
+               post_text: ["トップ3貢献", "🥇 視聴者A 🥈 FAN2 🥉 FAN3",
                            "1k⬆️3名"].join("\n") },
               DAY_QUIET],
     });
-    await load({ [URL_LATEST]: LATEST, [ALIAS_URL]: { identity_key: "d1", alias: "あきと" },
+    await load({ [URL_LATEST]: LATEST, [ALIAS_URL]: { identity_key: "d1", alias: "視聴者A" },
                  [URL_CURRENT]: withAlias });
-    setInput(aliasInput(0), "あきと");
+    setInput(aliasInput(0), "視聴者A");
     await page.settle();
 
     const put = page.calls.fetches.find((f) => f.method === "PUT");
-    expect(JSON.parse(put.body)).toEqual({ identity_key: "d1", alias: "あきと" });
+    expect(JSON.parse(put.body)).toEqual({ identity_key: "d1", alias: "視聴者A" });
     // 文面はServerの組んだ物。引き直した応答がそのまま欄に出る。
-    expect(dayText(0)).toContain("🥇 あきと 🥈 FAN2 🥉 FAN3");
+    expect(dayText(0)).toContain("🥇 視聴者A 🥈 FAN2 🥉 FAN3");
     // 表の名前は表示名のまま。順位の根拠なので、省略形は隣へ添えるだけである。
     expect(dayNames(0)[0]).toBe("FAN1");
-    expect(dayCard(0).querySelector(".sm-md-alias").textContent).toBe("→ あきと");
+    expect(dayCard(0).querySelector(".sm-md-alias").textContent).toBe("→ 視聴者A");
     expect(doc.getElementById("sm-al-note").textContent).toBe("4 人中 1 人に設定");
-    expect(toastText()).toContain("FAN1 を「あきと」で貼るようにしました");
+    expect(toastText()).toContain("FAN1 を「視聴者A」で貼るようにしました");
   });
 
   it("欄を空にすると省略形を外す", async () => {
     const withAlias = payload({
       days: [{ ...DAY_LIVE,
-               roster: [{ ...DAY_LIVE.roster[0], alias: "あきと" },
+               roster: [{ ...DAY_LIVE.roster[0], alias: "視聴者A" },
                         ...DAY_LIVE.roster.slice(1)] },
               DAY_QUIET],
     });
     await load({ [URL_LATEST]: withAlias, [ALIAS_URL]: { identity_key: "d1", alias: "" },
                  [URL_CURRENT]: LATEST });
-    expect(aliasInput(0).value).toBe("あきと");
+    expect(aliasInput(0).value).toBe("視聴者A");
     setInput(aliasInput(0), "  ");
     await page.settle();
 
@@ -656,7 +656,7 @@ describe("streamers.js の週のメンション", () => {
   it("保存できなかったときは欄を元へ戻し、付いたように見せない", async () => {
     // ALIAS_URLを張らない=404。文面は引き直さないので、貼る物は前のままである。
     await load({ [URL_LATEST]: LATEST });
-    setInput(aliasInput(0), "あきと");
+    setInput(aliasInput(0), "視聴者A");
     await page.settle();
     expect(aliasInput(0).value).toBe("");
     expect(toastText()).toContain("FAN1 の省略形の保存");

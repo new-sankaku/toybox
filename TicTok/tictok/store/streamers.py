@@ -822,8 +822,8 @@ class StreamersMixin:
         # point-in-timeを優先する(そちらは過去の見え方を保つのが目的)。
         #
         # event側をMAX()で優先してはいけない: MAX()は辞書順の最大を返すだけで「最新の
-        # handle」ではない。実測では改名前の自動生成handle user5037930325926 が現handle
-        # harehare12345 を、user9487377432719 が chikudenchi0807 を押しのけていた。
+        # handle」ではない。実測では改名前の自動生成handle user0000000000001 が現handle
+        # viewer_01 を、user0000000000002 が viewer_02 を押しのけていた。
         gifter_rows = conn.execute(
             "SELECT e.identity_key AS key,"
             " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
@@ -1787,7 +1787,11 @@ class StreamersMixin:
 
     def _gift_window_ranking(self, conn, handles: list, ph: str,
                              start: float, end: float) -> list:
-        """[start, end) にGiftを投げた人をコイン順に。切らずに全件返す(表示側で切る)。"""
+        """[start, end) にGiftを投げた人をコイン順に。切らずに全件返す(表示側で切る)。
+
+        **束ねない。** この一覧は@で呼ぶ相手なので、アカウントごとに別の@IDが要る。
+        1人へ畳んだ順位が要る面は :meth:`_gift_window_ranking_merged` を読む。
+        """
         rows = conn.execute(
             "SELECT e.identity_key AS key," + _GIFTER_SELECT_SQL + _GIFTER_FROM_SQL
             + f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
@@ -1797,6 +1801,30 @@ class StreamersMixin:
             (*handles, start, end),
         ).fetchall()
         return [_gifter_row(row) for row in rows if row["key"]]
+
+    def _gift_window_ranking_merged(self, conn, handles: list, ph: str,
+                                    start: float, end: float) -> list:
+        """[start, end) のGifterを、**同じ人の別アカウント(user_merges)を1人へ畳んで**コイン順に。
+
+        数えるGift eventは畳まない版(:meth:`_gift_window_ranking`)とまったく同じで、変わるのは
+        束ね方と人数だけである ―― 窓の合計コインは畳んでも一致する。畳んだアカウントの数は
+        行の ``accounts`` が名乗る(1なら束ねていない)。
+
+        メンションの一覧が畳まない版を使い続けるのは、あちらが@で呼ぶ相手の一覧で、
+        アカウントごとに別の@IDが要るためである。畳んだこちらを使うのは「1人ぶんいくら
+        投げたか」で切る面(ストーリーの検証と出力)で、束ねた人のコインがアカウントの数だけ
+        割れたままだと、fileになる人とならない人が束ねの有無で変わってしまう。
+        """
+        rows = conn.execute(
+            f"SELECT {_MERGED_KEY_SQL} AS key," + _GIFTER_MERGED_SELECT_SQL
+            + _GIFTER_MERGED_FROM_SQL
+            + f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
+            " AND e.time >= ? AND e.time < ?"
+            " GROUP BY key"
+            " ORDER BY diamonds DESC, gifts DESC",
+            (*handles, start, end),
+        ).fetchall()
+        return [_gifter_row(row, row["accounts"] or 1) for row in rows if row["key"]]
 
     def _gift_day_rankings(self, conn, handles: list, ph: str,
                            start: float, end: float) -> dict:
@@ -1880,6 +1908,12 @@ class StreamersMixin:
         日の境目を週と同じ時刻にしてあるので、7日ぶんのコインは週の合計と必ず一致する。
         区分ごとの取捨(gifters側の印)はdaysへ効かない —— あちらは@で呼ぶ相手の一覧、
         こちらは順位の名乗りで、@IDの取れていない人を外すと1位が別人の名前に化ける。
+
+        gifters は**アカウント1つにつき1行**である(束ねない)。同じ人の別アカウント
+        (user_merges)を1人へ畳んだ順位は merged_gifters が、畳み先の辞書は merge_map が
+        別に持つ。2つを並べて返すのは、@で呼ぶ相手はアカウントごとに要るのに対して、
+        「1人ぶんいくら投げたか」で切る面(ストーリーの検証と出力)は畳んだ額で判ずる
+        ためである。どちらか一方に寄せると、必ずどちらかの面が間違う。
         """
         with self._lock:
             handles = self._owner_handles_locked(unique_id)
@@ -1897,6 +1931,7 @@ class StreamersMixin:
             "gifter_count": 0, "mentionable_count": 0, "diamonds": 0,
             "below_count": 0, "below_diamonds": 0, "dropped_weeks": 0,
             "days": [], "merges": self.list_user_merges(),
+            "merged_gifters": [], "merge_map": self.user_merge_map(),
         }
         keys, totals, dropped = self._ranking_periods(
             conn, unique_id, handles, ph, WEEK_SATURDAY)
@@ -1912,6 +1947,14 @@ class StreamersMixin:
         # 束ねの一覧。日ぶんと同じ応答で返すので、束ねた直後の画面は1回引き直すだけで
         # 「畳まれた顔ぶれ」と「束ねの中身」の両方が揃う。
         merges = self.list_user_merges()
+        # 同じ人の別アカウントを1人へ畳んだ版の順位。**``gifters`` と入れ替えない** ――
+        # あちらは@で呼ぶ相手の一覧で、アカウントごとに別の@IDが要る。こちらを読むのは
+        # 「1人ぶんいくら投げたか」で切る面(ストーリーの検証と出力)である。
+        merged_gifters = self._gift_window_ranking_merged(conn, handles, ph, start, end)
+        for position, row in enumerate(merged_gifters):
+            # 順位は**畳んだ後の並びの中**で振る。``gifters`` 側の順位(区分に入った人だけに
+            # 振る番号)とは別物なので、両方を同じ数として読ませない。
+            row["rank"] = position + 1
         # 区分ごとの人数は行を数えて出す。行のtierと別に集計すると、境目を直したときに
         # 枠の見出しと中身が食い違う。
         counts = [{"count": 0, "mentionable": 0, "diamonds": 0} for _ in tiers]
@@ -1977,6 +2020,14 @@ class StreamersMixin:
             # ので、外す相手を選べるように名乗りまで込みで返す。配信者にも週にも
             # 紐付かない(省略形と同じく人に付く)。
             "merges": merges,
+            # 束ねた後の順位。**``gifters`` の代わりではない。** @で呼ぶ相手はアカウント
+            # ごとに要るので上はそのまま残し、「1人ぶんいくら投げたか」で判ずる面
+            # (ストーリーの検証と出力)だけがこちらを読む。区分では絞らない ―― 誰のfileを
+            # 作るかを決めるのは読む側で、ここは畳んだ順位を渡すだけである。
+            "merged_gifters": merged_gifters,
+            # 畳み先の辞書(サブのkey -> 主のkey)。名乗りまで込みの ``merges`` を読む側が
+            # 解いて組み立てると、畳み方の規則が読む側の数だけ増える。
+            "merge_map": self.user_merge_map(),
         }
 
     def streamer_mention_gifts(self, unique_id: str, week: str,

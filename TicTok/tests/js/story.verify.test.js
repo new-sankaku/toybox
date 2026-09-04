@@ -10,7 +10,7 @@ import { loadPage } from "./helpers/page.js";
 //     返す物をそのまま描き、画面側では組み立てない。
 //
 // (2) **誤りに気づける画面**。実際に事故が起きている —— 鹿の全画面演出(Guardian's Pledge /
-//     4999🪙 / よい🐢💤 ｻｲｺｳｯ!)が「Goal Highlight」の名前で別人(あきと🐢💤)のfileへ入り、
+//     4999🪙 / 視聴者C🐢💤 ｻｲｺｳｯ!)が「Goal Highlight」の名前で別人(視聴者A🐢💤)のfileへ入り、
 //     出来上がったmp4を観るまで誰も気付けなかった。原因は画面がgift名とgifter名の文字列
 //     しか出しておらず、**映像と突き合わせる手段が無かった**ことにある。
 //
@@ -26,7 +26,7 @@ describe("story.js の検証と警告", () => {
   let win;
   let doc;
 
-  const STREAMER = "pomiiiip";
+  const STREAMER = "streamer_a";
   const URL_LIST = "/api/highlights";
   const URL_COVER = `/api/highlights/coverage?streamer=${STREAMER}`;
   const URL_MENTIONS = `/api/streamers/${STREAMER}/mentions`;
@@ -42,7 +42,7 @@ describe("story.js の検証と警告", () => {
   // 出力tabの ▶ もこれしか見ない(画面はpathからURLを組み立てない)。
   const HIGHLIGHTS = [
     {
-      id: 7, unique_id: STREAMER, filename: "g65i71rvmudg.mp4", path: "/hl/g65i71rvmudg.mp4",
+      id: 7, unique_id: STREAMER, filename: "g65hl0000001.mp4", path: "/hl/g65hl0000001.mp4",
       url: MEDIA_7,
       duration_seconds: 60.8, status: "matched", segment_count: 10, gift_count: 10,
       top_diamonds: 6000, total_diamonds: 20585, matched_at: 1756700000,
@@ -65,7 +65,7 @@ describe("story.js の検証と警告", () => {
 
   function hit(over = {}) {
     const row = {
-      highlight_id: 7, filename: "g65i71rvmudg.mp4", segment_id: 101, idx: 3,
+      highlight_id: 7, filename: "g65hl0000001.mp4", segment_id: 101, idx: 3,
       // ``at`` は**そのgiftがハイライトの中で何秒目か**で、gift演出の頭(segment_start)とは
       // 別の値である(giftはgift演出の頭に在るとは限らない)。
       at: 14.5, segment_start: 12.0, segment_end: 21.0,
@@ -110,7 +110,7 @@ describe("story.js の検証と警告", () => {
       event_id: 900, time: 1756500000, label: "08/30 23:15",
       gift_id: 5655, gift_name: "Goal Highlight", gift_count: 1, diamonds: 6000,
       gift_image: "/api/gift-icon/5655", identity_key: "k1",
-      user_nickname: "あきと🐢💤", user_unique_id: "akito", week_diamonds: 13543,
+      user_nickname: "視聴者A🐢💤", user_unique_id: "viewer_a", week_diamonds: 13543,
       target: true, hits: [hit()],
       ...over,
     };
@@ -128,25 +128,25 @@ describe("story.js の検証と警告", () => {
     gift(),
     // **採られていないgift。** 高額なのにハイライトに1本も無い —— この面の一番の用途。
     gift({ event_id: 901, gift_name: "Fantastic Fly Love", diamonds: 19999,
-           user_nickname: "よい🐢💤 ｻｲｺｳｯ!", identity_key: "k2", week_diamonds: 30000,
+           user_nickname: "視聴者C🐢💤 ｻｲｺｳｯ!", identity_key: "k2", week_diamonds: 30000,
            hits: [] }),
     // 2本のハイライトに出ているgift(重複排除の確認)。
     gift({ event_id: 902, gift_name: "Future City", diamonds: 4000, identity_key: "k3",
-           user_nickname: "おニャンコ🐢💤", week_diamonds: 8000,
+           user_nickname: "視聴者B🐢💤", week_diamonds: 8000,
            hits: [hit({ segment_id: 201, at: 28.0, segment_start: 27.0, segment_end: 30.0,
                        gift_row_id: 9201 }),
-                  hit({ highlight_id: 8, filename: "g65rb2jh3030.mp4",
+                  hit({ highlight_id: 8, filename: "g65hl0000005.mp4",
                         segment_id: 202, at: 4.0, segment_start: 3.0, segment_end: 9.0,
                         gift_row_id: 9202 })] }),
     // 演出区間の出なかったgift。
     gift({ event_id: 903, gift_name: "Swan", diamonds: 699, identity_key: "k4",
-           user_nickname: "あおちゃ🐾", week_diamonds: 5000,
+           user_nickname: "視聴者E🐾", week_diamonds: 5000,
            hits: [hit({ segment_id: 301, at: 36.5, segment_start: 30.0, segment_end: 42.0,
                         gift_row_id: 9301, effect: [], has_effect: false })] }),
     // **言い切れていない当たり。** 位置がずれている可能性がある行で、別人のgiftが別人の
     // fileへ入る事故はここから始まる。
     gift({ event_id: 904, gift_name: "Guardian's Pledge", diamonds: 4999, identity_key: "k5",
-           user_nickname: "よい🐢💤 ｻｲｺｳｯ!", week_diamonds: 20000,
+           user_nickname: "視聴者C🐢💤 ｻｲｺｳｯ!", week_diamonds: 20000,
            hits: [hit({ segment_id: 401, at: 47.2, segment_start: 45.0, segment_end: 54.0,
                         gift_row_id: 9401,
                         confidence: "low", corr: 0.41, score: 41,
@@ -155,12 +155,12 @@ describe("story.js の検証と警告", () => {
     // 届かない人のgiftはServerが並べないので、応答に混ぜると在り得ない画面を試すことに
     // なる。
     gift({ event_id: 905, gift_name: "Hearts", diamonds: 199, identity_key: "k6",
-           user_nickname: "るきしろ🐢💤", week_diamonds: 1000 }),
+           user_nickname: "視聴者D🐢💤", week_diamonds: 1000 }),
     // 同じ人(k1)の2件め。**連投ではない**(giftが違う)ので塊の罫では繋がないが、
     // 「Gifterごと」の並びでは1件めの隣に来なければならない。
     gift({ event_id: 906, time: 1756500500, gift_id: 5602, gift_name: "Rosa",
-           diamonds: 500, identity_key: "k1", user_nickname: "あきと🐢💤",
-           user_unique_id: "akito", week_diamonds: 13543,
+           diamonds: 500, identity_key: "k1", user_nickname: "視聴者A🐢💤",
+           user_unique_id: "viewer_a", week_diamonds: 13543,
            hits: [hit({ segment_id: 601, at: 24.0, segment_start: 22.0, segment_end: 27.0,
                         gift_row_id: 9601 })] }),
     // **連投。** 同じ人が同じgiftを続けて投げたもので、message_idの違う別eventである。
@@ -184,18 +184,18 @@ describe("story.js の検証と警告", () => {
     // (gift 49件のうち19件が、別のgifterと同じgift演出に載っていた)。gift演出の窓を「その行の
     // 区間」としていた頃は、片方の行で詰めた値がもう片方のfileまで動かしていた。
     gift({ event_id: 920, time: 1756502000, gift_id: 8001, gift_name: "Lion",
-           diamonds: 150, identity_key: "k1", user_nickname: "あきと🐢💤",
-           user_unique_id: "akito", week_diamonds: 13543,
+           diamonds: 150, identity_key: "k1", user_nickname: "視聴者A🐢💤",
+           user_unique_id: "viewer_a", week_diamonds: 13543,
            hits: [hit({ segment_id: 701, at: 65.5, segment_start: 64.0,
                         segment_end: 70.0, gift_row_id: 9701, segment_gifters: 2 })] }),
     gift({ event_id: 921, time: 1756502001, gift_id: 8002, gift_name: "Heart Me",
-           diamonds: 99, identity_key: "k4", user_nickname: "あおちゃ🐾",
+           diamonds: 99, identity_key: "k4", user_nickname: "視聴者E🐾",
            user_unique_id: "aocha", week_diamonds: 5000,
            hits: [hit({ segment_id: 701, at: 68.5, segment_start: 64.0,
                         segment_end: 70.0, gift_row_id: 9702, segment_gifters: 2,
                         is_primary: false })] }),
     // **1人しか投げていないのに長い。** 繋ぎを跨いで2場面が1つになった疑いが濃い形で、
-    // 実物(hl18 / 11.68〜22.25秒 / gifterはあきと1人)がこれだった。長いこと自体は
+    // 実物(hl18 / 11.68〜22.25秒 / gifterは視聴者A1人)がこれだった。長いこと自体は
     // 正しいことがある(gifterが複数居る長い演出は、演出が続けて起きただけ)ので、
     // 条件は「長い」ではなく**「長いのに投げた人が1人」**である。
     gift({ event_id: 930, time: 1756503000, gift_id: 9001, gift_name: "Ramune",
@@ -234,7 +234,7 @@ describe("story.js の検証と警告", () => {
     return {
       id: 9101, gift_event_id: 900, gift_id: 5655, gift_name: "Goal Highlight",
       gift_image: "/api/gift-icon/5655", diamonds: 6000,
-      user_nickname: "あきと🐢💤", user_unique_id: "akito",
+      user_nickname: "視聴者A🐢💤", user_unique_id: "viewer_a",
       at: 14.5, inside: true, is_primary: true, manual: false,
       excluded: false, dropped: false, chosen: false,
       ...over,
@@ -273,12 +273,12 @@ describe("story.js の検証と警告", () => {
     segment({ id: 201, idx: 2, start: 27.0, end: 30.0, at: 28.0,
               gifts: [segGift({ id: 9201, gift_event_id: 902, gift_id: 4001,
                                 gift_name: "Future City", diamonds: 4000,
-                                user_nickname: "おニャンコ🐢💤", user_unique_id: "onyanko",
+                                user_nickname: "視聴者B🐢💤", user_unique_id: "onyanko",
                                 at: 28.0 })] }),
     segment({ id: 301, idx: 3, start: 30.0, end: 42.0, at: 36.5, effect: [],
               gifts: [segGift({ id: 9301, gift_event_id: 903, gift_id: 3001,
                                 gift_name: "Swan", diamonds: 699,
-                                user_nickname: "あおちゃ🐾", user_unique_id: "aocha",
+                                user_nickname: "視聴者E🐾", user_unique_id: "aocha",
                                 at: 36.5 })] }),
     // 言い切れていないgift演出。**鹿が映っているのに「Goal Highlight」と名乗ったgift演出は、
     // これと同じ形をしていた。**
@@ -287,7 +287,7 @@ describe("story.js の検証と警告", () => {
               effect: [], approved: false,
               gifts: [segGift({ id: 9401, gift_event_id: 904, gift_id: 1,
                                 gift_name: "Guardian's Pledge", diamonds: 4999,
-                                user_nickname: "よい🐢💤 ｻｲｺｳｯ!", user_unique_id: "yoi",
+                                user_nickname: "視聴者C🐢💤 ｻｲｺｳｯ!", user_unique_id: "viewer_c",
                                 at: 47.2 })] }),
     // 連投が1つのgift演出に乗った形。gift 3件でgift演出は1つである。
     segment({ id: 501, idx: 5, start: 54.0, end: 60.0, at: 55.0, effect: [],
@@ -307,11 +307,11 @@ describe("story.js の検証と警告", () => {
     segment({ id: 701, idx: 6, start: 64.0, end: 70.0, at: 65.5, effect: [],
               gifts: [
                 segGift({ id: 9701, gift_event_id: 920, gift_id: 8001, gift_name: "Lion",
-                          diamonds: 150, user_nickname: "あきと🐢💤",
-                          user_unique_id: "akito", at: 65.5 }),
+                          diamonds: 150, user_nickname: "視聴者A🐢💤",
+                          user_unique_id: "viewer_a", at: 65.5 }),
                 segGift({ id: 9702, gift_event_id: 921, gift_id: 8002,
                           gift_name: "Heart Me", diamonds: 99,
-                          user_nickname: "あおちゃ🐾", user_unique_id: "aocha",
+                          user_nickname: "視聴者E🐾", user_unique_id: "aocha",
                           at: 68.5, is_primary: false }),
               ] }),
   ];
@@ -328,21 +328,21 @@ describe("story.js の検証と警告", () => {
   };
 
   // 置き場に実在する書き出し済みfile。**下見(plan)とは別物**で、計画を組まなくても観られる。
-  const EXPORT_FILE = "260829-260905_coin13543_あきと🐢💤_story.mp4";
+  const EXPORT_FILE = "260829-260905_coin13543_視聴者A🐢💤_story.mp4";
   const EXPORTS = {
     streamer: STREAMER, week: "2026-08-29", exists: true,
-    directory: "D:/rec/pomiiiip/LiveHightlite_マージ済み",
+    directory: "D:/rec/streamer_a/LiveHightlite_マージ済み",
     items: [
-      { filename: EXPORT_FILE, path: `D:/rec/pomiiiip/LiveHightlite_マージ済み/${EXPORT_FILE}`,
+      { filename: EXPORT_FILE, path: `D:/rec/streamer_a/LiveHightlite_マージ済み/${EXPORT_FILE}`,
         bytes: 12_345_678, modified_at: 1756700000,
-        url: "/api/clips/file?root=work&name=pomiiiip%2F1.mp4",
-        week: "260829-260905", coin: 13543, position: 1, nickname: "あきと🐢💤",
+        url: "/api/clips/file?root=work&name=streamer_a%2F1.mp4",
+        week: "260829-260905", coin: 13543, position: 1, nickname: "視聴者A🐢💤",
         verified: true, provenance: true },
-      { filename: "260829-260905_coin7000_よい🐢💤 ｻｲｺｳｯ!_story.mp4",
-        path: "D:/rec/pomiiiip/LiveHightlite_マージ済み/2.mp4",
+      { filename: "260829-260905_coin7000_視聴者C🐢💤 ｻｲｺｳｯ!_story.mp4",
+        path: "D:/rec/streamer_a/LiveHightlite_マージ済み/2.mp4",
         bytes: 6_000_000, modified_at: 1756700100,
-        url: "/api/clips/file?root=work&name=pomiiiip%2F2.mp4",
-        week: "260829-260905", coin: 7000, position: 2, nickname: "よい🐢💤 ｻｲｺｳｯ!",
+        url: "/api/clips/file?root=work&name=streamer_a%2F2.mp4",
+        week: "260829-260905", coin: 7000, position: 2, nickname: "視聴者C🐢💤 ｻｲｺｳｯ!",
         verified: false, provenance: false },
     ],
   };
@@ -353,23 +353,23 @@ describe("story.js の検証と警告", () => {
     + `${STREAMER}&filename=${encodeURIComponent(EXPORT_FILE)}`;
   const PROVENANCE = {
     streamer: STREAMER, filename: EXPORT_FILE, provenance: true, verified: true,
-    week: "2026-08-29", nickname: "あきと🐢💤", seconds: 18.0,
+    week: "2026-08-29", nickname: "視聴者A🐢💤", seconds: 18.0,
     cuts: [
-      { index: 0, at: 0.0, seconds: 9.0, highlight_id: 7, src: "g65i71rvmudg.mp4",
+      { index: 0, at: 0.0, seconds: 9.0, highlight_id: 7, src: "g65hl0000001.mp4",
         diamonds: 6000, start: 12.0, end: 21.0,
         gifts: [{ gift_event_id: 900, gift_name: "Goal Highlight", diamonds: 6000,
-                  user_nickname: "あきと🐢💤" }] },
-      { index: 1, at: 9.0, seconds: 9.0, highlight_id: 7, src: "g65i71rvmudg.mp4",
+                  user_nickname: "視聴者A🐢💤" }] },
+      { index: 1, at: 9.0, seconds: 9.0, highlight_id: 7, src: "g65hl0000001.mp4",
         diamonds: 4999, start: 45.0, end: 54.0,
         gifts: [{ gift_event_id: 904, gift_name: "Guardian's Pledge", diamonds: 4999,
-                  user_nickname: "よい🐢💤 ｻｲｺｳｯ!" }] },
+                  user_nickname: "視聴者C🐢💤 ｻｲｺｳｯ!" }] },
     ],
   };
 
   // 配信者ごとの投入先。**Serverが名乗る値**で、画面はpathを組み立てない —— 置き場の
   // 決まりが変わった日に、画面だけが実在しない場所を名乗る(投入は成功するので、名乗りが
   // 嘘であることに誰も気付かない)。
-  const UPLOAD_DIR = "D:/rec/pomiiiip/highlights";
+  const UPLOAD_DIR = "D:/rec/streamer_a/highlights";
 
   function routes(over = {}) {
     return {
@@ -556,6 +556,22 @@ describe("story.js の検証と警告", () => {
       expect(doc.getElementById("cv-stats").textContent).toContain("外したgift 12件");
       // 対象外の行はそもそも届かないので、印の描き分けも置かない。
       expect(doc.getElementById("cv-rows").textContent).not.toContain("対象外");
+    });
+
+    it("束ねたアカウントの行は、畳んだ数を名前の脇で名乗る", async () => {
+      // 束ね(user_merges)の在る人は、週合計が何アカウントぶんの合計なのかを出さないと、
+      // その行が下限を越えている理由を画面から辿れない(配信者画面の日ぶんと同じ名乗り)。
+      const merged = {
+        ...COVERAGE,
+        items: COVERAGE.items.map((item, index) => (
+          index === 0 ? { ...item, accounts: 2,
+                          person_key: "k1", identity_key: "k2" } : item)),
+      };
+      await openCover({ [`GET ${URL_COVER}`]: merged });
+      const chips = Array.from(doc.querySelectorAll("#cv-rows .st-merged"));
+      expect(chips.length).toBe(1);
+      expect(chips[0].textContent).toContain("統合 2");
+      expect(chips[0].dataset.accounts).toBe("2");
     });
 
     it("演出区間(has_effect)は画面の判断材料に使わない", async () => {
@@ -929,7 +945,7 @@ describe("story.js の検証と警告", () => {
 
   // **同じgiftは複数のハイライトに入る。** どれを観るかを人が選べないと、機械が代表に
   // 決めた1本にそのgiftのアニメが1frameも無いとき、その行から確かめる手が無い ——
-  // 実測(Whale diving 2,150🪙 / おニャンコ🐢💤)は3本に当たり、3本とも同席と判定され、
+  // 実測(Whale diving 2,150🪙 / 視聴者B🐢💤)は3本に当たり、3本とも同席と判定され、
   // 代表になった5.9秒の1本には映っておらず、11.1秒ある別の1本の11.8〜15.8秒にだけ
   // 映っていた。選ぶことは「このgiftはこの1本を使う」という指定でもある。
   describe("候補の切り替え", () => {
@@ -941,12 +957,12 @@ describe("story.js の検証と警告", () => {
       id: 202, idx: 0, start: 3.0, end: 9.0, at: 4.0,
       gifts: [segGift({ id: 9202, gift_event_id: 902, gift_id: 4001,
                         gift_name: "Future City", diamonds: 4000,
-                        user_nickname: "おニャンコ🐢💤", user_unique_id: "onyanko",
+                        user_nickname: "視聴者B🐢💤", user_unique_id: "onyanko",
                         at: 4.0 })],
     });
     const DETAIL_8 = {
-      highlight: { id: 8, unique_id: STREAMER, filename: "g65rb2jh3030.mp4",
-                   path: "/hl/g65rb2jh3030.mp4", url: MEDIA_8,
+      highlight: { id: 8, unique_id: STREAMER, filename: "g65hl0000005.mp4",
+                   path: "/hl/g65hl0000005.mp4", url: MEDIA_8,
                    duration_seconds: 24.0, status: "matched", week: "2026-08-29" },
       segments: [SEGMENT_202],
     };
@@ -963,15 +979,15 @@ describe("story.js の検証と警告", () => {
       await selectRow("Future City");
       expect(picker().disabled).toBe(false);
       // **file名が主語。** 頭は共通の羅列なので尻だけを出し、尺と印を添える。
-      expect(options()).toEqual(["…71rvmudg.mp4 3.0秒 (主)",
-                                 "…b2jh3030.mp4 6.0秒 (主)"]);
+      expect(options()).toEqual(["…l0000001.mp4 3.0秒 (主)",
+                                 "…l0000005.mp4 6.0秒 (主)"]);
       expect(picker().value).toBe("9201");
 
       // 1本しか当たっていない行では触らせない —— 押せる見た目のまま何も起きないのが
       // 一番読めない。
       await selectRow("Swan");
       expect(picker().disabled).toBe(true);
-      expect(options()).toEqual(["…71rvmudg.mp4 12.0秒 (主)"]);
+      expect(options()).toEqual(["…l0000001.mp4 12.0秒 (主)"]);
     });
 
     it("候補を選ぶとその本を開き、gift演出の頭から映す", async () => {
@@ -1665,7 +1681,7 @@ describe("story.js の検証と警告", () => {
 
     it("相席のgift演出でも、片方の区間を詰めて相手は動かない", async () => {
       // **これが今回の作りが解いた事故そのものである。** gift演出の窓を「その行の区間」と
-      // していた頃は、あきとの行で詰めた6秒があおちゃのfileでも同じ長さで切られていた。
+      // していた頃は、視聴者Aの行で詰めた6秒が視聴者Eのfileでも同じ長さで切られていた。
       const seg = SEGMENTS[6];
       await openCover({
         "PATCH /api/highlights/7/segments/701/gifts/9701": {
@@ -1883,21 +1899,21 @@ describe("story.js の検証と警告", () => {
       week_label: "8/29 〜 9/5",
       counts: { total: 3, selected: 3 },
       files: [{
-        nickname: "あきと🐢💤", user_unique_id: "akito", identity_key: "k1", rank: 1,
+        nickname: "視聴者A🐢💤", user_unique_id: "viewer_a", identity_key: "k1", rank: 1,
         position: 1, coin: 13543, diamonds: 10999, seconds: 18.0,
         filename: EXPORT_FILE,
         count: 2,
         items: [
           { start: 12.0, end: 21.0, highlight_id: 7, at: 14.5,
             segment_id: 101, gift_name: "Goal Highlight", gift_id: 5655, diamonds: 6000,
-            user_nickname: "あきと🐢💤", identity_key: "k1",
+            user_nickname: "視聴者A🐢💤", identity_key: "k1",
             confidence: "high", approved: true,
             frame_url: "/api/highlights/7/frame?at=14.500", frame_clamped: false,
             recording_frame_url: "/api/highlights/7/segments/101/frame?at=14.500" },
-          // **これが事故そのもの。** あきとのfileに、よいが投げたgiftが入っている。
+          // **これが事故そのもの。** 視聴者Aのfileに、よいが投げたgiftが入っている。
           { start: 45.0, end: 54.0, highlight_id: 7, at: 47.2,
             segment_id: 401, gift_name: "Guardian's Pledge", gift_id: 1, diamonds: 4999,
-            user_nickname: "よい🐢💤 ｻｲｺｳｯ!", identity_key: "k5",
+            user_nickname: "視聴者C🐢💤 ｻｲｺｳｯ!", identity_key: "k5",
             confidence: "low", approved: false,
             frame_url: "/api/highlights/7/frame?at=47.200", frame_clamped: false,
             recording_frame_url: "/api/highlights/7/segments/401/frame?at=47.200" },
@@ -1908,11 +1924,11 @@ describe("story.js の検証と警告", () => {
           { start: 12.0, end: 21.0, seconds: 9.0, highlight_id: 7, diamonds: 6000,
             segment_ids: [101], gift_event_ids: [900],
             gifts: [{ gift_event_id: 900, gift_name: "Goal Highlight", diamonds: 6000,
-                      user_nickname: "あきと🐢💤" }] },
+                      user_nickname: "視聴者A🐢💤" }] },
           { start: 45.0, end: 54.0, seconds: 9.0, highlight_id: 7, diamonds: 4999,
             segment_ids: [401], gift_event_ids: [904],
             gifts: [{ gift_event_id: 904, gift_name: "Guardian's Pledge",
-                      diamonds: 4999, user_nickname: "よい🐢💤 ｻｲｺｳｯ!" }] },
+                      diamonds: 4999, user_nickname: "視聴者C🐢💤 ｻｲｺｳｯ!" }] },
         ],
       }],
       skipped: [],
@@ -1962,11 +1978,11 @@ describe("story.js の検証と警告", () => {
           missing: [
             { gift_event_id: 911, label: "08/30 21:04", gift_name: "Fireworks",
               diamonds: 1088, gift_count: 1, unit_diamonds: 1088,
-              user_nickname: "あきと🐢💤", identity_key: "k1",
+              user_nickname: "視聴者A🐢💤", identity_key: "k1",
               highlight_ids: [], reason: "どのハイライトにも出ていません" },
             { gift_event_id: 912, label: "08/31 22:10", gift_name: "Hearts",
               diamonds: 210, gift_count: 1, unit_diamonds: 210,
-              user_nickname: "あきと🐢💤", identity_key: "k1",
+              user_nickname: "視聴者A🐢💤", identity_key: "k1",
               highlight_ids: [9], reason: "別のハイライトに在りますが、素材に選んでいません" },
           ],
         }],
@@ -2006,7 +2022,7 @@ describe("story.js の検証と警告", () => {
       const uncovered = {
         ...PLAN,
         uncovered: [{
-          identity_key: "k9", nickname: "むらたろう", coin: 4200,
+          identity_key: "k9", nickname: "視聴者G", coin: 4200,
           missing_count: 1, missing_diamonds: 1088,
           missing: [{ gift_event_id: 950, label: "08/30 20:00", gift_name: "Fireworks",
                       diamonds: 1088, reason: "どのハイライトにも出ていません" }],
@@ -2018,7 +2034,7 @@ describe("story.js の検証と警告", () => {
       expect(doc.getElementById("ex-skipped")).toBeNull();
       const row = rows("ex-rows").find((tr) => tr.classList.contains("st-nofile"));
       expect(row).toBeTruthy();
-      expect(row.textContent).toContain("むらたろう");
+      expect(row.textContent).toContain("視聴者G");
       expect(row.querySelector(".st-nofile-tag").textContent).toContain("fileにならない");
       const cells = cellText(row);
       expect(cells[0]).toBe("—");
@@ -2040,7 +2056,7 @@ describe("story.js の検証と警告", () => {
       expect(items[0].classList.contains("st-foreign")).toBe(false);
       expect(items[1].classList.contains("st-foreign")).toBe(true);
       // 名前そのものが行に出る(絵と併せて二重に気付ける)。
-      expect(items[1].querySelector(".st-sub-who").textContent).toContain("よい");
+      expect(items[1].querySelector(".st-sub-who").textContent).toContain("視聴者C");
       // 混ざっていることは色で名乗る(文章では言い直さない)。
       expect(items[1].querySelector(".st-sub-who").classList.contains("st-risk-text"))
         .toBe(true);
@@ -2048,6 +2064,34 @@ describe("story.js の検証と警告", () => {
       // 名前が中の行にも何十回と並ぶだけで、行の幅を食って読みにくくなっていた ――
       // 名前が出ている行が1行だけになることで、混ざった別人はかえって目に立つ。
       expect(items[0].querySelector(".st-sub-who")).toBeNull();
+    });
+
+    it("束ねたサブアカウントのgiftは別人として名乗らない", async () => {
+      // 配信者画面で束ねた相手(user_merges)は同じ人である。アカウント(identity_key)で
+      // 比べていた頃は、束ねた人が自分のサブアカウントで投げたgiftのたびに
+      // 「別人が混ざっている」と名乗られていた。比べるのはServerが畳んだ person_key。
+      const merged = {
+        ...PLAN,
+        files: [{
+          ...PLAN.files[0],
+          accounts: 2,
+          items: [
+            { ...PLAN.files[0].items[0], person_key: "k1" },
+            // 主とは別のアカウントで投げたgift。畳み先は同じ人である。
+            { ...PLAN.files[0].items[1], identity_key: "k2", person_key: "k1",
+              user_nickname: "視聴者Aのサブ" },
+          ],
+        }],
+      };
+      await plan({ "POST /api/highlights/export/plan": merged });
+      rows("ex-rows")[0].querySelector(".st-caret").click();
+      const items = Array.from(doc.querySelectorAll("#ex-rows .st-subitem"));
+      expect(items[1].classList.contains("st-foreign")).toBe(false);
+      // 同じ人なので名前も出さない(束の見出しと同じ名前を並べない)。
+      expect(items[1].querySelector(".st-sub-who")).toBeNull();
+      // 何アカウントぶんの1本なのかは、束の見出しの脇で名乗る。
+      expect(rows("ex-rows")[0].querySelector(".st-merged").textContent)
+        .toContain("統合 2");
     });
 
     it("gift件数はServerが数えた値を出す(items.lengthで代用しない)", async () => {
@@ -2136,7 +2180,7 @@ describe("story.js の検証と警告", () => {
       await page.settle();
       const files = Array.from(doc.querySelectorAll("#ex-files .st-filepick"));
       expect(files.length).toBe(EXPORTS.items.length);
-      expect(files[0].textContent).toContain("あきと🐢💤");
+      expect(files[0].textContent).toContain("視聴者A🐢💤");
       expect(doc.getElementById("ex-files-note").textContent).toBe("2");
       // 検証用の書き出し(DBの実照合と突き合わせていない物)は印で名乗る。
       expect(files[1].classList.contains("st-risk")).toBe(true);
@@ -2287,25 +2331,25 @@ describe("story.js の検証と警告", () => {
       week_label: "8/29 〜 9/5",
       counts: { total: 2, selected: 2 },
       files: [{
-        nickname: "あきと🐢💤", user_unique_id: "akito", identity_key: "k1", rank: 1,
+        nickname: "視聴者A🐢💤", user_unique_id: "viewer_a", identity_key: "k1", rank: 1,
         position: 1, coin: 13543, diamonds: 10999, seconds: 18.0,
         filename: EXPORT_FILE, count: 2,
         items: [
           { start: 12.0, end: 21.0, highlight_id: 7, at: 14.5, segment_id: 101,
             gift_name: "Goal Highlight", diamonds: 6000, identity_key: "k1",
-            user_nickname: "あきと🐢💤", confidence: "high", approved: true },
+            user_nickname: "視聴者A🐢💤", confidence: "high", approved: true },
           { start: 45.0, end: 54.0, highlight_id: 8, at: 47.2, segment_id: 401,
             gift_name: "Guardian's Pledge", diamonds: 4999, identity_key: "k1",
-            user_nickname: "あきと🐢💤", confidence: "high", approved: true },
+            user_nickname: "視聴者A🐢💤", confidence: "high", approved: true },
         ],
         cuts: [
           { start: 12.0, end: 21.0, seconds: 9.0, highlight_id: 7, diamonds: 6000,
             gifts: [{ gift_event_id: 900, gift_name: "Goal Highlight",
-                      diamonds: 6000, user_nickname: "あきと🐢💤" }] },
+                      diamonds: 6000, user_nickname: "視聴者A🐢💤" }] },
           // **別の素材から来る窓。** 1本のfileは複数のハイライトに跨る。
           { start: 45.0, end: 54.0, seconds: 9.0, highlight_id: 8, diamonds: 4999,
             gifts: [{ gift_event_id: 904, gift_name: "Guardian's Pledge",
-                      diamonds: 4999, user_nickname: "あきと🐢💤" }] },
+                      diamonds: 4999, user_nickname: "視聴者A🐢💤" }] },
         ],
       }],
       skipped: [],
@@ -2313,7 +2357,7 @@ describe("story.js の検証と警告", () => {
     const MEDIA_8 = "/api/highlights/8/media";
     const TWO_SOURCES = {
       items: [HIGHLIGHTS[0],
-              { ...HIGHLIGHTS[0], id: 8, filename: "g65rb2jh3030.mp4",
+              { ...HIGHLIGHTS[0], id: 8, filename: "g65hl0000005.mp4",
                 url: MEDIA_8 }],
       defaults: DEFAULTS, upload_dirs: { [STREAMER]: UPLOAD_DIR },
     };
@@ -2467,7 +2511,7 @@ describe("story.js の検証と警告", () => {
   describe("要らない行を片付ける", () => {
     const GONE = {
       id: 3, unique_id: STREAMER, filename: "synth_1153_0.mp4",
-      path: "D:/rec/pomiiiip/highlights/synth_1153_0.mp4",
+      path: "D:/rec/streamer_a/highlights/synth_1153_0.mp4",
       // 実体が無い行にServerは再生URLを返さない(``_with_url``)。押しても404になる
       // buttonを出さないための取り決めで、画面はpathからURLを組み立てない。
       url: null,
@@ -2573,13 +2617,13 @@ describe("story.js の検証と警告", () => {
 
     it("行をclickすると左のplayerに載り、面は動かない", async () => {
       await open();
-      listRow("g65i71rvmudg.mp4").click();
+      listRow("g65hl0000001.mp4").click();
       await page.settle();
       // Serverが名乗ったURLをそのまま使う(画面はpathからURLを組み立てない)。
       expect(doc.getElementById("hl-video").getAttribute("src")).toBe(MEDIA_7);
       // 動画の上に名乗りの段は置かない。**押した行そのものに印が付く**(検証・出力と同じ)。
       expect(doc.getElementById("hl-play-head")).toBeNull();
-      expect(listRow("g65i71rvmudg.mp4").classList.contains("st-current")).toBe(true);
+      expect(listRow("g65hl0000001.mp4").classList.contains("st-current")).toBe(true);
       // tabは一覧のまま。以前は検証tabへ飛ばしていた。
       expect(doc.getElementById("view-list").classList.contains("hidden")).toBe(false);
       expect(doc.getElementById("view-cover").classList.contains("hidden")).toBe(true);
@@ -2591,7 +2635,7 @@ describe("story.js の検証と警告", () => {
       await open({
         [`GET ${URL_LIST}`]: {
           items: [{ id: 3, unique_id: STREAMER, filename: "synth_1153_0.mp4",
-                    path: "D:/rec/pomiiiip/highlights/synth_1153_0.mp4", url: null,
+                    path: "D:/rec/streamer_a/highlights/synth_1153_0.mp4", url: null,
                     duration_seconds: 10.0, status: "missing", segment_count: 0 }],
           defaults: DEFAULTS, upload_dirs: { [STREAMER]: UPLOAD_DIR },
         },
@@ -2608,7 +2652,7 @@ describe("story.js の検証と警告", () => {
     // 上のtabから移る。
     it("行のbuttonは照合だけで、面を移るbuttonは置かない", async () => {
       await open();
-      const labels = Array.from(listRow("g65i71rvmudg.mp4").querySelectorAll("button"))
+      const labels = Array.from(listRow("g65hl0000001.mp4").querySelectorAll("button"))
         .map((el) => el.textContent);
       expect(labels).toEqual(["照合"]);
     });
@@ -2616,7 +2660,7 @@ describe("story.js の検証と警告", () => {
 
   describe("ハイライトの投入", () => {
     const UPLOAD_URL = "/api/highlights/upload";
-    const NEW_FILE = "g65rb2jh3030.mp4";
+    const NEW_FILE = "g65hl0000005.mp4";
 
     function uploaded(over = {}) {
       return {
@@ -2698,14 +2742,14 @@ describe("story.js の検証と警告", () => {
     it("配信者を選んでいれば、その配信者で投入する", async () => {
       await open({ [`POST ${UPLOAD_URL}`]: uploaded() });
       await pickStreamer(STREAMER);
-      await dropOn("view-list", [mp4(NEW_FILE), mp4("g65i71rvmudg.mp4")]);
+      await dropOn("view-list", [mp4(NEW_FILE), mp4("g65hl0000001.mp4")]);
 
       const [call] = uploads();
       expect(call.method).toBe("POST");
       // 配信者はbodyで名乗る(投入先を決めるのはServerで、画面はpathを組み立てない)。
       expect(call.body.get("streamer")).toBe(STREAMER);
       expect(call.body.getAll("files").map((f) => f.name))
-        .toEqual([NEW_FILE, "g65i71rvmudg.mp4"]);
+        .toEqual([NEW_FILE, "g65hl0000001.mp4"]);
       // 何件入ったかと、どこへ入ったかを名乗る。
       const text = doc.body.textContent;
       expect(text).toContain("+1");

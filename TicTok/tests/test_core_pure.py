@@ -475,7 +475,7 @@ def test_js_safe_keeps_max_safe_integer_numeric():
 
 def test_js_safe_stringifies_beyond_max_safe_integer():
     assert js_safe(JS_MAX_SAFE_INTEGER + 1) == str(JS_MAX_SAFE_INTEGER + 1)
-    assert js_safe(7664176088063052545) == "7664176088063052545"
+    assert js_safe(7301234567890123457) == "7301234567890123457"
 
 
 def test_js_safe_uses_absolute_value_for_negatives():
@@ -491,7 +491,7 @@ def test_js_safe_does_not_stringify_booleans():
 
 def test_js_safe_leaves_floats_and_strings_alone():
     assert js_safe(1e300) == 1e300
-    assert js_safe("7664176088063052545") == "7664176088063052545"
+    assert js_safe("7301234567890123457") == "7301234567890123457"
     assert js_safe(None) is None
 
 
@@ -508,8 +508,8 @@ def test_js_safe_normalises_tuples_to_lists():
 
 
 def test_js_safe_response_render_emits_the_id_as_a_string():
-    body = JsSafeJSONResponse({"room_id": 7664176088063052545, "count": 12}).body
-    assert json.loads(body) == {"room_id": "7664176088063052545", "count": 12}
+    body = JsSafeJSONResponse({"room_id": 7301234567890123457, "count": 12}).body
+    assert json.loads(body) == {"room_id": "7301234567890123457", "count": 12}
 
 
 # --------------------------------------------------------------------- cancel

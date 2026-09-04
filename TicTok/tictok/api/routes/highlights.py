@@ -1723,14 +1723,21 @@ def _export_group(entry: dict) -> dict:
             "gift_count": item.get("gift_count"),
             "unit_diamonds": item.get("unit_diamonds"),
             # **誰が投げたか。** 行にこれが無いと、束を開いても持ち主と違うgifterのgift演出が
-            # 紛れていることに人が気付けない —— 今回の事故(``あきと`` のfileに ``よい`` の
+            # 紛れていることに人が気付けない —— 今回の事故(``視聴者A`` のfileに ``よい`` の
             # gift)は、束の2件目に別の名前が並んでいれば一目で判った。
             #
             # ``identity_key`` まで返すのは、**表示名で比べては駄目**だからである。改名すれば
             # 別人に見え、同名を名乗れば同一人に見える。画面は鍵どうしで比べる。
+            #
+            # **比べる鍵は ``person_key`` の方である。** ``identity_key`` は投げた
+            # アカウントで、人が束ねたサブアカウント(user_merges)はそのままでは別人に
+            # 見える —— 束ねた人が自分のサブで投げるたびに「別人が混ざっている」と
+            # 名乗ることになる。両方返すのは、どのアカウントから来たgiftかも行から
+            # 読めるようにするためである。
             "user_nickname": item.get("user_nickname"),
             "user_unique_id": item.get("user_unique_id"),
             "identity_key": item.get("identity_key"),
+            "person_key": item.get("person_key"),
             "recording_id": item.get("recording_id"),
             "media_start": item.get("media_start"),
             # gift演出の範囲の中に居るgiftか。偽なら ``at`` はgift演出の頭より手前を指し、

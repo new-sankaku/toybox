@@ -1,7 +1,7 @@
 """JSON serialization boundary for the HTTP/WebSocket API.
 
 JavaScriptのNumberはIEEE754 doubleなので、2^53を超える整数はJSON.parseの時点で丸められる
-(7664176088063052545 → 7664176088063053000)。TikTokのroom_id/battle_id/team_id/user_idは
+(7301234567890123457 → 7301234567890123776)。TikTokのroom_id/battle_id/team_id/user_idは
 全てint64で日常的にこの範囲を超えるため、JSON数値のまま送ると画面に出たIDが実IDと別物になり、
 IDでの突合・検索が静かに壊れる。
 

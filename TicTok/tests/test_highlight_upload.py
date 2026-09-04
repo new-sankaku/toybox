@@ -62,10 +62,10 @@ def upload_roots(server, tmp_path):
     layout.set_record_roots([work, final])
     layout.set_pool_root(work)
     return {"work": work, "final": final, "layout": layout,
-            "dir": work / "pomi" / layout.HIGHLIGHT_DIRNAME}
+            "dir": work / "streamer_a" / layout.HIGHLIGHT_DIRNAME}
 
 
-def upload(client, files, streamer="pomi"):
+def upload(client, files, streamer="streamer_a"):
     """multipartで投入する。``files`` は ``[(file名, bytes), …]``。"""
     payload = [("files", (name, body, "video/mp4")) for name, body in files]
     return client.post(UPLOAD_URL, data={"streamer": streamer}, files=payload)
@@ -75,7 +75,7 @@ def names_in(directory: Path) -> set:
     return {path.name for path in directory.iterdir()} if directory.is_dir() else set()
 
 
-def ledger(client, streamer="pomi") -> dict:
+def ledger(client, streamer="streamer_a") -> dict:
     items = client.get(f"/api/highlights?streamer={streamer}").json()["items"]
     return {item["filename"]: item for item in items}
 
@@ -87,30 +87,30 @@ def test_upload_places_the_file_into_the_canonical_dir_and_lists_it(client, uplo
     """正規の置き場(``<work root>/<配信者>/highlights``)へ置き、**同じ口の中で台帳へ載せる**。
 
     走査を画面の続きの操作にすると、投入は済んだのに台帳には無い状態が画面から見える。"""
-    res = upload(client, [("g65i71rvmudg.mp4", BODY_A)])
+    res = upload(client, [("g65hl0000001.mp4", BODY_A)])
     assert res.status_code == 200
     body = res.json()
 
-    assert body["streamer"] == "pomi"
+    assert body["streamer"] == "streamer_a"
     assert Path(body["directory"]) == upload_roots["dir"]
     assert body["saved"] == 1 and body["rejected"] == 0
 
     (item,) = body["items"]
-    assert item["filename"] == "g65i71rvmudg.mp4"
+    assert item["filename"] == "g65hl0000001.mp4"
     assert item["saved"] is True
     assert item["bytes"] == len(BODY_A)
-    assert Path(item["path"]) == upload_roots["dir"] / "g65i71rvmudg.mp4"
+    assert Path(item["path"]) == upload_roots["dir"] / "g65hl0000001.mp4"
 
     # 実体は正規の置き場の下にだけ在る。旧来の置き場にも final root にも作らない。
-    assert (upload_roots["dir"] / "g65i71rvmudg.mp4").read_bytes() == BODY_A
-    assert not (upload_roots["work"] / "pomi" / "LiveHightlite").exists()
-    assert not (upload_roots["final"] / "pomi").exists()
+    assert (upload_roots["dir"] / "g65hl0000001.mp4").read_bytes() == BODY_A
+    assert not (upload_roots["work"] / "streamer_a" / "LiveHightlite").exists()
+    assert not (upload_roots["final"] / "streamer_a").exists()
 
     # 走査まで済んでいる。画面は「載った」と言い切れる。
     assert body["scan"]["added"] == 1
-    row = ledger(client)["g65i71rvmudg.mp4"]
+    row = ledger(client)["g65hl0000001.mp4"]
     assert row["root_key"] == "work"
-    assert row["source_dir"] == "pomi/highlights"
+    assert row["source_dir"] == "streamer_a/highlights"
     assert row["bytes"] == len(BODY_A)
     assert row["status"] == "new"
 
@@ -124,10 +124,10 @@ def test_upload_requires_a_streamer(client, upload_roots):
     assert res.status_code == 400
     assert "配信者" in res.json()["detail"]
     # 置き場は1つも作らない(空のfolderだけが増えることが無い)。
-    assert not (upload_roots["work"] / "pomi").exists()
+    assert not (upload_roots["work"] / "streamer_a").exists()
 
     # fileを1つも付けない投入も断る。0件を成功として返すと、画面は投入した気になる。
-    assert client.post(UPLOAD_URL, data={"streamer": "pomi"}).status_code == 400
+    assert client.post(UPLOAD_URL, data={"streamer": "streamer_a"}).status_code == 400
 
 
 # ===== 断るのは1件だけ =====
@@ -192,12 +192,12 @@ def test_a_crafted_name_cannot_write_outside_the_placement(client, upload_roots,
 
     # 置き場の外(work root直下・親・final root)に何も生まれていないこと。
     assert names_in(upload_roots["dir"]) == set()
-    assert {p.name for p in upload_roots["work"].iterdir()} <= {"pomi"}
+    assert {p.name for p in upload_roots["work"].iterdir()} <= {"streamer_a"}
     assert "evil.mp4" not in {p.name for p in upload_roots["work"].parent.rglob("*")}
     assert ledger(client) == {}
 
 
-@pytest.mark.parametrize("streamer", ["../evil", "pomi/sub", r"pomi\sub", ".."])
+@pytest.mark.parametrize("streamer", ["../evil", "streamer_a/sub", r"streamer_a\sub", ".."])
 def test_a_crafted_streamer_cannot_write_outside_the_root(client, upload_roots, streamer):
     """**配信者名もclient由来である。** 置き場のpathの一部になるので、file名と同じ厳しさで
     見る —— 区切りを含む名前は、rootの中とはいえ走査が二度と辿らない深さへfileを積む。"""
@@ -205,7 +205,7 @@ def test_a_crafted_streamer_cannot_write_outside_the_root(client, upload_roots, 
     assert res.status_code == 400
     assert "配信者名" in res.json()["detail"]
     assert "evil" not in {p.name for p in upload_roots["work"].parent.rglob("*")}
-    assert not (upload_roots["work"] / "pomi").exists()
+    assert not (upload_roots["work"] / "streamer_a").exists()
 
 
 # ===== 同名 =====
@@ -292,7 +292,7 @@ def test_nothing_half_written_is_left_in_the_placement(client, upload_roots, mon
 # —— pathを受ければ、そこから任意のdirへ書ける口になる。
 
 
-def upload_into(client, folder, files, streamer="pomi", root_key="work"):
+def upload_into(client, folder, files, streamer="streamer_a", root_key="work"):
     """folderを指定して投入する。``folder`` は一覧が名乗る ``source_dir``。"""
     payload = [("files", (name, body, "video/mp4")) for name, body in files]
     return client.post(UPLOAD_URL,
@@ -308,16 +308,16 @@ def test_upload_can_target_a_folder_under_the_placement(client, upload_roots):
     layout = upload_roots["layout"]
 
     res = upload_into(client, layout.source_dir_of(week, "work"),
-                      [("g65i71rvmudg.mp4", BODY_A)])
+                      [("g65hl0000001.mp4", BODY_A)])
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["saved"] == 1
     assert Path(body["directory"]) == week
     # 置き場の直下ではなく、指したfolderの中に在る。
-    assert names_in(week) == {"g65i71rvmudg.mp4"}
+    assert names_in(week) == {"g65hl0000001.mp4"}
     assert names_in(upload_roots["dir"]) == {"20260829-20260905"}
     # 走査はsubfolderまで辿るので、そのまま台帳へ載る。
-    assert set(ledger(client)) == {"g65i71rvmudg.mp4"}
+    assert set(ledger(client)) == {"g65hl0000001.mp4"}
 
 
 def test_upload_refuses_a_folder_outside_the_streamers_placement(client, upload_roots):
@@ -334,7 +334,7 @@ def test_upload_refuses_a_folder_outside_the_streamers_placement(client, upload_
     assert names_in(other) == set()
 
     # ``..`` で抜けようとしても同じ。名前の見た目ではなく、解決したpathで照合している。
-    res = upload_into(client, "pomi/highlights/../../someone-else/highlights",
+    res = upload_into(client, "streamer_a/highlights/../../someone-else/highlights",
                       [("a.mp4", BODY_A)])
     assert res.status_code == 400
     assert names_in(other) == set()
@@ -343,7 +343,7 @@ def test_upload_refuses_a_folder_outside_the_streamers_placement(client, upload_
 def test_upload_names_a_folder_that_is_gone(client, upload_roots):
     """消えたfolderは404で名乗る。**黙って置き場の直下へ落とさない** —— 週で仕分けたはずの
     素材が根に散らばると、どこへ入ったのかを人が追えない。"""
-    res = upload_into(client, "pomi/highlights/20260829-20260905", [("a.mp4", BODY_A)])
+    res = upload_into(client, "streamer_a/highlights/20260829-20260905", [("a.mp4", BODY_A)])
     assert res.status_code == 404
     assert "20260829-20260905" in res.json()["detail"]
 
@@ -365,14 +365,14 @@ def test_create_week_folder_makes_it_under_the_upload_dir(client, upload_roots):
     """作る場所は投入先の直下に固定する。読む側が複数の置き場を辿るのに対し、**作る側の
     場所が1つでなければ人が自分の作ったfolderへ戻れない**(投入と同じ約束)。"""
     name = week_names()[0]
-    res = client.post(FOLDER_URL, json={"streamer": "pomi", "name": name})
+    res = client.post(FOLDER_URL, json={"streamer": "streamer_a", "name": name})
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["created"] is True
     assert Path(body["path"]) == upload_roots["dir"] / name
     assert (upload_roots["dir"] / name).is_dir()
     # 一覧はそのfolderを棚として名乗る。画面はここの綴りでdropの投入先を指す。
-    folders = client.get("/api/highlights?streamer=pomi").json()["folders"]
+    folders = client.get("/api/highlights?streamer=streamer_a").json()["folders"]
     assert body["source_dir"] in {folder["source_dir"] for folder in folders}
 
 
@@ -380,8 +380,8 @@ def test_create_week_folder_is_idempotent(client, upload_roots):
     """既に在るなら作らずに ``created: false``。409で断ると、押しても何も起きないbuttonに
     見える —— 利用者の望む結末(そのfolderが在ること)は既に満たされている。"""
     name = week_names()[0]
-    assert client.post(FOLDER_URL, json={"streamer": "pomi", "name": name}).status_code == 200
-    res = client.post(FOLDER_URL, json={"streamer": "pomi", "name": name})
+    assert client.post(FOLDER_URL, json={"streamer": "streamer_a", "name": name}).status_code == 200
+    res = client.post(FOLDER_URL, json={"streamer": "streamer_a", "name": name})
     assert res.status_code == 200
     assert res.json()["created"] is False
 
@@ -391,7 +391,7 @@ def test_create_week_folder_takes_only_names_the_server_offers(client, upload_ro
     対象の週と1日ずれた名前のfolderが静かに増えるうえ、pathの区切りを名乗られれば置き場の
     外にも作れる。"""
     for bad in ["20260830-20260906", "../someone-else", "適当なfolder", ""]:
-        res = client.post(FOLDER_URL, json={"streamer": "pomi", "name": bad})
+        res = client.post(FOLDER_URL, json={"streamer": "streamer_a", "name": bad})
         assert res.status_code == 400, bad
         assert "週のfolder" in res.json()["detail"]
     assert names_in(upload_roots["dir"]) == set()

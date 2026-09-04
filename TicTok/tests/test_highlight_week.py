@@ -74,8 +74,8 @@ def _segment(tmp_db, highlight_id, idx, *, gift_event_id=None, dropped=0,
 
 @pytest.fixture
 def gifts(tmp_db, make_session, gift_builder):
-    """今週2件・前の週1件のgift。どれも同じ配信者(pomi)へ投げられている。"""
-    session_id = make_session("pomi")
+    """今週2件・前の週1件のgift。どれも同じ配信者(streamer_a)へ投げられている。"""
+    session_id = make_session("streamer_a")
     _gift(tmp_db, session_id, gift_builder, handle="01", at=THIS_WEEK,
           diamonds=6000, name="Goal Highlight")
     _gift(tmp_db, session_id, gift_builder, handle="01", at=THIS_WEEK + 600,
@@ -86,15 +86,15 @@ def gifts(tmp_db, make_session, gift_builder):
 
 
 def _by_name(tmp_db) -> dict:
-    return {item["filename"]: item for item in tmp_db.list_highlights("pomi")}
+    return {item["filename"]: item for item in tmp_db.list_highlights("streamer_a")}
 
 
 def test_週は当たったgiftの時刻から決まる(tmp_db, gifts):
     """**fileの日付ではない。** highlightは自分の時刻を持たないので、当たったgiftの
     eventの時刻だけが「いつの素材か」を言える。"""
-    this_week = _highlight(tmp_db, "pomi", "hl_this.mp4")
+    this_week = _highlight(tmp_db, "streamer_a", "hl_this.mp4")
     _segment(tmp_db, this_week, 0, gift_event_id=gifts["Goal Highlight"])
-    prev_week = _highlight(tmp_db, "pomi", "hl_prev.mp4")
+    prev_week = _highlight(tmp_db, "streamer_a", "hl_prev.mp4")
     _segment(tmp_db, prev_week, 0, gift_event_id=gifts["Flying Jets"])
 
     rows = _by_name(tmp_db)
@@ -107,7 +107,7 @@ def test_週は当たったgiftの時刻から決まる(tmp_db, gifts):
 def test_土曜7時を跨いだ本は両方の週を名乗る(tmp_db, gifts):
     """**多い方へ丸めない。** 丸めると、跨がれた側の週で「この週の素材が無い」と見える。
     代表(``week``)はgiftの多い方だが、``weeks`` には両方が残る。"""
-    highlight_id = _highlight(tmp_db, "pomi", "hl_cross.mp4")
+    highlight_id = _highlight(tmp_db, "streamer_a", "hl_cross.mp4")
     _segment(tmp_db, highlight_id, 0, gift_event_id=gifts["Flying Jets"])
     _segment(tmp_db, highlight_id, 1, gift_event_id=gifts["Goal Highlight"])
     _segment(tmp_db, highlight_id, 2, gift_event_id=gifts["LIVE On Air"])
@@ -119,7 +119,7 @@ def test_土曜7時を跨いだ本は両方の週を名乗る(tmp_db, gifts):
 
 def test_giftの当たっていない本は週を名乗らない(tmp_db, gifts):
     """置き場に在るだけの素材を「この週の物」と名乗る根拠が無い。推測で埋めない。"""
-    highlight_id = _highlight(tmp_db, "pomi", "hl_bare.mp4")
+    highlight_id = _highlight(tmp_db, "streamer_a", "hl_bare.mp4")
     _segment(tmp_db, highlight_id, 0)
 
     row = _by_name(tmp_db)["hl_bare.mp4"]
@@ -129,7 +129,7 @@ def test_giftの当たっていない本は週を名乗らない(tmp_db, gifts):
 def test_前回の照合の残りは数えない(tmp_db, gifts):
     """``dropped`` は前回の照合に在って今回は出なくなった行で、**今の照合が指す場所を
     持たない**。これを数えると、既に否定された対応が週の割り当てを動かす。"""
-    highlight_id = _highlight(tmp_db, "pomi", "hl_dropped.mp4")
+    highlight_id = _highlight(tmp_db, "streamer_a", "hl_dropped.mp4")
     _segment(tmp_db, highlight_id, 0, gift_event_id=gifts["Goal Highlight"])
     _segment(tmp_db, highlight_id, 1, gift_event_id=gifts["Flying Jets"],
              dropped=1, gift_dropped=1)

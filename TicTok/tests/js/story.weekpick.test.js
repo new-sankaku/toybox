@@ -3,7 +3,7 @@ import { loadPage } from "./helpers/page.js";
 
 // 出力tabの**素材は週で決まる**。素材を選ぶ棚そのものを外した ―― 期間を指定してあるのに
 // その期間の素材を人が選び直す作業が残っていて、しかも並ぶのは
-// v1c43ag5000cdab7s77og65i71rvmudg.mp4 のようなfile名だけで、中身を当てられなかった
+// v1c43ag5000cdab7s000g65hl0000001.mp4 のようなfile名だけで、中身を当てられなかった
 // (利用者の指定)。素材は**その週のgiftに当たったハイライト**そのものである。
 //
 // 縛るのは4つ。
@@ -19,7 +19,7 @@ describe("story.js 出力tabの素材を週で選ぶ", () => {
   let win;
   let doc;
 
-  const STREAMER = "pomiiiip";
+  const STREAMER = "streamer_a";
   const URL_LIST = "/api/highlights";
   const URL_MENTIONS = `/api/streamers/${STREAMER}/mentions`;
   const THIS_WEEK = "2026-08-29";
@@ -69,16 +69,16 @@ describe("story.js 出力tabの素材を週で選ぶ", () => {
                           start_label: "8/22(土) 7:00", end_label: "8/29(土) 7:00" };
 
   const EXPORTS = { streamer: STREAMER, week: THIS_WEEK, exists: true,
-                    directory: "D:/rec/pomiiiip/LiveHightlite_マージ済み", items: [] };
+                    directory: "D:/rec/streamer_a/LiveHightlite_マージ済み", items: [] };
 
   // 下見の応答。**中身は問わない** ―― この面の仕事は「何を素材として渡したか」で、
   // 誰のfileに何が入るかを決めるのはServerである。
   const PLAN = {
     order: "diamonds", week: THIS_WEEK, post_min: 1000, min_diamonds: 1000,
     files: [{
-      identity_key: "k1", nickname: "あきと🐢💤", user_nickname: "あきと🐢💤",
-      unique_id: "akito", user_unique_id: "akito", coin: 13543, rank: 1,
-      position: 1, position_total: 1, filename: "260829-260905_coin13543_あきと_story.mp4",
+      identity_key: "k1", nickname: "視聴者A🐢💤", user_nickname: "視聴者A🐢💤",
+      unique_id: "viewer_a", user_unique_id: "viewer_a", coin: 13543, rank: 1,
+      position: 1, position_total: 1, filename: "260829-260905_coin13543_視聴者A_story.mp4",
       count: 1, cut_count: 1, diamonds: 6000, seconds: 6.0, items: [], cuts: [],
     }],
     skipped: [], uncovered: [],
@@ -92,7 +92,7 @@ describe("story.js 出力tabの素材を週で選ぶ", () => {
     return {
       "POST /api/highlights/export/plan": PLAN,
       [`GET ${URL_LIST}`]: { items: HIGHLIGHTS, defaults: DEFAULTS,
-                             upload_dirs: { [STREAMER]: "D:/rec/pomiiiip/highlights" } },
+                             upload_dirs: { [STREAMER]: "D:/rec/streamer_a/highlights" } },
       [`GET ${URL_MENTIONS}`]: MENTIONS,
       [`GET ${URL_MENTIONS}?week=${PREV_WEEK}`]: PREV_MENTIONS,
       [`GET ${URL_MENTIONS}?week=${THIS_WEEK}`]: MENTIONS,
@@ -153,7 +153,7 @@ describe("story.js 出力tabの素材を週で選ぶ", () => {
     await openExport();
     // 押していないのに下見が引かれ、表が組まれている。
     expect(rows().length).toBe(1);
-    expect(rows()[0].textContent).toContain("あきと🐢💤");
+    expect(rows()[0].textContent).toContain("視聴者A🐢💤");
   });
 
   it("対象の判定文はもう出さない(閾値の説明は帯を1段占めるだけだった)", async () => {

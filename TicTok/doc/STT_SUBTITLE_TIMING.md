@@ -131,7 +131,7 @@ ffmpeg -allowed_extensions ALL -f hls -i index.m3u8 -vn -ac 1 -ar 16000 \
   「あるって」で切れる）、「ただいま。」（turboは「帰ったよ」）、turboが丸ごと落とした
   「怖かったよ 充電19%になっちゃったし」を拾う。
 * 録画00502ではturboが良い。「ヒデちゃーん」（large-v3は落とす）、「気合い入れロポミ」
-  （large-v3は「気合い入れろうぽん」。配信者は pomiiiip なので「ポミ」が正しい）。
+  （large-v3は「気合い入れろうぽん」。配信者は streamer_a なので「ポミ」が正しい）。
 
 3.5倍の時間に見合う差ではないので **turbo のままにする**。時刻もmodelでは動かない（上表）。
 
@@ -149,7 +149,7 @@ ffmpeg -allowed_extensions ALL -f hls -i index.m3u8 -vn -ac 1 -ar 16000 \
 (3) `compression_ratio` が+0.05より悪化しない (4) 文字数が±5%以内 (5) hot語の出現が対照の3倍を
 超えない。
 
-録画00502（pomiiiip・1879秒、`large-v3-turbo`）:
+録画00502（streamer_a・1879秒、`large-v3-turbo`）:
 
 | 語彙 | segment | 文字数 | avg_logprob | compression_ratio |
 |---|---|---|---|---|

@@ -25,9 +25,9 @@ from tests.test_server import (  # noqa: F401  (fixtureとして使う)
 
 
 def test_clip_name_round_trips_range_and_label():
-    parsed = parse_clip_name("00400_pomiiiip_20260729_220601_025716-025719_ガンダム.mp4")
-    assert parsed["stem"] == "00400_pomiiiip_20260729_220601"
-    assert parsed["streamer"] == "pomiiiip"
+    parsed = parse_clip_name("00400_streamer_a_20260729_220601_025716-025719_ガンダム.mp4")
+    assert parsed["stem"] == "00400_streamer_a_20260729_220601"
+    assert parsed["streamer"] == "streamer_a"
     assert (parsed["start"], parsed["end"]) == (2 * 3600 + 57 * 60 + 16,
                                                 2 * 3600 + 57 * 60 + 19)
     assert parsed["label"] == "ガンダム"
@@ -55,10 +55,10 @@ def test_still_name_round_trips_position_and_variant():
     1 frameそのものが成果物なので、秒の中のどこかが結果の全てである)。"""
     from tictok.media.clipper import still_path
 
-    src = Path("K:/rec/pomiiiip/mp4/00400_pomiiiip_20260729_220601.mp4")
+    src = Path("K:/rec/streamer_a/mp4/00400_streamer_a_20260729_220601.mp4")
     out = still_path(src, 2 * 3600 + 57 * 60 + 16.35, "ガンダム", suffix="overlay")
     parsed = parse_clip_name(out.name)
-    assert parsed["stem"] == "00400_pomiiiip_20260729_220601"
+    assert parsed["stem"] == "00400_streamer_a_20260729_220601"
     assert parsed["start"] == pytest.approx(2 * 3600 + 57 * 60 + 16.35)
     assert parsed["end"] is None
     assert parsed["label"] == "ガンダム"

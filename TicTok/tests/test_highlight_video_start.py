@@ -5,7 +5,7 @@
 gift演出の境目(``highlight_segments.start``)は**音**で決めている。TikTokのmontageは音を一瞬で
 切り替えながら、映像には切り替わりの演出を掛ける ―― 実測(実物7本・境目29箇所、2026-09-02)
 で映像が落ち着くのは音の境目より**中央値0.60秒あと**、範囲は0.00〜1.47秒である。目でも
-確認済みで、``…savog65jlu2boovg.mp4`` の14.512秒(Guardian's Pledge 4999💎)は +0.45秒まで
+確認済みで、``…savog65hl0000002.mp4`` の14.512秒(Guardian's Pledge 4999💎)は +0.45秒まで
 前の場面が縮みながら退き、板が組み上がるのは +0.9〜1.05秒である。
 
 **演出は境目を跨ぐ。** だから窓は両端とも動く:
@@ -274,13 +274,13 @@ def test_俯瞰の行も映像の頭を名乗る(tmp_db, week):
     行うので、頭がどこから来たのかをあの面が言えないと理由が読めない。"""
     goal = week["ids"]["Goal Highlight"]
     on_air = week["ids"]["LIVE On Air"]
-    highlight_id = _cov_highlight(tmp_db, "pomi", "hl1.mp4")
+    highlight_id = _cov_highlight(tmp_db, "streamer_a", "hl1.mp4")
     _cov_segment(tmp_db, highlight_id, 0, gift_event_id=goal,
                  start=10.0, end=16.0, gift_media_time=101.2)
     _cov_segment(tmp_db, highlight_id, 1, gift_event_id=on_air,
                  start=20.0, end=26.0, gift_media_time=101.2, video_start=20.62)
 
-    result = tmp_db.highlight_coverage("pomi", "", 0)
+    result = tmp_db.highlight_coverage("streamer_a", "", 0)
     # 測っていないgift演出の頭は音の境目のまま。**推測で埋めない。**
     unmeasured = _cov_hit(result, goal)
     assert (unmeasured["video_start"], unmeasured["video_probed"]) == (None, False)

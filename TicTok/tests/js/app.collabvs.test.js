@@ -4,8 +4,8 @@ import { loadPage } from "./helpers/page.js";
 // 監視画面のコラボ相手欄。コラボ(非BattleのLinkMic)のpeerは数値user_idしか名乗らないため、
 // 表示名も戦績も配信者profileの対戦相手別集計(user_id軸)から解決する。ここが噛み合わなく
 // なると、画面には「対戦履歴なし」だけが出て誰も間違いに気付けない。
-const PEER = "6555489410954575873";
-const OTHER = "7450739310981366791";
+const PEER = "7300000000000000104";
+const OTHER = "7300000000000000102";
 
 function profile() {
   return {
@@ -88,14 +88,14 @@ function profile() {
 
 function snapshot(collab) {
   return {
-    unique_id: "wicha_3111",
+    unique_id: "streamer_c",
     status: "connected",
     simulation: false,
     error_message: null,
     ffmpeg_available: true,
     record_video: true,
     recording: null,
-    owner: { unique_id: "wicha_3111", nickname: "うぃ", avatar: "" },
+    owner: { unique_id: "streamer_c", nickname: "うぃ", avatar: "" },
     session_id: 12,
     room_id: 777,
     stats: {},
@@ -123,11 +123,11 @@ const SERIES = {
 };
 
 const ROUTES = {
-  "/api/streamers/wicha_3111/profile": profile,
-  "/api/monitors/wicha_3111/battles": { unique_id: "wicha_3111", owner: {}, battles: [] },
-  "/api/monitors/wicha_3111/timeline": { bucket_seconds: 10, buckets: [], markers: [] },
-  "/api/monitors/wicha_3111/summary": { totals: {}, users: [], gifts: [] },
-  "/api/monitors/wicha_3111/history-stats": { sessions: [] },
+  "/api/streamers/streamer_c/profile": profile,
+  "/api/monitors/streamer_c/battles": { unique_id: "streamer_c", owner: {}, battles: [] },
+  "/api/monitors/streamer_c/timeline": { bucket_seconds: 10, buckets: [], markers: [] },
+  "/api/monitors/streamer_c/summary": { totals: {}, users: [], gifts: [] },
+  "/api/monitors/streamer_c/history-stats": { sessions: [] },
   "/api/system/disk": { entries: [] },
   [`/api/sessions/12/battle-series/903`]: SERIES,
 };
@@ -152,7 +152,7 @@ function profileWithBattles(n) {
 
 async function openPage(collab, opts = {}) {
   const routes = opts.battles
-    ? { ...ROUTES, "/api/streamers/wicha_3111/profile": () => profileWithBattles(opts.battles) }
+    ? { ...ROUTES, "/api/streamers/streamer_c/profile": () => profileWithBattles(opts.battles) }
     : ROUTES;
   const page = loadPage({ page: "index", url: "http://localhost:8520/", routes });
   page.fireReady();
@@ -290,7 +290,7 @@ describe("監視画面のコラボ相手の対戦履歴", () => {
     // profile を返さない server。ここで「対戦履歴なし」を出すと、80戦した相手が
     // 未対戦に見える(取得失敗を既定値で埋めて誤認させる典型)。
     const routes = { ...ROUTES };
-    delete routes["/api/streamers/wicha_3111/profile"];
+    delete routes["/api/streamers/streamer_c/profile"];
     page = loadPage({ page: "index", url: "http://localhost:8520/", routes });
     page.fireReady();
     await page.settle();
@@ -306,7 +306,7 @@ describe("監視画面のコラボ相手の対戦履歴", () => {
   it("コラボが終われば欄ごと下げる", async () => {
     page = await openPage(LIVE_COLLAB);
     expect(page.document.getElementById("collab-vs").classList.contains("hidden")).toBe(false);
-    page.calls.sockets[0].emit({ type: "state", monitor: "wicha_3111", data: snapshot([]) });
+    page.calls.sockets[0].emit({ type: "state", monitor: "streamer_c", data: snapshot([]) });
     await page.settle();
     expect(page.document.getElementById("collab-vs").classList.contains("hidden")).toBe(true);
   });
@@ -315,7 +315,7 @@ describe("監視画面のコラボ相手の対戦履歴", () => {
     page = await openPage(LIVE_COLLAB);
     page.calls.sockets[0].emit({
       type: "state",
-      monitor: "wicha_3111",
+      monitor: "streamer_c",
       data: snapshot([{ channel_id: "c1", start: 1786200000, guests_max: 1, peers: [OTHER] }]),
     });
     await page.settle();

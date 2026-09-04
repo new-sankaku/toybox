@@ -74,7 +74,7 @@ const SORTERS = {
 // 配信者別の内訳は必ず額を併記する。実測では 286,946 対 3 コインのような極端な偏りがあり、
 // 「2人へ投げた」とだけ出すと両方のファンであるかのように読めてしまう。
 // div(block)で組む。.u-text は .u-stack の中でしか縦積みにならず、素で使うと
-// 「286,946@wicha_3111」のように行が繋がって読めなくなる。
+// 「286,946@streamer_c」のように行が繋がって読めなくなる。
 function streamerBreakdown(fan) {
   const wrap = document.createElement("div");
   fan.streamers.forEach((s) => {

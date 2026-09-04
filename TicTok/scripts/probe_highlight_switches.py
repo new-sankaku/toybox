@@ -7,7 +7,7 @@
 montageは音を一瞬で切り替えながら映像には切り替わりの演出を掛け、その演出は境目を跨ぐ。
 
 尻(``video_end``)を測るようになったのは頭(``video_start``)より後である。既に照合済みの
-highlightは頭しか持っておらず、そのままでは**窓の終わりに次のgiftが映る**。実測(あきと🐢💤
+highlightは頭しか持っておらず、そのままでは**窓の終わりに次のgiftが映る**。実測(視聴者A🐢💤
 の Strong Finish の窓)で音の境目の0.93秒手前から次の場面が現れており、通しで観ると
 「2人目のgiftの終わりに3人目のgiftが少し映る」形になっていた。
 
@@ -20,7 +20,7 @@ mp4だけを読み、gift演出の境目にも人の入力にも触らない。
 
 Usage (TicTok directory から venv で実行):
     python scripts/probe_highlight_switches.py
-    python scripts/probe_highlight_switches.py --streamer pomiiiip
+    python scripts/probe_highlight_switches.py --streamer streamer_a
     python scripts/probe_highlight_switches.py --apply
 """
 

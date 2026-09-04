@@ -2458,7 +2458,7 @@ function fmtCompact(value) {
 
 // 人が読む文字を切るところは全部ここを通す。charAt(0)やslice(n)はUTF-16の単位で切るので、
 // 絵文字で始まる名前では上位surrogateだけが残って豆腐(□)が出る ―― 実データの
-// 「🟡むらたろう🍑🏌️‍♂️🍔」の頭文字avatarがその形で壊れていた。TikTokの表示名は結合文字を
+// 「🟡視聴者G🍑🏌️‍♂️🍔」の頭文字avatarがその形で壊れていた。TikTokの表示名は結合文字を
 // 含む絵文字(ZWJ結合の 🐈‍⬛、ZWJ+異体字選択子の 🏌️‍♂️)を普通に含むため、code point単位
 // ([...str])でも足りない ―― 1つの絵文字が複数のcode pointに割れる。
 // Intl.Segmenterは主要browserに揃っている。持たない環境ではcode point単位まで戻す

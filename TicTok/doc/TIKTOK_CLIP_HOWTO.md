@@ -880,7 +880,7 @@ vendorに依存しない実測はおおむね**20〜30分/本**に寄る:
 - 有名な「15 HOUR POTATO」は**52秒**で1,132万再生。だが**単発のひらめきではなく
   『25 days of potato recipes』連載の25本目**。
 - さらに**1年後にコメント返信の形で作り直した2本目が2,264万再生と本家を超えた**
-  （caption「Reply to @lfor05 The new and improved 15 HOUR POTATO recipe…」、47秒。
+  （caption「Reply to @viewer_13 The new and improved 15 HOUR POTATO recipe…」、47秒。
   中身は油をduck fatからbeef drippingに替えただけの改訂版）。
 
 **Miss Excel（Excel講座）**

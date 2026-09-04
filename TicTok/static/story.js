@@ -106,8 +106,8 @@ const HL_STATUS_MISSING = "missing";
 const CONFIDENCE_NONE = "none";
 
 // 出力に載せてよいと言い切れるgift演出の線。**これ以外は名乗る。** 実際に、鹿の全画面演出
-// (Guardian's Pledge / 4999🪙 / よい🐢💤 ｻｲｺｳｯ!)が「Goal Highlight」として別人
-// (あきと🐢💤)のfileへ入り、出来上がったmp4を観るまで誰も気付けなかった。
+// (Guardian's Pledge / 4999🪙 / 視聴者C🐢💤 ｻｲｺｳｯ!)が「Goal Highlight」として別人
+// (視聴者A🐢💤)のfileへ入り、出来上がったmp4を観るまで誰も気付けなかった。
 const CONFIDENCE_OK = "high";
 
 // 点の目盛りの名乗り(Serverが名乗らないときだけの控え)。**線の値は画面が決めない** ――
@@ -343,7 +343,7 @@ function gifterNode(seg) {
   // 表の中では表示名だけを出す。@idまで並べると1人ぶんが2段になり、表が横へ溢れて
   // 右端の列が画面の外へ出る。
   //
-  // 名前は絵文字混じりで長さの上限が無い(実物に「🟡むらたろう🍑🏌️‍♂️🍔」のような名前が
+  // 名前は絵文字混じりで長さの上限が無い(実物に「🟡視聴者G🍑🏌️‍♂️🍔」のような名前が
   // 居る)。伸びるに任せるとこの列だけで表が横scrollになるので、字の大きさに追従する
   // 上限で省略し、全文はcellのtooltipで読ませる ―― 固定幅ではないので窓幅と字の大きさに
   // 追い付く。
@@ -352,7 +352,32 @@ function gifterNode(seg) {
   cell.classList.add("st-gifter");
   cell.title = [seg.user_nickname, seg.user_unique_id && `@${seg.user_unique_id}`]
     .filter(Boolean).join(" ");
+  // サブアカウントを畳んだ人(配信者画面の日ぶんと同じ名乗り)。畳んだ数を出さないと、
+  // その人の週合計が何アカウントぶんの合計なのかが読めない ―― 下限に届いた理由も、
+  // 1本のfileに複数のアカウントのgiftが並ぶ理由も、この印からしか辿れない。
+  const accounts = num(seg.accounts);
+  if (accounts !== null && accounts > 1) {
+    const merged = document.createElement("span");
+    merged.className = "st-merged";
+    merged.dataset.accounts = String(accounts);
+    merged.textContent = `統合 ${fmtNum(accounts)}`;
+    cell.appendChild(merged);
+  }
   return cell;
+}
+
+// 「同じ人か」。**アカウントではなく人で比べる。** 束ね(user_merges)を畳んだ鍵はServerが
+// person_key で名乗り、identity_key は投げたアカウントのままである ―― アカウントで比べると、
+// 束ねた人のサブアカウントぶんのgiftが「別人のgiftが混ざっている」と名乗られる。
+// 名乗りの無い側は「同じ人だ」と言い切れないので偽にする(黙って同一視しない)。
+function personKey(row) {
+  return String((row && (row.person_key || row.identity_key)) || "");
+}
+
+function samePerson(item, file) {
+  const a = personKey(item);
+  const b = personKey(file);
+  return Boolean(a) && a === b;
 }
 
 // gift演出に付いた印。折り返させると1行が3段まで伸びて、表の見える行数がその分減る。
@@ -3182,7 +3207,7 @@ function coverOrder(order) {
   // ―― 1人ぶんを続けて確かめるときは、誰から見るかが週合計で決まる。塊の中は高額順。
   if (order === "gifter") {
     return (a, b) => (num(b.week_diamonds) || 0) - (num(a.week_diamonds) || 0)
-      || String(a.identity_key || "").localeCompare(String(b.identity_key || ""))
+      || personKey(a).localeCompare(personKey(b))
       || (num(b.diamonds) || 0) - (num(a.diamonds) || 0)
       || (num(a.time) || 0) - (num(b.time) || 0);
   }
@@ -3221,8 +3246,8 @@ function cutSeekAt(hit, cut) {
 
 // **そのgiftを切り出す範囲。gift演出の窓ではない。**
 //
-// 1つのgift演出には別人のgiftが複数入る（実測で6.0秒のgift演出に あきと6000🪙 / おニャンコ999🪙 /
-// るきしろ99🪙 の3人）。出力はgifterごとに1本なので、gift演出の窓をそのまま「この行の区間」
+// 1つのgift演出には別人のgiftが複数入る（実測で6.0秒のgift演出に 視聴者A6000🪙 / 視聴者B999🪙 /
+// 視聴者D99🪙 の3人）。出力はgifterごとに1本なので、gift演出の窓をそのまま「この行の区間」
 // として扱うと、1人の行で詰めた値が他の2人のfileまで一緒に動く。
 //
 // Serverは触っていないgiftにも必ず値を入れて返す（そのときはgift演出の窓と同じ値になる）ので、
@@ -4104,10 +4129,11 @@ function buildFileItems(file) {
       row.dataset.exitem = String(item.gift_event_id);
     }
     // **束の持ち主と違うgifterが混ざっていないか。** 以前はここを省いていた ―― 「同じ人の
-    // gift演出が並ぶ」前提だったからである。その前提が破れたのが今回の事故で、あきと🐢💤 の
-    // fileに よい🐢💤 ｻｲｺｳｯ! のgiftが入っていた。**違えばこの行で目に入る。**
-    const mine = String(item.identity_key || "") === String(file.identity_key || "");
-    if (item.identity_key && file.identity_key && !mine) row.classList.add("st-foreign");
+    // gift演出が並ぶ」前提だったからである。その前提が破れたのが今回の事故で、視聴者A🐢💤 の
+    // fileに 視聴者C🐢💤 ｻｲｺｳｯ! のgiftが入っていた。**違えばこの行で目に入る。**
+    const mine = samePerson(item, file);
+    const known = Boolean(personKey(item)) && Boolean(personKey(file));
+    if (known && !mine) row.classList.add("st-foreign");
     if (item.confidence !== undefined && item.confidence !== null
         && !isSure(item.confidence)) {
       row.classList.add("st-risk");
@@ -4160,13 +4186,12 @@ function buildFileItems(file) {
     // (利用者の指摘)。**別人が混ざっていることは、この省略で弱まらない** ―― 束の中で
     // 名前が出ている行はその1行だけになるので、かえって目に入る。名乗りの無いgift
     // (identity_keyをServerが出せなかったもの)は「同じ人だ」と言い切れないので出す。
-    const named = !(mine && item.identity_key && file.identity_key);
-    const who = named ? gifterNode(item) : null;
+    const who = mine ? null : gifterNode(item);
     if (who) {
       who.classList.add("st-sub-who");
       // 別人が混ざっている行は色で名乗る(.st-risk-text)。名前が出ていること自体が印で、
       // 文章では言い直さない。
-      if (item.identity_key && file.identity_key) who.classList.add("st-risk-text");
+      if (known) who.classList.add("st-risk-text");
     }
     row.append(no, play, giftNode(item), ...(who ? [who] : []), coin, len, mark, from);
     // gift演出の行も**clickで再生**する。▶は小さく、狙って押す物が並ぶほど確かめる手が止まる
@@ -4213,8 +4238,7 @@ function buildMissingItems(file) {
     when.textContent = gift.label || fmtClock(gift.time);
     // ここに並ぶのは**その束の持ち主が投げたgift**なので、名前は出さない —— 束の見出しと
     // 同じ名前が薄い行に十数回並ぶだけである。持ち主と違う名乗りのときだけ出す。
-    const mine = String(gift.identity_key || "") === String(file.identity_key || "");
-    const who = mine ? null : gifterNode(gift);
+    const who = samePerson(gift, file) ? null : gifterNode(gift);
     if (who) who.classList.add("st-sub-who");
     const why = document.createElement("span");
     why.className = "st-sub-from vd-summary";
@@ -4343,7 +4367,8 @@ function noFileRow(who, cols) {
   const NUM_COLS = new Set([0, 2, 3, 4, 5]);
   const name = document.createElement("span");
   name.className = "st-groupname";
-  const gifter = gifterNode({ user_nickname: who.nickname, user_unique_id: who.unique_id });
+  const gifter = gifterNode({ user_nickname: who.nickname, user_unique_id: who.unique_id,
+                              accounts: who.accounts });
   // 印は短い語だけ。**なぜ出来ないのか**はServerの文言で、行のtooltipが持つ
   // (表の1行を3段に伸ばさない)。画面が言い換える説明は置かない。
   const tag = document.createElement("span");
@@ -4438,7 +4463,9 @@ function renderPlanRows() {
     // 観ている1本を印で示すための鍵。file名はServerが決めた一意な値で、書き出し済みの
     // 一覧(ex-files)から再生した時も同じ値で突き合わせられる。
     if (file.filename) tr.dataset.exfile = file.filename;
-    const gifter = gifterNode({ user_nickname: file.nickname, user_unique_id: file.user_unique_id });
+    const gifter = gifterNode({ user_nickname: file.nickname,
+                                user_unique_id: file.user_unique_id,
+                                accounts: file.accounts });
     // 順位は#の列に出ているので、名前のtooltipへは足さない(省略された名前の復元だけ)。
     // **行を選ぶ=再生し、その人のgift演出を開く。** 観ている1本の中身を確かめるのがこの面の
     // 用なので、選んだ行の内訳は開いた状態で待っている(利用者の指定)。閉じるのは専用の

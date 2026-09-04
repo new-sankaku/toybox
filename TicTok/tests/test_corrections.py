@@ -138,8 +138,8 @@ def test_rematch_orphans_a_correction_whose_source_text_changed():
 
 @pytest.fixture
 def recording(tmp_db, make_session):
-    session_id = make_session("pomiiiip", status="connected")
-    return tmp_db.create_recording(session_id, "pomiiiip", "/a.mp4", "a.mp4", "hd", 1.0)
+    session_id = make_session("streamer_a", status="connected")
+    return tmp_db.create_recording(session_id, "streamer_a", "/a.mp4", "a.mp4", "hd", 1.0)
 
 
 def _save(tmp_db, recording, texts, **kwargs):

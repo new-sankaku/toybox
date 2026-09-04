@@ -166,8 +166,8 @@ DBのstatusでは排他にならない。ts結合もsweepも「録画中(`status
 | 退避先に同名で除外 | 1本 |
 | 録画中で除外 | 3本(session 333/334/335) |
 
-配信者別: @pomiiiip 8本 50.50GB / @wicha_3111 37本 28.20GB / @msjxpa 3本 0.48GB /
-@koharundechu 1本 0.02GB
+配信者別: @streamer_a 8本 50.50GB / @streamer_c 37本 28.20GB / @streamer_d 3本 0.48GB /
+@streamer_b 1本 0.02GB
 
 退避後の見込み: **C: 63.6GB → 142.8GB**、K: 5366.9GB → 5287.7GB。
 

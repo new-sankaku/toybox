@@ -12,9 +12,9 @@ coinを投じて視聴者を集める施策の実測を残す。`envelopes` 表(
 
 | business_type | 種別 | diamond_count | people_count | 送信者(実測) |
 |---|---|---|---|---|
-| 1 | 宝箱 (Treasure Box) | 20 | 16 | 配信者 @wicha_3111 |
-| 4 | **Portal の送信** | 120 | 80 | 配信者 @wicha_3111 |
-| 19 | Super Fan Box | **無し** | 1 | **視聴者** @sinbakwk35k |
+| 1 | 宝箱 (Treasure Box) | 20 | 16 | 配信者 @streamer_c |
+| 4 | **Portal の送信** | 120 | 80 | 配信者 @streamer_c |
+| 19 | Super Fan Box | **無し** | 1 | **視聴者** @streamer_f |
 
 ### 事前の想定と違った点
 
@@ -27,7 +27,7 @@ coinを投じて視聴者を集める施策の実測を残す。`envelopes` 表(
 2. **`business_type=19`(Super Fan Box)は `diamond_count` を持たない。** `people_count` のみ。
    0で埋めると「無料で配った」という観測していない事実になるので **NULL のまま残す**。
 
-3. **送信者は配信者とは限らない。** 実測で bt=19 は視聴者(@sinbakwk35k)が送っていた。
+3. **送信者は配信者とは限らない。** 実測で bt=19 は視聴者(@streamer_f)が送っていた。
    「配信者が支出した施策」と決めつけられないので、送信者をそのまま保存して解析側が
    判断できるようにする。
 
@@ -45,7 +45,7 @@ coinを投じて視聴者を集める施策の実測を残す。`envelopes` 表(
 
 ```
 portal_info = {"id": ..., "sender_id": ..., "trans_count": 24}
-base_message.room_id = 7661142088730266389   # 自室
+base_message.room_id = 7300000000000000203   # 自室
 ```
 
 したがって「**どの配信者から流入したか**」は取得不能で、**「Portal経由で何人動いたか」
@@ -58,10 +58,10 @@ base_message.room_id = 7661142088730266389   # 自室
 
 | | id |
 |---|---|
-| Portal送信 (EnvelopeEvent, bt=4) | `7661161260446092052` |
-| Portal閉鎖 (PortalEvent) | `7661135713622936341` |
+| Portal送信 (EnvelopeEvent, bt=4) | `7300000000000000303` |
+| Portal閉鎖 (PortalEvent) | `7300000000000000302` |
 
-**別値**である。一方 `sender_id` は一致する(`7310859361970226178`)。
+**別値**である。一方 `sender_id` は一致する(`7300000000000000101`)。
 結合するなら「送信者 + 時刻の近さ」で寄せるしかなく、それは解析側の判断なので
 **収集側では結合しない**。2行を別々に残し、`kind` で区別する。
 
@@ -95,9 +95,9 @@ collector の既存 checkpoint(`_persist_progress`)に相乗りするので、�
 samples の実payloadをそのまま handler へ流した実測:
 
 ```
-宝箱(Treasure Box)      20 coin  定員16   @wicha_3111
-Portal送信             120 coin  定員80   @wicha_3111
-Super Fan Box              —     定員1    @sinbakwk35k   <- coinはNULL
+宝箱(Treasure Box)      20 coin  定員16   @streamer_c
+Portal送信             120 coin  定員80   @streamer_c
+Super Fan Box              —     定員1    @streamer_f   <- coinはNULL
 portal_closed              —      —       実移動24人
 
 投下coin合計: 140  (coin不明の宝箱: 1件 — 0で埋めていない)

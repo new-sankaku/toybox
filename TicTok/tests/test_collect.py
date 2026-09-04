@@ -993,7 +993,7 @@ async def test_repeated_sign_failures_on_one_room_stop_the_reconnect_loop(collec
     """同じroomだけが署名を拒まれ続けるなら、撃ち直しても結果は変わらない。規定回数で
     transient(=session内の再接続loop)を降り、room単位の保留へ移すこと。
 
-    実測: room 7672781787921353493は1時間48分で97回500を返し続けた一方、同じ時刻に別の
+    実測: room 7300000000000000205は1時間48分で97回500を返し続けた一方、同じ時刻に別の
     監視対象は同じsign serverで再接続に成功していた。sign server全体の障害ではない。"""
     from TikTokLive.client.errors import SignAPIError
 
@@ -1233,14 +1233,14 @@ async def test_a_session_that_never_connects_still_carries_the_resolved_owner(co
     owner_avatarがroom_info経由でしか書かれなかったため、署名が通らない/制限の行は
     履歴で頭文字の円盤になっていた。"""
     await collector._apply_resolved_owner(
-        SimpleNamespace(avatar="https://cdn.example/a.webp", nickname="ぽみ", room_id=7000)
+        SimpleNamespace(avatar="https://cdn.example/a.webp", nickname="配信者A", room_id=7000)
     )
     collector._resolved_room_id = 7000
     collector._prepare_session()
 
     row = collector._storage.get_session(collector.session_id)
     assert row["owner_avatar"] == "https://cdn.example/a.webp"
-    assert row["owner_nickname"] == "ぽみ"
+    assert row["owner_nickname"] == "配信者A"
 
 
 def test_a_session_with_nothing_resolved_does_not_borrow_another_sessions_owner(collector):
@@ -2164,9 +2164,9 @@ def test_treasure_box_payload_is_captured(envelope_collector):
     import asyncio
 
     asyncio.run(envelope_collector._on_envelope(_envelope_event(
-        envelope_id="7661188576227855124", business_type=1, diamond_count=20,
+        envelope_id="7300000000000000304", business_type=1, diamond_count=20,
         people_count=16, create_time="1783764415705", unpack_at=1783764595,
-        send_user_id="7310859361970226178", send_user_name="wicha_3111",
+        send_user_id="7300000000000000101", send_user_name="streamer_c",
     )))
 
     rows = envelope_collector._envelopes
@@ -2175,8 +2175,8 @@ def test_treasure_box_payload_is_captured(envelope_collector):
     assert row["kind"] == "envelope"
     assert (row["diamond_count"], row["people_count"]) == (20, 16)
     assert row["business_type"] == 1
-    assert row["sender_unique_id"] == "wicha_3111"
-    assert row["envelope_id"] == "7661188576227855124"
+    assert row["sender_unique_id"] == "streamer_c"
+    assert row["envelope_id"] == "7300000000000000304"
     # msの文字列で届くcreate_timeが秒へ正規化されること。
     assert 1783764415 <= row["create_time"] <= 1783764416
     assert row["unpack_at"] == pytest.approx(1783764595)
@@ -2190,14 +2190,14 @@ def test_super_fan_box_has_no_diamond_count_and_is_not_zero_filled(envelope_coll
     asyncio.run(envelope_collector._on_envelope(_envelope_event(
         envelope_id="1195152805380", business_type=19, people_count=1,
         create_time="1784220745989", unpack_at=1784220925,
-        send_user_id="7577028547187065877", send_user_name="sinbakwk35k", skin_id=56,
+        send_user_id="7300000000000000105", send_user_name="streamer_f", skin_id=56,
     )))
 
     row = envelope_collector._envelopes[0]
     assert row["diamond_count"] is None
     assert row["people_count"] == 1
     # 送信者は配信者とは限らない(実測でこれは視聴者)。そのまま残す。
-    assert row["sender_unique_id"] == "sinbakwk35k"
+    assert row["sender_unique_id"] == "streamer_f"
     assert row["data"]["skin_id"] == 56
 
 
@@ -2207,9 +2207,9 @@ def test_portal_send_arrives_as_an_envelope_with_business_type_4(envelope_collec
     import asyncio
 
     asyncio.run(envelope_collector._on_envelope(_envelope_event(
-        envelope_id="7661161260446092052", business_type=4, diamond_count=120,
+        envelope_id="7300000000000000303", business_type=4, diamond_count=120,
         people_count=80, create_time="1783764873225", unpack_at=1783765172,
-        send_user_id="7310859361970226178", send_user_name="wicha_3111",
+        send_user_id="7300000000000000101", send_user_name="streamer_c",
     )))
 
     row = envelope_collector._envelopes[0]
@@ -2223,13 +2223,13 @@ def test_portal_close_records_the_moved_count_and_no_source_room(envelope_collec
     import asyncio
 
     asyncio.run(envelope_collector._on_portal(_portal_event(
-        id="7661135713622936341", sender_id="7310859361970226178", trans_count=24,
+        id="7300000000000000302", sender_id="7300000000000000101", trans_count=24,
     )))
 
     row = envelope_collector._envelopes[0]
     assert row["kind"] == "portal_closed"
     assert row["trans_count"] == 24
-    assert row["sender_user_id"] == "7310859361970226178"
+    assert row["sender_user_id"] == "7300000000000000101"
     # 流入元を示すfieldを勝手に作っていないこと。
     assert "source_room_id" not in row
     assert "from_unique_id" not in row
@@ -2244,12 +2244,12 @@ def test_the_same_envelope_id_is_folded_and_hide_does_not_erase_the_measurement(
     import asyncio
 
     asyncio.run(envelope_collector._on_envelope(_envelope_event(
-        envelope_id="7661188576227855124", business_type=1, diamond_count=20,
-        people_count=16, send_user_id="7310859361970226178",
-        send_user_name="wicha_3111",
+        envelope_id="7300000000000000304", business_type=1, diamond_count=20,
+        people_count=16, send_user_id="7300000000000000101",
+        send_user_name="streamer_c",
     )))
     asyncio.run(envelope_collector._on_envelope(_envelope_event(
-        envelope_id="7661188576227855124", business_type=1,
+        envelope_id="7300000000000000304", business_type=1,
     )))
 
     assert len(envelope_collector._envelopes) == 1
@@ -2310,11 +2310,11 @@ def test_envelopes_round_trip_through_storage(tmp_db, make_session):
         {"kind": "envelope", "envelope_id": "E1", "time": 100.0, "create_time": 99.0,
          "business_type": 1, "diamond_count": 20, "people_count": 16,
          "trans_count": None, "unpack_at": 200.0, "sender_user_id": "u1",
-         "sender_unique_id": "wicha_3111", "data": {"display": "NEW"}},
+         "sender_unique_id": "streamer_c", "data": {"display": "NEW"}},
         {"kind": "envelope", "envelope_id": "E2", "time": 110.0, "create_time": None,
          "business_type": 19, "diamond_count": None, "people_count": 1,
          "trans_count": None, "unpack_at": None, "sender_user_id": "u2",
-         "sender_unique_id": "sinbakwk35k", "data": {}},
+         "sender_unique_id": "streamer_f", "data": {}},
         {"kind": "portal_closed", "envelope_id": "P1", "time": 120.0,
          "create_time": None, "business_type": None, "diamond_count": None,
          "people_count": None, "trans_count": 24, "unpack_at": None,
@@ -2421,12 +2421,12 @@ async def test_finalize_callback_wires_the_comment_index(
     session_id = make_session("streamer", status="connected")
     collector.session_id = session_id
     recorder = _finalized_recorder(tmp_db, tmp_root, session_id)
-    tmp_db.add_event(session_id, event_builder("comment", at=1100.0, comment="おつぽみ"))
+    tmp_db.add_event(session_id, event_builder("comment", at=1100.0, comment="おつ配信者A"))
 
     await collector._on_recording_finalized(recorder)
 
     rows = tmp_db.search_hits_for(recorder.recording_id, indexer.SOURCE_COMMENT)
-    assert [r["body"] for r in rows] == ["おつぽみ"]
+    assert [r["body"] for r in rows] == ["おつ配信者A"]
 
 
 # ---------------- 焼き込みassetの先行取得への結線 ----------------
@@ -2961,7 +2961,7 @@ def _chat_message(message_id, text="おは"):
 
 def test_message_id_treats_the_protobuf_default_as_absent():
     """未設定のint64は0で届く。0を鍵にすると、idを持たないevent同士が互いの重複になる。"""
-    assert dedup.message_id_of(_chat_message(7658591137032538901)) == 7658591137032538901
+    assert dedup.message_id_of(_chat_message(7300000000000000301)) == 7300000000000000301
     assert dedup.message_id_of(_chat_message(0)) is None
     assert dedup.message_id_of(SimpleNamespace()) is None
 

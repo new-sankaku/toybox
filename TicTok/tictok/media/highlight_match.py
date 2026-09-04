@@ -8,7 +8,7 @@ hashはそのどれにも弱い。
 
 **実物のhighlightはmontageである。** ここがPOC(``scripts/highlight_poc.py`` の ``match``)
 との決定的な違いで、clip全体を1つのoffsetへ当てる作りは原理的に当たらない。実測(60.8秒の
-``v1c43ag5000cdab7s77og65i71rvmudg.mp4``)では、10個ほどのgift演出が**2本の録画**から繋がれて
+``v1c43ag5000cdab7s000g65hl0000001.mp4``)では、10個ほどのgift演出が**2本の録画**から繋がれて
 いた。gift演出の平均は約6秒、短いものは2.5秒程度である。clip全体で当てると
 votes 299 / ratio 1.4 / 相関 0.14 で不合格になる。
 
@@ -35,7 +35,7 @@ frameを引くのは高い。
 
 構造の側に答えがある。**1本のhighlightはTikTokのLIVE replay 1本 = 配信1回から作られる。**
 配信1回に対応するのは ``sessions.room_id`` である。**session ではない** ―― 接続断で1回の
-配信が複数sessionに割れる(実測: pomiiiip 直近21日の25回中5回、DB全体で46 roomが複数session、
+配信が複数sessionに割れる(実測: streamer_a 直近21日の25回中5回、DB全体で46 roomが複数session、
 1 roomあたり最大9 session)。sessionで絞ると、montageがsessionの切れ目をまたいだときに片側の
 gift演出が丸ごと落ちる。roomで絞れば、別の日の録画は候補から丸ごと消えて、同じ配信の録画は
 sessionが割れていても残る。実物7本での実測(2026-09-02 / 候補32本・51.6時間)では、1位のroomが
@@ -47,7 +47,7 @@ sessionが割れていても残る。実物7本での実測(2026-09-02 / 候補3
 で、1本につき1回しか作らない)。scope="gift" の絞り込みは、cacheした ``hashes``/``times``
 配列を時間でfilterするだけで作る ―― 再decodeは一切不要である。gift窓だけの指紋を別に作り
 直すのは、同じ音を2度復号して2つ目のcacheを持つだけで、何も速くならない。実測
-(pomiiiip 14日 = 33本 / 53.9時間 = 194,199秒 / hash 2,320万本):
+(streamer_a 14日 = 33本 / 53.9時間 = 194,199秒 / hash 2,320万本):
 
   - 全gift(``min_diamonds=0``、2,098件) = 22,615秒 → 8.6倍。粗い走査 2.15秒 -> 1.28秒
   - **既定(設定値98💎、508件) = 6,221秒 → 31.2倍。粗い走査 0.84秒**
@@ -183,7 +183,7 @@ DIFF_SHIFT = 3
 # 演出の台地の側へ寄り、閾値がその台地より高くなって区間が1つも出なかった —— この module の
 # 以前の docstring が「実物の演出は1つも拾えない」と書いていたのはこの状態の観測である。
 #
-# 実測(2026-09-04 / 60.8秒の実物 ``v1c43ag5000cdab7s77og65i71rvmudg.mp4``)。以前の
+# 実測(2026-09-04 / 60.8秒の実物 ``v1c43ag5000cdab7s000g65hl0000001.mp4``)。以前の
 # docstringが「1つも出ない」と名指しした3つが、閾値を替えるだけで**どれも出る**:
 #
 #   =====================  ===============  =========================
@@ -1524,7 +1524,7 @@ def match_highlight(conn, highlight: Path, streamer: str, *,
     既定 14→30日)を狭い順に試し、**1本も当たらなかった段は捨てて次の段へ進む**。
     ``days`` を明示すればその1つだけで走る(画面から日数を指定したときの道)。
 
-    段にしてよい理由は実測にある(2026-09-02 / pomiiiip):
+    段にしてよい理由は実測にある(2026-09-02 / streamer_a):
 
     - 候補を14本→33本にしても通しは 18.0秒→19.9秒。**通しの8〜9割は候補の量と無関係**な
       「gift演出の詰め」(ffmpegでframeを出す段)で、候補に比例するのは読み込みと粗い走査だけ
@@ -1822,7 +1822,7 @@ def _pick_room(coarse: Sequence[dict], pool: Sequence[_Candidate]) -> dict:
 
     **1本のhighlightはTikTokのLIVE replay 1本 = 配信1回から作られる。** 配信1回に対応するのは
     ``sessions.room_id`` であって session ではない ―― **接続断で1回の配信が複数sessionに割れる**
-    (実測: pomiiiip 直近21日の25回中5回。DB全体では300 session中46 roomが複数sessionを持ち、
+    (実測: streamer_a 直近21日の25回中5回。DB全体では300 session中46 roomが複数sessionを持ち、
     1 roomあたり最大9 session)。sessionで絞ると、highlightのmontageがsessionの切れ目をまたいだ
     ときに片側のgift演出が丸ごと落ちる。
 

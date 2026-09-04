@@ -252,11 +252,11 @@ def _gift_list(league):
 def test_worker_reads_league_for_an_offline_broadcaster(monkeypatch):
     """live中である必要は無い(status=4でもroomIdは返り、終了済みの室でもleagueは引ける)。"""
     worker, web = _worker_with(
-        monkeypatch, {"data": {"user": {"roomId": "7669064047828601616", "status": 4}}},
+        monkeypatch, {"data": {"user": {"roomId": "7300000000000000204", "status": 4}}},
         _gift_list("B4"),
     )
-    assert asyncio.run(worker._fetch("someone")) == (True, "7669064047828601616", "B4")
-    assert web.params["room_id"] == "7669064047828601616"
+    assert asyncio.run(worker._fetch("someone")) == (True, "7300000000000000204", "B4")
+    assert web.params["room_id"] == "7300000000000000204"
 
 
 def test_worker_treats_user_not_found_as_a_confirmed_non_broadcaster(monkeypatch):
@@ -410,7 +410,7 @@ def test_enqueue_skips_handles_that_cannot_be_looked_up(tmp_db, make_session, fr
     (実DBで3人、うち1人は通算86万コイン)。照会すればTikTokは「居ない」を返すが、それを
     「確認して配信者ではなかった」と確定させると、見ていないものを見たことにしてしまう。"""
     session_id = make_session("streamer_a")
-    for key, uid in (("a", "Enigma 40944"), ("b", "だれか"), ("c", "valid.handle_1")):
+    for key, uid in (("a", "Enigma 00000"), ("b", "だれか"), ("c", "valid.handle_1")):
         _gift(tmp_db, session_id, key, uid, 500, frozen_now)
     tmp_db.flush()
     assert tmp_db.enqueue_gifter_leagues(frozen_now - 3600, 100, 5 * DAY, frozen_now) == 1

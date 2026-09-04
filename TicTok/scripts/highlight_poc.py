@@ -25,8 +25,8 @@ montage(2.5〜8秒のgift演出を10個ほど繋いだもの)であることが�
 使い方::
 
     python scripts/highlight_poc.py synth --recording 1153
-    python scripts/highlight_poc.py index --streamer pomiiiip --days 14
-    python scripts/highlight_poc.py run --streamer pomiiiip --highlight <path> --scope gift
+    python scripts/highlight_poc.py index --streamer streamer_a --days 14
+    python scripts/highlight_poc.py run --streamer streamer_a --highlight <path> --scope gift
 """
 
 import argparse

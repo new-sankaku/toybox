@@ -9,7 +9,7 @@ import { loadPage } from "./helpers/page.js";
 //
 // (1) **窓が丸ごと飛ぶ。** 送っている最中にも時刻のtickは走り、その値は前の窓の位置である。
 //     それを次の窓の終わりと比べると、前の窓の方が後ろに在るだけで次の窓が「もう終わった」
-//     ことになる。実測(あきと🐢💤 / 3窓)では2本目 Strong Finish が 36.3〜43.8秒、3本目
+//     ことになる。実測(視聴者A🐢💤 / 3窓)では2本目 Strong Finish が 36.3〜43.8秒、3本目
 //     Rocket Game が 6.8〜12.9秒で、43.8 > 12.9 のため3本目が一度も映らなかった。
 //
 // (2) **シークバーを掴むと秒が飛び回る。** 掴んだ位置を窓の頭へ送り返すと、送り返した先が
@@ -22,7 +22,7 @@ describe("story.js 出力tabの通し再生", () => {
   let win;
   let doc;
 
-  // あきと🐢💤 の実データ(recordings/.../260829-260905_coin19380_あきと🐢💤_story.mp4.json
+  // 視聴者A🐢💤 の実データ(recordings/.../260829-260905_coin19380_視聴者A🐢💤_story.mp4.json
   // と highlight_segments)そのままの3窓。素材は3本とも別のfileである。
   const CHAPTERS = [
     { no: 1, url: "/api/highlights/2/media", start: 15.064, end: 21.757,
@@ -81,7 +81,7 @@ describe("story.js 出力tabの通し再生", () => {
   }
 
   async function start(mode = "all") {
-    page.run(`startRun("あきと", ${JSON.stringify(CHAPTERS)}, ${JSON.stringify(mode)})`);
+    page.run(`startRun("視聴者A", ${JSON.stringify(CHAPTERS)}, ${JSON.stringify(mode)})`);
     await page.settle();
   }
 

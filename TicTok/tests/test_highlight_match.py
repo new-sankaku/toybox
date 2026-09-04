@@ -273,16 +273,16 @@ def test_pick_room_keeps_recordings_from_every_session_of_the_room():
     """**接続断で1回の配信が複数sessionに割れる。** sessionで絞ると、highlightのmontageが
     切れ目をまたいだときに片側のgift演出が丸ごと落ちる。
 
-    実測の形をそのまま置いてある ―― room 7677205833033992980 は session 562/563/565/567/569 に
+    実測の形をそのまま置いてある ―― room 7300000000000000207 は session 562/563/565/567/569 に
     割れており、録画は 1054/1055/1057/1059/1061 である。票が立つのは 1054 と 1061 だけでも、
     残す候補は同じroomの5本でなければならない。"""
     rooms = {1054: 562, 1055: 563, 1057: 565, 1059: 567, 1061: 569}
-    pool = [_Cand(rid, sid, "7677205833033992980") for rid, sid in rooms.items()]
+    pool = [_Cand(rid, sid, "7300000000000000207") for rid, sid in rooms.items()]
     pool.append(_Cand(1084, 575, "OTHER"))
     scans = _scans([[(1054, 100.0, 300, 9.0)], [(1061, 200.0, 280, 9.0)],
                     [(1084, 800.0, 30, 4.0)]])
     found = hm._pick_room(scans, pool)
-    assert found["room_id"] == "7677205833033992980"
+    assert found["room_id"] == "7300000000000000207"
     assert found["recordings"] == [1054, 1055, 1057, 1059, 1061]
 
 
@@ -503,8 +503,8 @@ def test_primary_is_decided_inside_the_segment_only():
     で勝ち、兜の区間に別人の名前が付いた。出力はgifterごとに1本ずつ作るので、これは
     giftが1件落ちるだけでなく**別人の名前が付く**誤りになる。"""
     prepared = [_item(0, 55.75, 3.91)]
-    rows = {1154: [_gift(1, 54.99, 1000, "Galaxy", "セクハラ珍たん"),
-                   _gift(2, 57.43, 399, "Spartan Helmet", "🟡むらたろう")]}
+    rows = {1154: [_gift(1, 54.99, 1000, "Galaxy", "視聴者J"),
+                   _gift(2, 57.43, 399, "Spartan Helmet", "🟡視聴者G")]}
     hm._assign_gifts(prepared, rows, hm.GIFT_LEAD)
     got = prepared[0]["gifts"]
     assert [g["inside"] for g in got] == [False, True]
@@ -708,7 +708,7 @@ def test_match_highlight_reports_a_missing_file(tmp_path):
 # monkeypatchで差し替えるか(段の順序を見る側)、ffmpegと素材だけを外して本体を走らせる
 # (窓の実時刻と進捗の名乗りを見る側)。
 #
-# 段にしてよい理由は実測にある(2026-09-02 / pomiiiip)。候補を14本→33本にしても通しは
+# 段にしてよい理由は実測にある(2026-09-02 / streamer_a)。候補を14本→33本にしても通しは
 # 18.0秒→19.9秒で、通しの8〜9割は候補の量と無関係な「gift演出の詰め」(ffmpegでframeを出す段)
 # である。候補に比例するのは読み込みと粗い走査だけ(録画1本あたり0.094秒)で、**外れた段は
 # 1.0秒で終わる**(当たりが無ければ詰めるgift演出が無い)。よって「狭い窓で試して、1本も
@@ -963,8 +963,8 @@ def test_match_highlight_names_the_streamer_and_the_days_when_nothing_is_a_candi
     monkeypatch.setattr(hm, "candidates", lambda conn, streamer, days: [])
     monkeypatch.setattr(hm.config, "get_highlight_match_day_stages", lambda: (30.0,))
     with pytest.raises(hm.HighlightMatchError) as err:
-        hm.match_highlight(None, highlight, "pomiiiip")
-    assert "pomiiiip" in str(err.value) and "30" in str(err.value)
+        hm.match_highlight(None, highlight, "streamer_a")
+    assert "streamer_a" in str(err.value) and "30" in str(err.value)
 
     with pytest.raises(hm.HighlightMatchError) as err:
         hm.match_highlight(None, highlight, "", days=14.0)
@@ -973,9 +973,12 @@ def test_match_highlight_names_the_streamer_and_the_days_when_nothing_is_a_candi
 
 # ===== 実物の真値（回帰） =====
 #
-# 実物のhighlight 1本の真値は tests/data/highlight_truth_pomiiiip.json にある。目視(演出の
+# 実物のhighlight 1本の真値は tests/data/highlight_truth.json にある。目視(演出の
 # frame)とDBのgift eventで確定したもので、合否は**giftの名前・gifter・gift演出の並び順**で採る
 # (gift演出の秒とbaseは3秒hopの粗い推定なので参考値)。
+#
+# repoへ入れる版はgifterの名前を伏せてある。実素材と突き合わせるには実名が要るので、
+# 実名の版は tests/data/highlight_truth.local.json として手元にだけ置く(gitignore)。
 #
 # 突き合わせ本体を走らせるには53.9時間ぶんの録画と本番DBが要るので、ここでは2段に分ける。
 #
@@ -991,11 +994,12 @@ import json
 import os
 import sqlite3
 
-TRUTH_PATH = pathlib.Path(__file__).resolve().parent / "data" / "highlight_truth_pomiiiip.json"
+TRUTH_PATH = pathlib.Path(__file__).resolve().parent / "data" / "highlight_truth.json"
+LOCAL_TRUTH_PATH = TRUTH_PATH.with_name("highlight_truth.local.json")
 
 
-def _truth() -> dict:
-    return json.loads(TRUTH_PATH.read_text(encoding="utf-8"))
+def _truth(path: pathlib.Path = TRUTH_PATH) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _key(fragment: dict) -> tuple:
@@ -1110,8 +1114,8 @@ def test_compare_allows_extra_gifts_in_one_segment():
     truth = _truth()
     segments = _observed(truth)
     segments[-1].gifts.append({"gift_name": "Spartan Helmet",
-                               "user_nickname": "🟡むらたろう🍑🏌️‍♂️🍔"})
-    segments[0].gifts.insert(0, {"gift_name": "口笛はなぜ", "user_nickname": "おニャンコ🐢💤"})
+                               "user_nickname": "🟡視聴者G🍑🏌️‍♂️🍔"})
+    segments[0].gifts.insert(0, {"gift_name": "口笛はなぜ", "user_nickname": "視聴者B🐢💤"})
     assert _compare(segments, truth) == []
 
 
@@ -1148,7 +1152,10 @@ def test_truth_on_the_real_material():
     from tictok.core import config, layout
     from tictok.paths import PROJECT_ROOT
 
-    truth = _truth()
+    if not LOCAL_TRUTH_PATH.is_file():
+        pytest.fail(f"実名の真値がありません: {LOCAL_TRUTH_PATH}"
+                    " ―― repoの highlight_truth.json は名前を伏せてあるので突き合わせに使えない")
+    truth = _truth(LOCAL_TRUTH_PATH)
     db = PROJECT_ROOT / "tictok.db"
     highlight = (PROJECT_ROOT / "recordings" / truth["streamer"]
                  / layout.HIGHLIGHT_LEGACY_DIRNAME / truth["highlight"])
@@ -1174,4 +1181,4 @@ def test_truth_on_the_real_material():
     # 真値の10行に加えて、最後のgift演出で Galaxy 1000💎 に隠れていた1件が出ること。ここが
     # 出ないなら ``primary`` が範囲内へ閉じていない(範囲外の高額giftが勝っている)。
     names = {(g["gift_name"], g["user_nickname"]) for s in result["segments"] for g in s.gifts}
-    assert ("Spartan Helmet", "🟡むらたろう🍑🏌️‍♂️🍔") in names
+    assert ("Spartan Helmet", "🟡視聴者G🍑🏌️‍♂️🍔") in names

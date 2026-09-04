@@ -321,8 +321,8 @@ class UsersMixin:
         conn = self._read_connection()
         rows = conn.execute(
             # 表示名はusers表を優先する。MAX(e.user_unique_id)は辞書順の最大を拾うだけで
-            # 「最新のhandle」ではなく、実測では改名前の自動生成handle(user5037930325926)が
-            # 現handle(harehare12345)を押しのけた。users表は毎eventで最新へupsertされる
+            # 「最新のhandle」ではなく、実測では改名前の自動生成handle(user0000000000001)が
+            # 現handle(viewer_01)を押しのけた。users表は毎eventで最新へupsertされる
             # 唯一の真実なので、eventの値はusers側が空のときだけ使う。
             "SELECT e.identity_key AS key, s.unique_id AS owner,"
             " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
@@ -677,6 +677,36 @@ class UsersMixin:
                     self._merge_person_locked(self._conn, row["member_key"]))
                 group["updated_at"] = max(group["updated_at"], row["updated_at"] or 0.0)
         return sorted(groups.values(), key=lambda g: -g["updated_at"])
+
+    def user_merge_map(self) -> dict:
+        """``{サブのidentity_key: 主のidentity_key}``。束ねられている人だけが入る。
+
+        束ねを**畳み先の辞書として**読む唯一の口である。:meth:`list_user_merges` は名乗り
+        まで込みの一覧(画面が束ねの中身を出すためのもの)なので、集計や照合があれを解いて
+        畳み先を組み立てると、畳み方の規則が読む側の数だけ増える。
+
+        段は作らない規則が :meth:`merge_users` に在るので、1回引けば畳み先が決まる ——
+        値をもう一度この辞書で引き直す必要は無い(引き直しても同じ値になる)。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT member_key, primary_key FROM user_merges").fetchall()
+        return {row["member_key"]: row["primary_key"] for row in rows}
+
+    def user_person_key(self, identity_key) -> str:
+        """そのkeyの畳み先。束ねられていれば主のkey、そうでなければ自分自身。
+
+        1件だけ引く口である(:meth:`user_merge_map` は全件)。切り出す直前の照合
+        (:func:`tictok.media.highlight_export.verify_item`)がここを通るのは、**あの場では
+        手元の値を1つも信用せずDBを引き直す**という約束のためで、計画の段で作った辞書を
+        渡さない —— 計画から書き出しまでの間に束ねが変わっていれば、変わった後の答えで
+        判ずるのが正しい。
+        """
+        key = (identity_key or "").strip()
+        if not key:
+            return ""
+        with self._lock:
+            return self._merge_key_locked(key)
 
     def dismiss_discovery_candidate(self, unique_id: str) -> None:
         with self._lock:

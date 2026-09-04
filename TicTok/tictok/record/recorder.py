@@ -707,7 +707,7 @@ async def reencode_single_resolution(
     async def _covers_source(timing_mode: str) -> bool:
         """出来た出力が入力の尺を保っているか。exit 0 は「最後まで読めた」を意味しない。
 
-        実測(2026-07-23, pomiiiip_20260618_222816): 途中でsegment分割が止まった録画は、
+        実測(2026-07-23, streamer_a_20260618_222816): 途中でsegment分割が止まった録画は、
         stream copyでは177.9分そのまま通るのに、この再encodeでは順に読んだdecoderが
         14.5分の地点で止まり、**ffmpegは0で正常終了して**91%を捨てた出力を残した。その
         出力が元mp4と差し替えられ、178分の録画が14.5分になった(seekすれば復号できるので、

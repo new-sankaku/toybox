@@ -1,9 +1,9 @@
 """書き出したmp4の中身が本当に合っているかを、**後から**DBで確かめる。
 
-    venv/Scripts/python scripts/verify_highlight_export.py [--streamer pomiiiip] [--json]
+    venv/Scripts/python scripts/verify_highlight_export.py [--streamer streamer_a] [--json]
 
 事故があったので在るscriptである。`highlight_videos` が0行の状態で手で組んだ定義から7本の
-mp4が出て、``あきと`` の名前を持つfileの中身は ``よい`` が投げた Guardian's Pledge だった。
+mp4が出て、``視聴者A`` の名前を持つfileの中身は ``よい`` が投げた Guardian's Pledge だった。
 **file名は誰の物かを名乗るが、名前の側に中身の保証は何も無い。**
 
 いまは書き出しのたびに素性が隣へ残る(``<file名>.mp4.json``)。ここはそれを**信用せずに**

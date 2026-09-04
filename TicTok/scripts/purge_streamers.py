@@ -39,7 +39,7 @@ search_fts は external content FTS5 なので、search_hits を消しただけ�
 書き出せるので、それを入力にすればDBとdiskで対象がずれない。
 
 Usage (TicTok directory から venv で実行):
-    python scripts/purge_streamers.py --keep wicha_3111,pomiiiip,koharundechu
+    python scripts/purge_streamers.py --keep streamer_c,streamer_a,streamer_b
     python scripts/purge_streamers.py --keep ... --list-files purge_targets.txt
     python scripts/purge_streamers.py --keep ... --apply --db-only --vacuum
     python scripts/purge_streamers.py --keep ... --apply --vacuum

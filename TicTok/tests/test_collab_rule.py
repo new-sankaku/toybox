@@ -8,8 +8,8 @@ from types import SimpleNamespace as NS
 
 from tictok.core.collab import linkmic_state
 
-OWN_UID = "7310859361970226178"
-OWN_ROOM = "7658613249207110420"
+OWN_UID = "7300000000000000101"
+OWN_ROOM = "7300000000000000202"
 
 
 def _member(uid, room):
@@ -49,25 +49,25 @@ def _state(event):
 def test_own_linked_with_a_linked_peer_is_connected():
     """実観測のsnapshot(自室LINKED + 他室LINKED)。これが「繋がっている」の基本形。"""
     event = _event([
-        _entry("7658549112440064788", "GROUP_STATUS_LINKED", [("7392514617857852436", "7658549112440064788")]),
+        _entry("7300000000000000201", "GROUP_STATUS_LINKED", [("7300000000000000103", "7300000000000000201")]),
         _entry(OWN_ROOM, "GROUP_STATUS_LINKED", [(OWN_UID, OWN_ROOM)]),
     ])
     out = _state(event)
     assert out["connected"] is True
-    assert out["peers"] == ["7392514617857852436"]
+    assert out["peers"] == ["7300000000000000103"]
 
 
 def test_peer_room_id_is_carried_out_for_identity_resolution():
     """相手のroom_idを返すこと。表示名はLinkLayerに載らず、この室を引くのが唯一の
     解決経路なので、ここで落とすと画面は数値IDしか出せない。"""
     event = _event([
-        _entry("7658549112440064788", "GROUP_STATUS_LINKED", [("p1", "7658549112440064788")]),
+        _entry("7300000000000000201", "GROUP_STATUS_LINKED", [("p1", "7300000000000000201")]),
         _entry("a2", "GROUP_STATUS_LINKED", [("p2", "")]),
         _entry(OWN_ROOM, "GROUP_STATUS_LINKED", [(OWN_UID, OWN_ROOM)]),
     ])
     out = _state(event)
     # 室を名乗らない相手はkeyごと出さない(空文字を室として引きに行かせない)。
-    assert out["peer_rooms"] == {"p1": "7658549112440064788"}
+    assert out["peer_rooms"] == {"p1": "7300000000000000201"}
 
 
 def test_peer_rooms_come_from_the_link_list_route_too():

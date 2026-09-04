@@ -88,7 +88,7 @@ CREATE INDEX IF NOT EXISTS idx_event_strings_hash ON event_strings(hash);
 
 既存の7箇所はすべて `MAX(e.user_avatar)` の形でした。**これは「最新」ではなく文字列の
 辞書順最大です。** `streamers.py` にも実例つきのcommentがあります（改名前の自動生成handle
-`user5037930325926` が現handle `harehare12345` を押しのけた）。
+`user0000000000001` が現handle `viewer_01` を押しのけた）。
 
 したがって **`MAX(e.user_avatar_id)` への機械置換は誤りです。** idの最大は「最初に見た順」
 であって辞書順ではありません。正しい書き換えは値へJOINしてからMAXを採る形です。

@@ -3668,7 +3668,7 @@ select optgroup, select option {
   block-size: calc(var(--mn-row) * 10 + 1.9rem);
   overflow-y: auto;
 }
-/* 名前と@IDはどこでも折る。@IDは長いものが24文字あり(@user15479683579…)、
+/* 名前と@IDはどこでも折る。@IDは長いものが24文字あり(@user00000000001…)、
    折らないとこの列の最小幅がその長さになり、区分ごとの狭い枠でコイン列が
    外へ押し出されて横にscrollする。切り詰めずに折るのは、@IDそのものが目的の値だから。 */
 /* .u .u-name は既定で nowrap + 三点リーダ。nowrap のままだと表の自動列幅が
@@ -5017,7 +5017,7 @@ select optgroup, select option {
    **1つも折り返させない。** 値はどれも形の決まった短い物(配信者名・種別の名乗り・日時・
    容量)で、折り返して読む物は1つも無い。共通の既定(white-space:normal +
    overflow-wrap:anywhere)のままだと、列が痩せたときに語の途中で割れて1行が2段になる
-   ―― 実測で `pomiiiip` が `pomiii`/`ip` に、`09/02 21:18:32` が2段に割れていた。
+   ―― 実測で `streamer_a` が `stream`/`er_a` に、`09/02 21:18:32` が2段に割れていた。
    折り返しを禁じれば、auto layoutは各列へ中身ぶんの幅を割り当てる。 */
 .vd-cliplist th, .vd-cliplist td { white-space: nowrap; }
 /* **余りの受け皿はfile名の列(2)。** 他の列が中身ぶんを取った残り全部をここへ回す。
@@ -6394,7 +6394,7 @@ a { color: var(--accent-ink); }
    詰まって読めない。shrink-to-fit(1%)で詰め、余りはfile名の列(3)へ全部寄せる
    ―― 固定幅ではないので窓幅に追従する(配信者動画のシーン検索と同じ手)。 */
 /* nowrapは必須。共通の.result-table tdは overflow-wrap:anywhere を持つので、幅を
-   shrink-to-fitにした瞬間に「pomi / iiip」「08/ 29 01: 53: 20」と1文字ずつ縦に割れる。 */
+   shrink-to-fitにした瞬間に「stream / er_a」「08/ 29 01: 53: 20」と1文字ずつ縦に割れる。 */
 /* **cellに割合(1%)を置かない。** あれは表を列いっぱいへ広げるための指定である ——
    auto layoutは割合指定の列から表の幅を逆算する(中身Wの列に1%と書けば表はW÷0.01を望む)
    ので、幅をautoにしても表は必ず列いっぱいまで伸びる(実測で1130px)。列を字の幅で
@@ -6412,7 +6412,7 @@ a { color: var(--accent-ink); }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* gifterの名前は絵文字混じりで長さの上限が無い(実物に「🟡むらたろう🍑🏌️‍♂️🍔」が居る)。
+/* gifterの名前は絵文字混じりで長さの上限が無い(実物に「🟡視聴者G🍑🏌️‍♂️🍔」が居る)。
    伸びるに任せるとこの列だけで表が横scrollになり、右端の印が枠の外へ出る。
    **上限は「入っているcellの幅」であって、字数ではない。** 以前は 16ch を敷いていたが、
    これはcellにどれだけ余裕があっても同じ所で切る指定で、実測でgifterの列が172pxある行の
@@ -6420,6 +6420,14 @@ a { color: var(--accent-ink); }
    見切れる」の正体である。列の幅を決めるのは下のnth-childの配分で、ここは配られた幅を
    使い切るだけにする(全文はcellのtooltip)。 */
 .st-gifter { max-inline-size: 100%; }
+/* サブアカウントを畳んだ人の印。名前を置き換えず脇へ添えるのは、この表が「誰のgiftか」を
+   確かめる面だからである(配信者画面の日ぶん .sm-md-merged と同じ名乗り)。 */
+.st-merged {
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+  margin-inline-start: 0.25rem;
+}
 .st-gifter .u-name {
   min-inline-size: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

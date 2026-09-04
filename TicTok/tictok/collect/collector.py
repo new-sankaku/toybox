@@ -6240,7 +6240,7 @@ class TikTokCollector:
         - business_type=4 は**Portalの送信**である("sent a Portal"表示)。閉鎖側のPortalEvent
           とは別messageで、idも別値なので結合しない
         - business_type=19(Super Fan Box)は**diamond_countを持たない**。0で埋めない
-        - 送信者は配信者とは限らない(実測でbt=19は視聴者@sinbakwk35kが送信)。
+        - 送信者は配信者とは限らない(実測でbt=19は視聴者@streamer_fが送信)。
           「配信者の支出」と決めつけられないので、送信者をそのまま残す
         """
         self._mark_data()
@@ -6566,7 +6566,7 @@ class TikTokCollector:
                             channel_id=sim_collab_channel,
                             group_change_content=_sim_group_change(
                                 [(str(self.room_id), self._owner_id, "GROUP_STATUS_LINKED"),
-                                 ("7658549112440064788", "7777", "GROUP_STATUS_LINKED")]
+                                 ("7300000000000000201", "7777", "GROUP_STATUS_LINKED")]
                             ),
                         )
                     )

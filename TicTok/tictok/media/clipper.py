@@ -216,7 +216,7 @@ _STILL_NAME_RE = re.compile(
 # highlightをgifterごとに繋いだ1本の名前。組み立て側は
 # :func:`tictok.media.highlight_export.export_filename` で、**対で守る**。
 #
-#     01_260829-260905_coin5906_セクハラ珍たん_story.mp4
+#     01_260829-260905_coin5906_視聴者J_story.mp4
 #
 # 先頭の2桁は**その週の中の順位**(01がその週で一番コインの多い人)。file名の並び順そのものを
 # コインの高い順にするために付いている —— coinは桁区切りを持たないので、これが無いと

@@ -11,8 +11,8 @@ event側を優先していた。**`MAX()` は辞書順の最大を返すだけ�
 
 | 表示されていた値 | 実際の現handle | 誤った理由 |
 |---|---|---|
-| `user5037930325926` | `harehare12345` | `u` > `h` で自動生成handleが勝つ |
-| `user9487377432719` | `chikudenchi0807` | 同上 |
+| `user0000000000001` | `viewer_01` | `u` > `h` で自動生成handleが勝つ |
+| `user0000000000002` | `viewer_02` | 同上 |
 
 改名前の自動生成handle(`userNNNNNNNN`)は `u` で始まるため、**辞書順でほぼ必ず現handleに勝つ**。
 改名した視聴者ほど壊れて見える、という性質の悪い壊れ方だった。
@@ -69,19 +69,19 @@ gift送信者 1171人のうち:
 @handle が変わる全9件:
 
 ```
-user5037930325926  -> harehare12345      coin=80958  (19 sessions)
-user9487377432719  -> chikudenchi0807    coin=64921  ( 9 sessions)
-user7686532416008  -> kent.d710          coin= 4548  ( 7 sessions)
-dm08786581         -> jk08786583         coin= 1112
-yami_topaichi      -> mochi_sokkin       coin=  309
-Enigma SUMATA      -> Enigma JKSEX       coin=   15
-sairuiu07          -> suikadayo0         coin=    2
-mamacha1503        -> ochoolllee2        coin=    1
-dunio.galo7        -> xinnwee            coin=    1
+user0000000000001  -> viewer_01   coin=80958  (19 sessions)
+user0000000000002  -> viewer_02   coin=64921  ( 9 sessions)
+user0000000000003  -> viewer_03   coin= 4548  ( 7 sessions)
+oldhandle1         -> viewer_04   coin= 1112
+oldhandle2         -> viewer_05   coin=  309
+Enigma AAA         -> Enigma BBB  coin=   15
+oldhandle3         -> viewer_06   coin=    2
+viewer_09          -> viewer_07   coin=    1
+oldhandle4         -> viewer_08   coin=    1
 ```
 
 nickname の変化(71人)の方が件数は多い。最大は
-「僕はよい、コインはもう無い。」→「┗┻(よい)┻┛ 3代目ガーディアン」(289,352 coin)で、
+「視聴者Cの旧名」→「┗┻(視聴者C)┻┛ 3代目ガーディアン」(289,352 coin)で、
 これは配信者側の改名が反映されていなかったもの。
 
 avatar が855人と最多なのは、avatar URLが署名付きで頻繁に変わるため。`MAX()` の辞書順に

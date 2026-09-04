@@ -1632,11 +1632,11 @@ def test_streamer_profile_folds_an_opponent_by_user_id_across_renames(tmp_db, ma
     now = time.time()
     session_id = make_session("owner")
     plain = _battle(1, now - 7200, ["rival"])
-    plain["opponents"][0]["user_id"] = "7450739310981366791"
+    plain["opponents"][0]["user_id"] = "7300000000000000102"
     # handleもnicknameも載らなかった戦(実dataに在る)。同じ相手として畳まれること。
     bare = _battle(2, now - 3600, ["rival"])
     bare["opponents"][0] = {
-        "unique_id": "", "nickname": "", "avatar": "", "user_id": "7450739310981366791",
+        "unique_id": "", "nickname": "", "avatar": "", "user_id": "7300000000000000102",
     }
     tmp_db.save_battles(session_id, [plain, bare])
 
@@ -1644,12 +1644,12 @@ def test_streamer_profile_folds_an_opponent_by_user_id_across_renames(tmp_db, ma
     assert len(profile["opponents"]) == 1
     opponent = profile["opponents"][0]
     assert opponent["battles"] == 2
-    assert opponent["user_id"] == "7450739310981366791"
+    assert opponent["user_id"] == "7300000000000000102"
     # 1戦目に載っていた表示情報が、名前の無い戦を先に読んでも残ること。
     assert opponent["unique_id"] == "rival"
     assert opponent["nickname"] == "RIVAL"
     assert all(
-        h["opponent_user_ids"] == ["7450739310981366791"] for h in profile["history"]
+        h["opponent_user_ids"] == ["7300000000000000102"] for h in profile["history"]
     )
 
 
@@ -2641,7 +2641,7 @@ def test_streamer_profile_shows_the_current_handle_not_the_lexicographic_max(
     """配信者profileのgifterはsessionを跨ぐ通算集計なので、最新の身元で出すこと。
 
     MAX(e.user_unique_id)は辞書順の最大を返すだけで「最新のhandle」ではない。実DBでは
-    改名前の自動生成handle(user5037930325926)が現handle(harehare12345)を押しのけていた。
+    改名前の自動生成handle(user0000000000001)が現handle(viewer_01)を押しのけていた。
     """
     session_id = make_session("streamer")
     tmp_db.update_session(session_id, "ended")
@@ -2812,7 +2812,7 @@ def test_the_same_message_id_lands_only_once_per_session(
     for at in (100.0, 160.0):
         tmp_db.add_event(session_id, event_builder(
             "comment", at=at, comment="おは", text="おは",
-            create_time=99.5, message_id=7658591137032538901))
+            create_time=99.5, message_id=7300000000000000301))
     tmp_db.flush()
     rows = db_read.execute(
         "SELECT time FROM events WHERE session_id = ?", (session_id,)

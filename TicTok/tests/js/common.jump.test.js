@@ -5,18 +5,18 @@ import { loadCommon } from "./helpers/page.js";
 // apiSend → 候補組み立て → 絞り込み → 描画 まで通しで見る。
 const STREAMERS = {
   streamers: [
-    { unique_id: "pomiiiip", nickname: "ぽみ", sessions: 120, diamonds: 340000 },
+    { unique_id: "streamer_a", nickname: "配信者A", sessions: 120, diamonds: 340000 },
     { unique_id: "otherone", nickname: "べつのひと", sessions: 3, diamonds: 500 },
   ],
 };
 const SESSIONS = {
   sessions: [
-    { id: 339, unique_id: "pomiiiip", owner_nickname: "ぽみ", started_at: Date.UTC(2026, 6, 21, 5, 0, 0) / 1000 },
+    { id: 339, unique_id: "streamer_a", owner_nickname: "配信者A", started_at: Date.UTC(2026, 6, 21, 5, 0, 0) / 1000 },
   ],
 };
 const RECORDINGS = {
   recordings: [
-    { filename: "00339_pomiiiip_20260721_144949.mp4", unique_id: "pomiiiip", session_id: 339, quality: "hd" },
+    { filename: "00339_streamer_a_20260721_144949.mp4", unique_id: "streamer_a", session_id: 339, quality: "hd" },
   ],
 };
 const FANS = {
@@ -80,15 +80,15 @@ describe("横断jump (Ctrl+K)", () => {
     await page.settle();
     const input = page.document.querySelector(".jump-overlay input");
 
-    input.value = "pomiiiip";
+    input.value = "streamer_a";
     input.dispatchEvent(new win.Event("input", { bubbles: true }));
     expect(rows().length).toBeGreaterThan(0);
-    rows().forEach((r) => expect(r.textContent).toContain("pomiiiip"));
+    rows().forEach((r) => expect(r.textContent).toContain("streamer_a"));
 
-    input.value = "20260721 pomiiiip";
+    input.value = "20260721 streamer_a";
     input.dispatchEvent(new win.Event("input", { bubbles: true }));
     const titles = rows().map((r) => r.querySelector(".jump-title").textContent);
-    expect(titles).toContain("00339_pomiiiip_20260721_144949.mp4");
+    expect(titles).toContain("00339_streamer_a_20260721_144949.mp4");
   });
 
   it("0埋めの有無どちらのSession番号でも当たる", async () => {
@@ -99,7 +99,7 @@ describe("横断jump (Ctrl+K)", () => {
       input.value = q;
       input.dispatchEvent(new win.Event("input", { bubbles: true }));
       const titles = rows().map((r) => r.querySelector(".jump-title").textContent);
-      expect(titles).toContain("#00339 ぽみ");
+      expect(titles).toContain("#00339 配信者A");
     }
   });
 
@@ -127,10 +127,10 @@ describe("横断jump (Ctrl+K)", () => {
     ctrlK(win);
     await page.settle();
     const input = page.document.querySelector(".jump-overlay input");
-    input.value = "pomiiiip";
+    input.value = "streamer_a";
     input.dispatchEvent(new win.Event("input", { bubbles: true }));
-    const items = win.filterJumpItems("pomiiiip");
-    expect(items.find((i) => i.kind === "streamer").href).toBe("/streamers?uid=pomiiiip");
+    const items = win.filterJumpItems("streamer_a");
+    expect(items.find((i) => i.kind === "streamer").href).toBe("/streamers?uid=streamer_a");
     expect(items.find((i) => i.kind === "session").href).toBe("/history?session=339");
     expect(items.find((i) => i.kind === "recording").href).toBe("/history?session=339");
   });

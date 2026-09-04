@@ -4,3 +4,6 @@ AI_AUDIO/venv/
 AI_AUDIO/venv_cv/
 AI_AUDIO/work/
 models/audio_sep/
+
+# 実名の真値(手元だけ。repoには匿名化した highlight_truth.json が入る)
+tests/data/*.local.json

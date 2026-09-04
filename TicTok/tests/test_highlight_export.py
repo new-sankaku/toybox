@@ -27,8 +27,8 @@ import pytest
 from tictok.media import highlight_export as hx
 
 # 実データに在る表示名。ZWJ結合(🐈‍⬛)と ZWJ+異体字選択子(🏌️‍♂️)を含む。
-NICK_CAT = "ありしゃ🐈\u200d⬛🐾"
-NICK_GOLF = "🟡むらたろう🍑🏌\ufe0f\u200d♂\ufe0f🍔"
+NICK_CAT = "視聴者F🐈\u200d⬛🐾"
+NICK_GOLF = "🟡視聴者G🍑🏌\ufe0f\u200d♂\ufe0f🍔"
 
 # 2026-08-30 12:00 / 2026-09-01 03:00。日付の幅を見るために2日跨ぐ。**ローカル時刻で組む**
 # —— file名の日付はローカル時刻で切るので、UTC固定で書くと実行環境のtzで境界testが崩れる。
@@ -74,21 +74,29 @@ def _row(idx, *, gift=1, diamonds=100, key="k1", started_at=DAY0, media_start=60
         "excluded": excluded, "dropped": dropped,
         "segment_excluded": excluded, "gift_excluded": 0,
         "segment_dropped": dropped, "gift_dropped": 0,
-        "unique_id": "pomiiiip", "filename": "hl.mp4", "path": "C:/hl.mp4",
+        "unique_id": "streamer_a", "filename": "hl.mp4", "path": "C:/hl.mp4",
         "highlight_duration_seconds": 60.0,
         "recording": None if started_at is None else {"id": 7, "started_at": started_at},
     }
 
 
-def _mention(*gifters, post_min=1000):
+def _mention(*gifters, post_min=1000, merged=None, merge_map=None):
+    """``streamer_mention_week`` の応答。
+
+    ``gifters`` は@で呼ぶ相手の一覧でアカウント1つにつき1行、``merged_gifters`` は
+    同じ人の別アカウント(user_merges)を1人へ畳んだ順位である。束ねが無ければ2つは
+    同じ中身になるので、既定では ``gifters`` をそのまま畳んだ側にも置く。
+    """
     return {"week": "2026-08-29", "post_min": post_min,
             "start_label": "2026-08-29 07:00", "end_label": "2026-09-05 07:00",
-            "gifters": [dict(g) for g in gifters]}
+            "gifters": [dict(g) for g in gifters],
+            "merged_gifters": [dict(g) for g in (gifters if merged is None else merged)],
+            "merge_map": dict(merge_map or {})}
 
 
-def _gifter(key, nickname, diamonds):
+def _gifter(key, nickname, diamonds, accounts=1):
     return {"identity_key": key, "nickname": nickname, "unique_id": "",
-            "diamonds": diamonds, "rank": 1}
+            "diamonds": diamonds, "rank": 1, "accounts": accounts}
 
 
 @pytest.fixture(autouse=True)
@@ -136,7 +144,7 @@ def test_そのgift演出の主である方を尺より先に採る():
 
     帰属はどのgift演出にも「その窓に入った全員」を載せる(窓が重なるため)ので、そのgiftの演出が
     実際に映っているのはそのgift演出の主(``is_primary``)の1件だけである。尺で選ぶと**別人の演出が
-    映っているgift演出**を掴む —— 実測で、おニャンコ🐢💤の Travel with You(999💎)が、あきと🐢💤の
+    映っているgift演出**を掴む —— 実測で、視聴者B🐢💤の Travel with You(999💎)が、視聴者A🐢💤の
     Strong Finish(6000💎)のgift演出(7.46秒)を掴んで、彼女のfileにF1の演出が入った。彼女自身の
     演出(黄色い車)は別のgift演出(6.17秒)に正しく在ったのに、短いという理由だけで落ちていた。
     """
@@ -159,7 +167,7 @@ def test_主がどちらにも立たなければ範囲内の方を採る():
 def test_人が選んだ1本は機械のどの順位よりも先に来る():
     """**同じgiftは複数のhighlightに入る。** どれを使うかの順位(確からしさ→見せ場→主→
     inside→尺)はすべて「そのgiftのアニメが映っているのはどれか」を機械が当てる代用で、
-    代用が外れる形は実測で出ている —— Whale diving 2,150💎(おニャンコ🐢💤)は3本に当たり、
+    代用が外れる形は実測で出ている —— Whale diving 2,150💎(視聴者B🐢💤)は3本に当たり、
     3本すべてで同席(``is_primary`` が偽)と判定された。本人のアニメが映っているのは11.1秒
     ある1本だけだったのに、代表は5.9秒の別の本だった。人が実物を観て選んだのなら、代用を
     先に立てる理由は無い。"""
@@ -304,6 +312,65 @@ def test_余白はhighlightの端を越えない_上限を超える指定は弾�
         hx.plan_exports(rows, mention, pad_tail=hx.MAX_PAD_SECONDS + 0.1)
 
 
+# ===== 同じ人の別アカウント(user_merges) =====
+#
+# 人が配信者画面で束ねた時点で「この2つは同じ人だ」という判断は済んでいる。出力の面だけが
+# アカウントのまま扱うと、束ねた人の週合計がアカウントの数だけに割れ、1人ぶんが2本になるか、
+# どちらも下限に届かず1本も出ないかのどちらかになる。
+
+
+def _merged_mention(*, post_min=1000):
+    """fan_b を fan_a へ束ねてある週。@で呼ぶ相手はアカウントごと(600+600)のまま、
+    畳んだ側は1人ぶん(1,200)である。"""
+    return _mention(_gifter("fan_a", "太郎", 600), _gifter("fan_b", "太郎のサブ", 600),
+                    merged=[_gifter("fan_a", "太郎", 1200, accounts=2)],
+                    merge_map={"fan_b": "fan_a"}, post_min=post_min)
+
+
+def test_束ねたアカウントは1本へまとまる():
+    """サブアカウントで投げたgiftも主のfileへ入り、fileは1本だけになる。"""
+    rows = [_row(0, gift=1, diamonds=500, key="fan_a"),
+            _row(1, gift=2, diamonds=400, key="fan_b")]
+    plan = hx.plan_exports(rows, _merged_mention())
+    assert [entry["identity_key"] for entry in plan["files"]] == ["fan_a"]
+    entry = plan["files"][0]
+    assert [item["gift_event_id"] for item in entry["items"]] == [1, 2]
+    # 名前もfile名も**主アカウント**の物。サブの名乗りで出ると、束ねたはずの人が別の名前で
+    # 貼られる。週合計は畳んだ後の額である。
+    assert entry["nickname"] == "太郎" and entry["coin"] == 1200
+    assert "coin1200" in entry["filename"]
+    # 何アカウントぶんの合計なのかを行が名乗る(画面はこの数で印を出す)。
+    assert entry["accounts"] == 2
+
+
+def test_束ねなければ週合計が割れて1本も出ない():
+    """束ねる前は600💎ずつで、どちらも下限(1,000💎)に届かない。**この差が束ねの効き目**
+    である —— 同じgiftから、束ねた後は1本出て、束ねる前は1本も出ない。"""
+    rows = [_row(0, gift=1, diamonds=500, key="fan_a"),
+            _row(1, gift=2, diamonds=400, key="fan_b")]
+    with pytest.raises(hx.NoSegments):
+        hx.plan_exports(rows, _mention(_gifter("fan_a", "太郎", 600),
+                                       _gifter("fan_b", "太郎のサブ", 600)))
+
+
+def test_束ねた相手は他人の見せ場として落とさない():
+    """同じgift演出に主アカウントとサブアカウントのgiftが載っている場合。畳まずに見ると
+    サブ側は「他人の演出」で落ちるが、束ねてあれば同じ人なので残る。"""
+    rows = [_row(0, gift=1, diamonds=500, key="fan_a", segment_id=500, is_primary=True),
+            _row(0, gift=2, diamonds=400, key="fan_b", segment_id=500, gift_idx=1,
+                 is_primary=False)]
+    entry = hx.plan_exports(rows, _merged_mention())["files"][0]
+    assert [item["gift_event_id"] for item in entry["items"]] == [1, 2]
+
+
+def test_gift演出の行は投げたアカウントと人の両方を名乗る():
+    """観測した事実(どのアカウントが投げたか)は書き換えない。畳んだ鍵は別に添える ——
+    画面が「別人のgiftが混ざっている」を出すのは畳んだ側で比べたときだけである。"""
+    rows = [_row(0, gift=1, diamonds=500, key="fan_b")]
+    item = hx.plan_exports(rows, _merged_mention())["files"][0]["items"][0]
+    assert (item["identity_key"], item["person_key"]) == ("fan_b", "fan_a")
+
+
 # ===== 1本に載らなかったgift =====
 #
 # **無い物こそがこの列の要件である。** 照合結果だけを並べると、TikTokが選ばなかったgiftも
@@ -338,6 +405,18 @@ def test_載らなかったgiftを理由つきで名乗る():
     # **出来上がるfileの中身は変わらない。**
     assert [item["gift_event_id"] for item in entry["items"]] == [1]
     assert entry["count"] == 1
+
+
+def test_束ねた相手の載らなかったgiftも同じ1本へ付く():
+    """サブアカウントで投げて1本へ載らなかったgiftは、**主のfileの「未収録」**に並ぶ。
+    アカウントのまま束ねると、この行はどの束にも属さず画面から消える。"""
+    rows = [_row(0, gift=1, diamonds=500, key="fan_a")]
+    week = [_week_gift(1, "fan_a", 500), _week_gift(2, "fan_b", 400)]
+    entry = hx.plan_exports(rows, _merged_mention(), week_gifts=week)["files"][0]
+    assert [g["gift_event_id"] for g in entry["missing"]] == [2]
+    # 投げたアカウントは残したまま、人として畳んだ鍵を添える。
+    assert (entry["missing"][0]["identity_key"],
+            entry["missing"][0]["person_key"]) == ("fan_b", "fan_a")
 
 
 def test_載らなかったgiftを渡さなければ空のまま():
@@ -383,9 +462,9 @@ def test_file名の形は週の窓():
     先頭に付くのはその週の順位で、1人だけなら ``01_``(桁は週のfile数で決まる)。"""
     rows = [_row(0, gift=1, diamonds=500, key="a", started_at=DAY0),
             _row(1, gift=2, diamonds=400, key="a", started_at=DAY2)]
-    plan = hx.plan_exports(rows, _mention(_gifter("a", "セクハラ珍たん", 2088)))
+    plan = hx.plan_exports(rows, _mention(_gifter("a", "視聴者J", 2088)))
     assert plan["files"][0]["filename"] == \
-        "01_260829-260905_coin2088_セクハラ珍たん_story.mp4"
+        "01_260829-260905_coin2088_視聴者J_story.mp4"
 
 
 def test_日付はgift演出の位置で動かない():
@@ -449,7 +528,7 @@ def test_prefixを持たない古い名前も読み戻せる():
     """順位を刻む前に書き出したfileが、一覧から素性なしとして消えてはいけない。"""
     from tictok.media import clipper
 
-    parsed = clipper.parse_clip_name("260829-260905_coin2088_セクハラ珍たん_story.mp4")
+    parsed = clipper.parse_clip_name("260829-260905_coin2088_視聴者J_story.mp4")
     assert parsed["kind"] == "highlight" and parsed["coin"] == 2088
     assert parsed["week"] == "260829-260905" and parsed["position"] is None
 
@@ -464,7 +543,7 @@ def test_コイン数は週合計で桁区切りを入れない():
     # 絵文字とZWJ結合はそのまま残す。落とすと別人に見える。
     (NICK_CAT, NICK_CAT),
     (NICK_GOLF, NICK_GOLF),
-    ("よい🐢💤 ｻｲｺｳｯ!", "よい🐢💤 ｻｲｺｳｯ!"),
+    ("視聴者C🐢💤 ｻｲｺｳｯ!", "視聴者C🐢💤 ｻｲｺｳｯ!"),
     # file名に置けない文字は落とさず置換する(消すと a/b と ab が同じ名前になる)。
     ('a/b\\c:d*e?f"g<h>i|j', "a_b_c_d_e_f_g_h_i_j"),
     ("\x00\x1f\x7f制御", "_制御"),
@@ -540,7 +619,7 @@ def test_進捗の段階名は人数ぶん増えない():
         seen.append(message)
 
     async def go():
-        for index, nickname in enumerate(["ぽみ（よい）", "太郎"]):
+        for index, nickname in enumerate(["配信者A（よい）", "太郎"]):
             report = hx._scoped_progress(sink, index, 2, nickname)
             await report("highlightを切り出し中（3 / 5件）", 40)
 
@@ -557,9 +636,9 @@ def test_進捗の段階名は人数ぶん増えない():
 # 行として並ぶ。**組み立て側と読み手は対で守る。**
 
 @pytest.mark.parametrize("nickname", [
-    "セクハラ珍たん",
+    "視聴者J",
     NICK_CAT,                 # ZWJ結合
-    "ぽみ_切り抜き",           # 表示名に '_' が入る
+    "配信者A_切り抜き",           # 表示名に '_' が入る
     "映画_story",             # 表示名が '_story' で終わる
     "story",                  # 表示名がそのまま印と同じ綴り
     "coin999_太郎",           # 表示名が印と紛らわしい
@@ -587,7 +666,7 @@ def test_衝突の印が付いた名前も読み戻せる(monkeypatch, tmp_path)
     from tictok.media import clipper
 
     monkeypatch.setattr(hx.layout, "clip_output_dir", lambda s=None: tmp_path)
-    mark = hx._collision_mark("7594803955487917064")
+    mark = hx._collision_mark("7300000000000000106")
     name = hx.export_filename(DAY0, DAY2, 100, "同名", mark=mark)
     parsed = clipper.parse_clip_name(name)
     assert parsed["label"] == f"同名-{mark}"
@@ -610,11 +689,11 @@ def test_読めない名前は素性なしのまま並べる():
     """旧型・手で置かれたfileは推測せず None。隠さず「規約外」として並べる側の約束。"""
     from tictok.media import clipper
 
-    assert clipper.parse_clip_name("highlights_pomiiiip_g7_d25898_diamonds.mp4") is None
+    assert clipper.parse_clip_name("highlights_streamer_a_g7_d25898_diamonds.mp4") is None
     assert clipper.parse_clip_name("手で置いたfile.mp4") is None
     # 録画から切った成果物の読み取りは変わらない。
-    clip = clipper.parse_clip_name("00588_pomiiiip_20260828_222036_024846-024858_ASMR.mp4")
-    assert clip["kind"] == "clip" and clip["stem"] == "00588_pomiiiip_20260828_222036"
+    clip = clipper.parse_clip_name("00588_streamer_a_20260828_222036_024846-024858_ASMR.mp4")
+    assert clip["kind"] == "clip" and clip["stem"] == "00588_streamer_a_20260828_222036"
 
 
 def test_gift演出は信用できるかを名乗る():
@@ -637,7 +716,7 @@ def test_連投は記録を6件残したまま映像は1つになる():
     """**記録は1件も落とさない。切り出しは1つの連続した映像にする。** 2つは別の話である。"""
     rows = [_row(0, gift=100 + n, diamonds=199, key="a", gift_idx=n,
                  gift_media_time=60.0 + n * 0.4) for n in range(6)]
-    plan = hx.plan_exports(rows, _mention(_gifter("a", "るきしろ", 2987)))
+    plan = hx.plan_exports(rows, _mention(_gifter("a", "視聴者D", 2987)))
     entry = plan["files"][0]
     # giftの記録は6件。「Hearts ×6」と1行に潰さない。
     assert entry["count"] == 6 and len(entry["items"]) == 6
@@ -789,14 +868,14 @@ def test_余白で重なった隣のgift演出_高額順は安い側を削り時
 
 
 def test_接したgift演出は高額順では畳まない_高いgift演出から始まる():
-    """実測の再現。よい🐢💤 ｻｲｺｳｯ! の1本は 99💎 → 4999💎 → 99💎 の3件のgift演出が接していたため、
+    """実測の再現。視聴者C🐢💤 ｻｲｺｳｯ! の1本は 99💎 → 4999💎 → 99💎 の3件のgift演出が接していたため、
     畳むと0.0〜17.79秒の1つの窓になり「高額順を指定したのに99💎から始まる1本」が出来た。
 
     接しているだけの別々のgift演出なので、高額順では畳まず**4999💎のgift演出から始める**。"""
     rows = [_row(0, gift=1, diamonds=99, key="a", start=0.0, end=5.41),
             _row(1, gift=2, diamonds=4999, key="a", start=5.41, end=11.45),
             _row(2, gift=3, diamonds=99, key="a", start=11.45, end=17.79)]
-    mention = _mention(_gifter("a", "よい🐢💤 ｻｲｺｳｯ!", 5197))
+    mention = _mention(_gifter("a", "視聴者C🐢💤 ｻｲｺｳｯ!", 5197))
     entry = hx.plan_exports(rows, mention)["files"][0]
     assert entry["cut_count"] == 3
     assert entry["cuts"][0]["diamonds"] == 4999
@@ -821,7 +900,7 @@ def test_高額順でも連投は1つの窓へ畳む_件数は落ちない():
     並び、しかも ``_assert_no_overlap`` で止まる。"""
     rows = [_row(0, gift=100 + n, diamonds=199, key="a", gift_idx=n,
                  gift_media_time=60.0 + n * 0.4) for n in range(6)]
-    entry = hx.plan_exports(rows, _mention(_gifter("a", "るきしろ", 2987)),
+    entry = hx.plan_exports(rows, _mention(_gifter("a", "視聴者D", 2987)),
                             order="diamonds")["files"][0]
     assert entry["cut_count"] == 1
     assert (entry["cuts"][0]["start"], entry["cuts"][0]["end"]) == (0.0, 3.0)

@@ -2,7 +2,7 @@
 
 事故があったので在るtestである。``highlight_videos`` が1行も無い状態で、手で組んだgift演出の
 定義から7本のmp4が書き出された。素材の範囲はあるhighlightから、gifterの名前は**別の
-highlight**の真値から採られており、``あきと`` の名前を持つfileの中身は ``よい`` が投げた
+highlight**の真値から採られており、``視聴者A`` の名前を持つfileの中身は ``視聴者C`` が投げた
 Guardian's Pledge だった。file名は誰の物かを名乗るが、名前の側に中身の保証は何も無い。
 
 ここが確かめるのは6つ。
@@ -34,7 +34,7 @@ from tests.test_highlight_api import (  # noqa: F401  (fixtureとして使う)
     clean_highlights, highlight_roots,
 )
 
-STREAMER = "pomi"
+STREAMER = "streamer_a"
 
 
 def _user(nickname, *, user_id, unique_id):
@@ -63,10 +63,10 @@ def matched(client, server, highlight_roots, make_srv_recording, gift_builder):
     started = recording["started_at"]
     storage.add_event(session_id, gift_builder(
         "Goal Highlight", diamonds=6000, at=started + 100.0,
-        user=_user("あきと", user_id="7001", unique_id="akito")))
+        user=_user("視聴者A", user_id="7001", unique_id="viewer_a")))
     storage.add_event(session_id, gift_builder(
         "Guardian's Pledge", diamonds=4999, at=started + 200.0,
-        user=_user("よい", user_id="7002", unique_id="yoi")))
+        user=_user("視聴者C", user_id="7002", unique_id="viewer_c")))
     storage.flush()
     gifts = storage.highlight_gift_events(session_id, started, started + 1000.0)
     assert len(gifts) == 2
@@ -139,20 +139,41 @@ def test_実照合結果はそのまま通り素性を返す(items):
     record = hx.verify_item(storage, item, gifts[0]["identity_key"])
     assert record["gift_event_id"] == gifts[0]["gift_event_id"]
     assert record["gift_name"] == "Goal Highlight" and record["diamonds"] == 6000
-    assert record["gifter"]["nickname"] == "あきと"
+    assert record["gifter"]["nickname"] == "視聴者A"
     assert record["segment_start"] == 0.0 and record["cut_end"] == 3.0
     assert record["highlight_filename"] == "a.mp4"
 
 
 def test_別人のgiftを持つgift演出はそのfileへ入れない(items):
-    """**事故そのもの。** ``あきと`` のfileに ``よい`` のgiftのgift演出を入れようとする。
+    """**事故そのもの。** ``視聴者A`` のfileに ``視聴者C`` のgiftのgift演出を入れようとする。
 
     file名は持ち主を名乗るので、ここが通ると名前が嘘をつく。"""
-    (akito, yoi), storage, gifts = items
-    assert yoi["gift_name"] == "Guardian's Pledge"
+    (viewer_a, viewer_c), storage, gifts = items
+    assert viewer_c["gift_name"] == "Guardian's Pledge"
     with pytest.raises(hx.NotVerified) as exc:
-        hx.verify_item(storage, yoi, gifts[0]["identity_key"])
+        hx.verify_item(storage, viewer_c, gifts[0]["identity_key"])
     assert "持ち主" in str(exc.value)
+
+
+def test_束ねたサブアカウントのgiftはその人のfileへ入る(items):
+    """**束ね(user_merges)を畳んでから比べる。** 人が「この2つは同じ人だ」と決めた相手の
+    giftは、その人のfileの中身である —— 畳まずに比べると、束ねた人ほど自分のgiftが
+    「別人のgift」として弾かれる。
+
+    畳み先は**その場でDBを引き直す**(計画の段で作った辞書は受け取らない)ので、束ねを
+    外せば同じ組み合わせがまた止まる。"""
+    (viewer_a, viewer_c), storage, gifts = items
+    owner = gifts[0]["identity_key"]
+    other = gifts[1]["identity_key"]
+    assert owner != other
+    storage.merge_users(other, owner)
+    record = hx.verify_item(storage, viewer_c, owner)
+    # 素性に残るgifterは**投げたアカウント**のまま(観測した事実は書き換えない)。
+    assert record["gifter"]["identity_key"] == other
+
+    storage.unmerge_user(other)
+    with pytest.raises(hx.NotVerified):
+        hx.verify_item(storage, viewer_c, owner)
 
 
 def test_別のhighlightのfileを切ろうとしたら止める(items, highlight_roots):
@@ -250,9 +271,9 @@ def test_名前の印と素性のverifiedは必ず一致する(tmp_path):
 
 def test_検証用の出力はfile名で判る():
     """名前の印は中身と一緒に動く。素性のJSONは隣に在るだけで、1本運べば付いて行かない。"""
-    name = hx.export_filename(0.0, 0.0, 5906, "セクハラ珍たん", verified=False)
+    name = hx.export_filename(0.0, 0.0, 5906, "視聴者J", verified=False)
     assert name.endswith(f"{hx.STORY_SUFFIX}{hx.UNVERIFIED_MARK}{hx.STORY_EXT}")
-    assert hx.UNVERIFIED_MARK not in hx.export_filename(0.0, 0.0, 5906, "セクハラ珍たん")
+    assert hx.UNVERIFIED_MARK not in hx.export_filename(0.0, 0.0, 5906, "視聴者J")
 
 
 def test_素性は中身の出所を1件ずつ名乗る(items, matched, tmp_path):
@@ -265,13 +286,13 @@ def test_素性は中身の出所を1件ずつ名乗る(items, matched, tmp_path
     checked = hx.verify_items(storage, [item], gifts[0]["identity_key"])
     record = hx.provenance_record(
         {"filename": "x_story.mp4", "identity_key": gifts[0]["identity_key"],
-         "nickname": "あきと", "unique_id": "akito", "coin": 6000, "rank": 1},
+         "nickname": "視聴者A", "unique_id": "viewer_a", "coin": 6000, "rank": 1},
         checked, streamer=STREAMER,
         plan={"week": "2026-08-29", "week_label": "…", "order": "diamonds",
               "post_min": 1000, "min_diamonds": 98},
         verified=True)
     assert record["verified"] is True and record["schema"] == hx.PROVENANCE_SCHEMA
-    assert record["gifter"]["nickname"] == "あきと"
+    assert record["gifter"]["nickname"] == "視聴者A"
     entry = record["segments"][0]
     assert entry["position"] == 1 and entry["highlight_id"] == highlight_id
     assert entry["segment_id"] == item["segment_id"]
@@ -360,6 +381,38 @@ def test_下見の各行に代表frameのURLが付く(client, matched):
             f"/frame?at={row['at']:.3f}")
 
 
+def test_束ねた2人は下見でも1本になる(client, matched, server):
+    """**画面までの通し。** 配信者タブで束ねた2つのアカウントは、下見でもfile 1本になり、
+    行は投げたアカウント(``identity_key``)と人(``person_key``)の両方を名乗る。
+
+    畳んだ鍵が応答の列から落ちていると、画面はアカウントで比べるしかなくなり、束ねた人が
+    自分のサブで投げたgiftのたびに「別人が混ざっている」と名乗る。"""
+    highlight_id, storage, gifts, _path = matched
+    viewer_a, viewer_c = gifts[0]["identity_key"], gifts[1]["identity_key"]
+    # 束ねる前は2人ぶんで2本。
+    before = client.post("/api/highlights/export/plan",
+                         json={"highlight_ids": [highlight_id]}).json()
+    coins = {f["identity_key"]: f["coin"] for f in before["files"]}
+    assert sorted(coins) == sorted([viewer_a, viewer_c])
+
+    storage.merge_users(viewer_c, viewer_a)
+    try:
+        body = client.post("/api/highlights/export/plan",
+                           json={"highlight_ids": [highlight_id]}).json()
+    finally:
+        # 束ねは人に付く(配信者にも週にも紐付かない)ので、同じstorageを使う後続のtestへ
+        # 残さない。
+        storage.unmerge_user(viewer_c)
+    assert [f["identity_key"] for f in body["files"]] == [viewer_a]
+    entry = body["files"][0]
+    assert entry["accounts"] == 2
+    # 週合計は畳んだ後の額(2つのアカウントの合計)で、file名もその数字を名乗る。
+    assert entry["coin"] == coins[viewer_a] + coins[viewer_c]
+    assert f"coin{entry['coin']}" in entry["filename"]
+    keys = {(item["identity_key"], item["person_key"]) for item in entry["items"]}
+    assert keys == {(viewer_a, viewer_a), (viewer_c, viewer_a)}
+
+
 def test_絵は切り出す窓の中から採る(client, matched, server):
     """giftがgift演出の頭より手前を指すとき、絵はその位置から採らない。
 
@@ -434,14 +487,14 @@ def test_下見に載らなかったgiftが理由つきで付く(client, server,
     assert session_id is not None
     recordings = storage.list_recordings(limit=1)
     started = recordings[0]["started_at"]
-    # どのhighlightにも出ていないgift。同じ人(あきと)が同じ週にもう1件投げている。
+    # どのhighlightにも出ていないgift。同じ人(視聴者A)が同じ週にもう1件投げている。
     storage.add_event(recordings[0]["session_id"], gift_builder(
         "Fireworks", diamonds=1088, at=started + 300.0,
-        user=_user("あきと", user_id="7001", unique_id="akito")))
+        user=_user("視聴者A", user_id="7001", unique_id="viewer_a")))
     # まとめ投げ(30💎 x 9)。単価で切るので、**載らなかった一覧にも出さない。**
     storage.add_event(recordings[0]["session_id"], gift_builder(
         "Rose", diamonds=270, repeat_count=9, at=started + 400.0,
-        user=_user("あきと", user_id="7001", unique_id="akito")))
+        user=_user("視聴者A", user_id="7001", unique_id="viewer_a")))
     storage.flush()
 
     body = client.post("/api/highlights/export/plan",

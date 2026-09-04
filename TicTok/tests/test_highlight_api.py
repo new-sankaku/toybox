@@ -85,20 +85,20 @@ def test_highlight_dirs_covers_both_placements_across_roots(highlight_roots):
     綴り(``LiveHightlite``)は実在するfolder名なので直さない。直した瞬間、利用者が置いた
     fileは1本も見つからなくなる。"""
     layout = highlight_roots["layout"]
-    highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
-    highlight_roots["place"](highlight_roots["work"], "pomi", "LiveHightlite", "b.mp4")
-    highlight_roots["place"](highlight_roots["final"], "pomi", "highlights", "c.mp4")
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "LiveHightlite", "b.mp4")
+    highlight_roots["place"](highlight_roots["final"], "streamer_a", "highlights", "c.mp4")
 
-    found = layout.highlight_dirs("pomi")
+    found = layout.highlight_dirs("streamer_a")
     assert found == [
-        highlight_roots["work"] / "pomi" / "highlights",
-        highlight_roots["final"] / "pomi" / "highlights",
-        highlight_roots["work"] / "pomi" / "LiveHightlite",
+        highlight_roots["work"] / "streamer_a" / "highlights",
+        highlight_roots["final"] / "streamer_a" / "highlights",
+        highlight_roots["work"] / "streamer_a" / "LiveHightlite",
     ]
     # 実在しない置き場は返さない(在るものだけを名乗る)。
     assert layout.highlight_dirs("unknown") == []
     # 正規の置き場は配信者folderの下。root直下の ``highlights`` とは別物である。
-    assert layout.highlight_dir("pomi") == highlight_roots["work"] / "pomi" / "highlights"
+    assert layout.highlight_dir("streamer_a") == highlight_roots["work"] / "streamer_a" / "highlights"
 
 
 def test_highlight_dirs_ignores_the_root_level_pool(highlight_roots):
@@ -107,8 +107,8 @@ def test_highlight_dirs_ignores_the_root_level_pool(highlight_roots):
     そこに在る実体はPOCが作った合成素材だけで、実物のhighlightは1本も無い。走査に残すと、
     合成素材が台帳に並んで「TikTokから来た物」のふりをする。"""
     layout = highlight_roots["layout"]
-    highlight_roots["pool"]("pomi", "synth.mp4")
-    assert layout.highlight_dirs("pomi") == []
+    highlight_roots["pool"]("streamer_a", "synth.mp4")
+    assert layout.highlight_dirs("streamer_a") == []
     assert layout.highlight_streamers() == []
     # 走査が辿らない場所を、**置く側も名乗れない**。配信者を失った呼び出しがroot直下へ
     # 落ちると、誰も読まない場所へ置いた/そこから読もうとした事実がpathにしか残らない。
@@ -119,11 +119,11 @@ def test_highlight_dirs_ignores_the_root_level_pool(highlight_roots):
 
 def test_highlight_streamers_lists_only_streamers_with_a_placement(highlight_roots):
     layout = highlight_roots["layout"]
-    highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
     highlight_roots["place"](highlight_roots["final"], "wicha", "LiveHightlite", "b.mp4")
     # 置き場を持たない配信者folder(録画だけが在る)は入らない。
     (highlight_roots["work"] / "solo" / "mp4").mkdir(parents=True, exist_ok=True)
-    assert layout.highlight_streamers() == ["pomi", "wicha"]
+    assert layout.highlight_streamers() == ["streamer_a", "wicha"]
 
 
 def test_merged_output_is_reachable_from_the_artifact_paths(highlight_roots):
@@ -133,8 +133,8 @@ def test_merged_output_is_reachable_from_the_artifact_paths(highlight_roots):
     ここに入っていないと**数十本のmp4がどの画面からも辿れないまま溜まる**。"""
     layout = highlight_roots["layout"]
     assert layout.MERGED_HIGHLIGHT_DIRNAME in layout.ARTIFACT_DIRNAMES
-    merged = layout.merged_highlight_dir("pomi")
-    assert merged == highlight_roots["work"] / "pomi" / layout.MERGED_HIGHLIGHT_DIRNAME
+    merged = layout.merged_highlight_dir("streamer_a")
+    assert merged == highlight_roots["work"] / "streamer_a" / layout.MERGED_HIGHLIGHT_DIRNAME
     merged.mkdir(parents=True, exist_ok=True)
     (merged / "260830-260901_coin2088_someone_story.mp4").write_bytes(b"\x00" * 8)
 
@@ -143,12 +143,12 @@ def test_merged_output_is_reachable_from_the_artifact_paths(highlight_roots):
     found = [p for p in layout.iter_clip_files(work) if p.parent == merged]
     assert len(found) == 1
     # 置き場が名乗る配信者へ戻せること(file名の規約は読めなくてよい)。
-    assert layout.clip_streamer_of(work, found[0]) == "pomi"
+    assert layout.clip_streamer_of(work, found[0]) == "streamer_a"
     assert layout.is_clip_path(work, found[0])
 
     # 素材の置き場は成果物ではない。繋ぐ前のhighlightが一覧へ混ざってはいけない。
-    highlight_roots["place"](work, "pomi", "LiveHightlite", "src.mp4")
-    assert (work / "pomi" / "LiveHightlite") not in list(layout.iter_clip_dirs(work))
+    highlight_roots["place"](work, "streamer_a", "LiveHightlite", "src.mp4")
+    assert (work / "streamer_a" / "LiveHightlite") not in list(layout.iter_clip_dirs(work))
 
 
 # ===== 走査 =====
@@ -157,28 +157,28 @@ def test_merged_output_is_reachable_from_the_artifact_paths(highlight_roots):
 def test_scan_records_where_each_file_was_found(client, highlight_roots):
     """行は必ず「どこで見つけたか」を持つ。置き場が複数ある以上、それが無ければ
     利用者は自分が置いたfileへ戻れない。"""
-    highlight_roots["place"](highlight_roots["work"], "pomi", "LiveHightlite", "a.mp4", 11)
-    highlight_roots["place"](highlight_roots["final"], "pomi", "highlights", "b.mp4", 22)
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "LiveHightlite", "a.mp4", 11)
+    highlight_roots["place"](highlight_roots["final"], "streamer_a", "highlights", "b.mp4", 22)
     # root直下の旧poolは走査しない。ここへ置いた物は台帳に載らない。
-    highlight_roots["pool"]("pomi", "synth.mp4", 33)
+    highlight_roots["pool"]("streamer_a", "synth.mp4", 33)
 
-    scanned = client.post("/api/highlights/scan", json={"streamer": "pomi"}).json()
+    scanned = client.post("/api/highlights/scan", json={"streamer": "streamer_a"}).json()
     assert scanned["added"] == 2 and scanned["missing"] == 0
     # 見た置き場を返す。0件だったとき「どこも見ていない」と「見たが空」を区別させる。
     assert len(scanned["dirs"]) == 2
 
     items = {item["filename"]: item
-             for item in client.get("/api/highlights?streamer=pomi").json()["items"]}
+             for item in client.get("/api/highlights?streamer=streamer_a").json()["items"]}
     assert set(items) == {"a.mp4", "b.mp4"}
     assert items["a.mp4"]["root_key"] == "work"
-    assert items["a.mp4"]["source_dir"] == "pomi/LiveHightlite"
+    assert items["a.mp4"]["source_dir"] == "streamer_a/LiveHightlite"
     assert items["b.mp4"]["root_key"] == "final"
-    assert items["b.mp4"]["source_dir"] == "pomi/highlights"
+    assert items["b.mp4"]["source_dir"] == "streamer_a/highlights"
     assert items["a.mp4"]["bytes"] == 11 and items["b.mp4"]["bytes"] == 22
     assert all(item["status"] == "new" for item in items.values())
     # 同じ走査を2度かけても行は増えない。
     assert client.post("/api/highlights/scan",
-                       json={"streamer": "pomi"}).json()["added"] == 0
+                       json={"streamer": "streamer_a"}).json()["added"] == 0
 
 
 def test_scan_walks_the_subfolders_a_person_made(client, highlight_roots):
@@ -187,23 +187,23 @@ def test_scan_walks_the_subfolders_a_person_made(client, highlight_roots):
     利用者は置き場の下へ週ごとのfolder(``20260829-20260905``)を作って素材を仕分ける。
     直下しか見ない走査では、仕分けた瞬間に行が「fileが無い」へ倒れ、照合結果と人の
     手直しがそこへ道連れになる。"""
-    highlight_roots["place"](highlight_roots["work"], "pomi", "LiveHightlite", "top.mp4")
-    highlight_roots["place"](highlight_roots["work"], "pomi",
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "LiveHightlite", "top.mp4")
+    highlight_roots["place"](highlight_roots["work"], "streamer_a",
                              "LiveHightlite/20260829-20260905", "week.mp4")
-    highlight_roots["place"](highlight_roots["work"], "pomi",
+    highlight_roots["place"](highlight_roots["work"], "streamer_a",
                              "LiveHightlite/20260829-20260905/naka", "deep.mp4")
 
-    scanned = client.post("/api/highlights/scan", json={"streamer": "pomi"}).json()
+    scanned = client.post("/api/highlights/scan", json={"streamer": "streamer_a"}).json()
     assert scanned["added"] == 3
     # 名乗るのは**置き場**の数のままにする(subfolderを足すと、0件のときに
     # 「どこも見ていない」を言い分けるための数が別の意味になる)。
     assert len(scanned["dirs"]) == 1
 
     items = {item["filename"]: item
-             for item in client.get("/api/highlights?streamer=pomi").json()["items"]}
-    assert items["top.mp4"]["source_dir"] == "pomi/LiveHightlite"
-    assert items["week.mp4"]["source_dir"] == "pomi/LiveHightlite/20260829-20260905"
-    assert items["deep.mp4"]["source_dir"] == "pomi/LiveHightlite/20260829-20260905/naka"
+             for item in client.get("/api/highlights?streamer=streamer_a").json()["items"]}
+    assert items["top.mp4"]["source_dir"] == "streamer_a/LiveHightlite"
+    assert items["week.mp4"]["source_dir"] == "streamer_a/LiveHightlite/20260829-20260905"
+    assert items["deep.mp4"]["source_dir"] == "streamer_a/LiveHightlite/20260829-20260905/naka"
     assert all(item["root_key"] == "work" for item in items.values())
 
 
@@ -211,14 +211,14 @@ def test_scan_prefers_the_shallower_copy_when_a_name_repeats(client, highlight_r
     """同じfile名が置き場の直下とsubfolderの両方に在れば、直下を採る(行は1本)。
 
     仕分けの途中では必ずその状態になる。2本にすると、同じhighlightに2つの照合結果が並ぶ。"""
-    highlight_roots["place"](highlight_roots["work"], "pomi", "LiveHightlite", "dup.mp4")
-    highlight_roots["place"](highlight_roots["work"], "pomi",
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "LiveHightlite", "dup.mp4")
+    highlight_roots["place"](highlight_roots["work"], "streamer_a",
                              "LiveHightlite/20260829-20260905", "dup.mp4")
 
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    items = client.get("/api/highlights?streamer=pomi").json()["items"]
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    items = client.get("/api/highlights?streamer=streamer_a").json()["items"]
     assert len(items) == 1
-    assert items[0]["source_dir"] == "pomi/LiveHightlite"
+    assert items[0]["source_dir"] == "streamer_a/LiveHightlite"
 
 
 def test_list_names_every_folder_including_the_empty_ones(client, highlight_roots):
@@ -228,20 +228,20 @@ def test_list_names_every_folder_including_the_empty_ones(client, highlight_root
     ある(今の一覧は中身も子孫も無い棚を出さない)。Serverが先に間引くと、画面はもう
     「在るのに空だ」と言えなくなる。綴りは行の ``source_dir`` と同じでなければ、
     画面はfolderと行を突き合わせられない。"""
-    highlight_roots["place"](highlight_roots["work"], "pomi", "LiveHightlite", "a.mp4")
-    (highlight_roots["work"] / "pomi" / "LiveHightlite" / "20260829-20260905").mkdir()
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "LiveHightlite", "a.mp4")
+    (highlight_roots["work"] / "streamer_a" / "LiveHightlite" / "20260829-20260905").mkdir()
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
 
-    data = client.get("/api/highlights?streamer=pomi").json()
+    data = client.get("/api/highlights?streamer=streamer_a").json()
     folders = {folder["source_dir"]: folder for folder in data["folders"]}
-    assert set(folders) == {"pomi/LiveHightlite",
-                            "pomi/LiveHightlite/20260829-20260905"}
+    assert set(folders) == {"streamer_a/LiveHightlite",
+                            "streamer_a/LiveHightlite/20260829-20260905"}
     # 置き場そのものは name が空。棚の見出しを画面が組めるよう、置き場の名乗りも添える。
-    assert folders["pomi/LiveHightlite"]["name"] == ""
-    assert folders["pomi/LiveHightlite"]["place"] == "pomi/LiveHightlite"
-    week = folders["pomi/LiveHightlite/20260829-20260905"]
+    assert folders["streamer_a/LiveHightlite"]["name"] == ""
+    assert folders["streamer_a/LiveHightlite"]["place"] == "streamer_a/LiveHightlite"
+    week = folders["streamer_a/LiveHightlite/20260829-20260905"]
     assert week["name"] == "20260829-20260905"
-    assert week["place"] == "pomi/LiveHightlite"
+    assert week["place"] == "streamer_a/LiveHightlite"
     assert week["root_key"] == "work"
     # 行の名乗りと同じ綴りである(片方だけ絶対path・片方だけ相対、が起きない)。
     assert data["items"][0]["source_dir"] in folders
@@ -251,30 +251,30 @@ def test_scan_prefers_the_canonical_placement_for_the_same_name(client, highligh
     """同じfile名が正規の置き場と現行の置き場の両方に在っても行は1本。
 
     移行の途中では必ずその状態になる。2本にすると、同じhighlightに2つの照合結果が並ぶ。"""
-    highlight_roots["place"](highlight_roots["work"], "pomi", "LiveHightlite", "dup.mp4")
-    highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "dup.mp4")
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "LiveHightlite", "dup.mp4")
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "dup.mp4")
 
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    items = client.get("/api/highlights?streamer=pomi").json()["items"]
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    items = client.get("/api/highlights?streamer=streamer_a").json()["items"]
     assert len(items) == 1
-    assert items[0]["source_dir"] == "pomi/highlights"
+    assert items[0]["source_dir"] == "streamer_a/highlights"
 
 
 def test_scan_marks_missing_without_dropping_the_row(client, highlight_roots):
     """fileが消えても行は残す。gift演出には人が確認・修正した内容が貼り付いている。"""
-    path = highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
+    path = highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
 
     path.unlink()
-    scanned = client.post("/api/highlights/scan", json={"streamer": "pomi"}).json()
+    scanned = client.post("/api/highlights/scan", json={"streamer": "streamer_a"}).json()
     assert scanned["missing"] == 1
-    items = client.get("/api/highlights?streamer=pomi").json()["items"]
+    items = client.get("/api/highlights?streamer=streamer_a").json()["items"]
     assert len(items) == 1 and items[0]["status"] == "missing"
 
     # 挿し直せば元へ戻る。照合していない行はnewへ(matched_atが無いので断定しない)。
     path.write_bytes(b"\x00" * 32)
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    items = client.get("/api/highlights?streamer=pomi").json()["items"]
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    items = client.get("/api/highlights?streamer=streamer_a").json()["items"]
     assert items[0]["status"] == "new"
 
 
@@ -310,9 +310,9 @@ def _gift(event_id=111, diamonds=6000, media_time=108.0, *, name="Goal Highlight
 @pytest.fixture
 def matched_highlight(client, highlight_roots, server):
     """1本走査して照合結果を入れた状態。(highlight_id, storage) を返す。"""
-    highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
     storage = server.runtime.storage
     storage.save_highlight_match(highlight_id, _fake_result([
         _segment(0, 0.0, 6.0),
@@ -610,9 +610,9 @@ def test_segment_patch_no_longer_takes_a_single_gift(client, matched_highlight):
 
 def test_match_enqueues_a_job_and_refuses_a_second_one(client, highlight_roots, server):
     """照合はqueueへ投入して返す(同期実行しない)。二重投入は行のstatusで弾く。"""
-    highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
 
     body = client.post(f"/api/highlights/{highlight_id}/match",
                        json={"days": 7.0, "scope": "gift"})
@@ -641,9 +641,9 @@ def test_match_enqueues_a_job_and_refuses_a_second_one(client, highlight_roots, 
 
 
 def test_match_refuses_when_the_file_is_gone(client, highlight_roots):
-    path = highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+    path = highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
     path.unlink()
     assert client.post(f"/api/highlights/{highlight_id}/match",
                        json={}).status_code == 404
@@ -676,7 +676,7 @@ def test_list_counts_exclude_the_segments_a_person_removed(client, matched_highl
     ]))
     # giftがgift演出から別表へ出たので、意味の変わる数は名前も変えた。gift演出1つが複数のgiftを
     # 持つため「gift付きgift演出の数」と「giftの件数」は別の数になる。
-    item = client.get("/api/highlights?streamer=pomi").json()["items"][0]
+    item = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]
     assert item["segment_count"] == 3
     assert item["gift_segment_count"] == 2 and item["gift_total_count"] == 3
     assert item["top_diamonds"] == 6000 and item["gift_diamonds"] == 6299
@@ -684,7 +684,7 @@ def test_list_counts_exclude_the_segments_a_person_removed(client, matched_highl
     segments = client.get(f"/api/highlights/{highlight_id}").json()["segments"]
     client.patch(f"/api/highlights/{highlight_id}/segments/{segments[0]['id']}",
                  json={"excluded": True})
-    item = client.get("/api/highlights?streamer=pomi").json()["items"][0]
+    item = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]
     assert item["segment_count"] == 2
     assert item["gift_segment_count"] == 1 and item["gift_total_count"] == 1
     assert item["top_diamonds"] == 100 and item["gift_diamonds"] == 100
@@ -692,17 +692,17 @@ def test_list_counts_exclude_the_segments_a_person_removed(client, matched_highl
 
 def test_delete_removes_the_row_but_not_the_file(client, highlight_roots):
     """highlightは外から来た素材で、こちらが作った成果物ではない。mp4には触らない。"""
-    path = highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+    path = highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
 
     body = client.delete(f"/api/highlights/{highlight_id}").json()
     assert body["deleted"] is True
-    assert client.get("/api/highlights?streamer=pomi").json()["items"] == []
+    assert client.get("/api/highlights?streamer=streamer_a").json()["items"] == []
     assert path.is_file()
     # 走査すれば新しい行として戻る(手直しは戻らない)。
     assert client.post("/api/highlights/scan",
-                       json={"streamer": "pomi"}).json()["added"] == 1
+                       json={"streamer": "streamer_a"}).json()["added"] == 1
 
 
 # ===== 再生URLと既定値 =====
@@ -713,10 +713,10 @@ def test_list_and_detail_carry_a_playable_url(client, highlight_roots):
 
     名前を実pathへ解く口を作ると、そこから任意のdirを名乗れてしまう
     (``tictok.api.routes.clips`` が既に持っている方針)。"""
-    path = highlight_roots["place"](highlight_roots["work"], "pomi", "highlights",
+    path = highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights",
                                     "a.mp4", 64)
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    item = client.get("/api/highlights?streamer=pomi").json()["items"][0]
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    item = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]
     highlight_id = item["id"]
     assert item["url"] == f"/api/highlights/{highlight_id}/media"
     detail = client.get(f"/api/highlights/{highlight_id}").json()["highlight"]
@@ -733,13 +733,13 @@ def test_list_and_detail_carry_a_playable_url(client, highlight_roots):
 
 def test_missing_file_has_no_url_and_media_is_a_404(client, highlight_roots):
     """実体が無い行はURLを名乗らない。押しても404になるbuttonを画面に出させない。"""
-    path = highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+    path = highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
     path.unlink()
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
 
-    item = client.get("/api/highlights?streamer=pomi").json()["items"][0]
+    item = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]
     assert item["status"] == "missing" and item["url"] is None
     assert client.get(f"/api/highlights/{highlight_id}/media").status_code == 404
 
@@ -761,9 +761,9 @@ def test_list_reports_server_defaults_for_both_sides(client):
 def test_match_request_rejects_an_unknown_field(client, highlight_roots):
     """知らないfieldは黙って捨てず弾く。捨てると、画面が送った値が何事も無く消えたまま
     「指定したはずの条件と違う結果」が出る。"""
-    highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
     response = client.post(f"/api/highlights/{highlight_id}/match",
                            json={"days": 7.0, "no_such_option": 1})
     assert response.status_code == 422
@@ -929,9 +929,9 @@ def test_frame_returns_a_jpeg_and_caches_it(client, highlight_roots):
     from tictok.media import highlight_frames
 
     _make_highlight_mp4(
-        highlight_roots["work"] / "pomi" / "highlights" / "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+        highlight_roots["work"] / "streamer_a" / "highlights" / "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
 
     response = client.get(f"/api/highlights/{highlight_id}/frame?at=1.0")
     assert response.status_code == 200
@@ -956,9 +956,9 @@ def test_frame_returns_a_jpeg_and_caches_it(client, highlight_roots):
 def test_frame_beyond_the_length_is_a_404_not_a_rounded_picture(client, highlight_roots):
     """尺を超えた ``at`` で最後のframeを返してはいけない。丸めた絵は「その位置の絵」として
     並ぶので、範囲外を指したことが画面から見えなくなる。"""
-    _make_highlight_mp4(highlight_roots["work"] / "pomi" / "highlights" / "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+    _make_highlight_mp4(highlight_roots["work"] / "streamer_a" / "highlights" / "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
     assert client.get(
         f"/api/highlights/{highlight_id}/frame?at={FRAME_SECONDS + 10}"
     ).status_code == 404
@@ -966,9 +966,9 @@ def test_frame_beyond_the_length_is_a_404_not_a_rounded_picture(client, highligh
 
 def test_frame_rejects_a_bad_position_or_width(client, highlight_roots):
     """黙って丸めない。丸めると画面は指定が効いていると思ったまま別の物を受け取る。"""
-    highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
     assert client.get(f"/api/highlights/{highlight_id}/frame?at=-1").status_code == 400
     assert client.get(f"/api/highlights/{highlight_id}/frame?at=1&w=0").status_code == 400
     assert client.get(
@@ -985,9 +985,9 @@ def test_filmstrip_sheet_is_built_once_and_served(client, highlight_roots):
     数十のHTTP往復が要る(録画側のseek barが既にspriteにしているのと同じ理由)。"""
     from tictok.media import highlight_frames
 
-    _make_highlight_mp4(highlight_roots["work"] / "pomi" / "highlights" / "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+    _make_highlight_mp4(highlight_roots["work"] / "streamer_a" / "highlights" / "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
 
     spec = client.get(f"/api/highlights/{highlight_id}/thumbnails")
     assert spec.status_code == 200
@@ -1019,9 +1019,9 @@ def test_filmstrip_url_changes_when_the_material_is_replaced(client, highlight_r
     highlightを置き直したときにbrowserのcacheが**古い絵を新しい仕様で**読み、絵と秒が
     黙ってずれる(画面はtileの番号からしか秒を知らない)。"""
     path = _make_highlight_mp4(
-        highlight_roots["work"] / "pomi" / "highlights" / "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+        highlight_roots["work"] / "streamer_a" / "highlights" / "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
     first = client.get(f"/api/highlights/{highlight_id}/thumbnails").json()["url"]
 
     import subprocess
@@ -1039,9 +1039,9 @@ def test_filmstrip_is_a_404_when_the_highlight_or_sheet_is_missing(client,
                                                                   highlight_roots):
     """焼く口が先である。sheetだけを先に頼まれても、その場で焼いて返さない ――
     仕様(刻み・grid)を伴わない絵は、画面には秒へ写せない1枚でしかない。"""
-    highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
     assert client.get(
         f"/api/highlights/{highlight_id}/thumbnails.jpg").status_code == 404
     assert client.get("/api/highlights/999999/thumbnails").status_code == 404
@@ -1051,9 +1051,9 @@ def test_recording_frame_refuses_when_the_segment_has_no_recording(client, highl
                                                                    server):
     """録画が当たっていないgift演出は409。「候補が無い」ではなく「そもそも探せない」であり、
     ``/candidates`` が同じ理由で409を返すのと揃える。"""
-    highlight_roots["place"](highlight_roots["work"], "pomi", "highlights", "a.mp4")
-    client.post("/api/highlights/scan", json={"streamer": "pomi"})
-    highlight_id = client.get("/api/highlights?streamer=pomi").json()["items"][0]["id"]
+    highlight_roots["place"](highlight_roots["work"], "streamer_a", "highlights", "a.mp4")
+    client.post("/api/highlights/scan", json={"streamer": "streamer_a"})
+    highlight_id = client.get("/api/highlights?streamer=streamer_a").json()["items"][0]["id"]
     storage = server.runtime.storage
     with storage._lock:
         cursor = storage._conn.execute(
@@ -1083,7 +1083,7 @@ def _recordingless_job(server, state: str) -> str:
     # 台帳はtest間で共有される(module singletonのstorage)ので、idは毎回変える。
     job_id = f"nullrec-{state}-{secrets.token_hex(3)}"
     storage.enqueue_media_job(job_id, "highlight_match", None,
-                              title="突き合わせ pomi / a.mp4",
+                              title="突き合わせ streamer_a / a.mp4",
                               params={"highlight_id": 1})
     storage.start_media_job(job_id)
     storage.finish_media_job(job_id, state, error="test" if state == "failed" else None)
@@ -1120,7 +1120,7 @@ def test_recordingless_jobs_do_not_poison_the_recording_id_lookups(server):
     _recordingless_job(server, "failed")
     storage.enqueue_media_job(f"nullrec-pending-{secrets.token_hex(3)}",
                               "highlight_match", None,
-                              title="突き合わせ pomi / b.mp4")
+                              title="突き合わせ streamer_a / b.mp4")
     assert None not in storage.busy_recording_ids()
     assert storage.media_job_recording_ids_in_states(
         ["highlight_match"], ["failed"]) == {"highlight_match": set()}

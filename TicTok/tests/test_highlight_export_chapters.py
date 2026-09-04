@@ -56,7 +56,7 @@ def _write_output(directory, name, cuts, *, verified=True):
     out = directory / name
     out.write_bytes(b"\x00" * 8)
     record = {"schema": hx.PROVENANCE_SCHEMA, "verified": verified,
-              "week": "2026-08-29", "gifter": {"nickname": "あきと"},
+              "week": "2026-08-29", "gifter": {"nickname": "視聴者A"},
               "segments": [], "cuts": [hx._cut_summary(cut) for cut in cuts]}
     hx.provenance_path(out).write_text(
         json.dumps(record, ensure_ascii=False), encoding="utf-8")
@@ -67,21 +67,21 @@ def test_章の開始位置は尺の累計で出る(client, clip_roots):
     """素性が持つのは窓ごとの尺だけである。**実測(``output.measured``)で伸縮を案分しない**
     —— 全体の差を各章へ配ると、当たっている章の位置まで動かすことになる。"""
     directory = layout.merged_highlight_dir(STREAMER)
-    _write_output(directory, "260829-260905_coin6000_あきと_story.mp4", [
+    _write_output(directory, "260829-260905_coin6000_視聴者A_story.mp4", [
         _cut(10.0, 16.0, diamonds=6000, highlight_id=1,
              gifts=[{"gift_event_id": 111, "gift_name": "Goal Highlight",
-                     "diamonds": 6000, "user_nickname": "あきと"}]),
+                     "diamonds": 6000, "user_nickname": "視聴者A"}]),
         _cut(2.0, 6.5, diamonds=999, highlight_id=2,
              gifts=[{"gift_event_id": 222, "gift_name": "Travel with You",
-                     "diamonds": 999, "user_nickname": "あきと"}]),
+                     "diamonds": 999, "user_nickname": "視聴者A"}]),
     ])
     reply = client.get("/api/highlights/exports/provenance",
                        params={"streamer": STREAMER,
-                               "filename": "260829-260905_coin6000_あきと_story.mp4"})
+                               "filename": "260829-260905_coin6000_視聴者A_story.mp4"})
     assert reply.status_code == 200, reply.text
     body = reply.json()
     assert body["provenance"] is True
-    assert body["nickname"] == "あきと" and body["verified"] is True
+    assert body["nickname"] == "視聴者A" and body["verified"] is True
     assert [cut["at"] for cut in body["cuts"]] == [0.0, 6.0]
     assert [cut["seconds"] for cut in body["cuts"]] == [6.0, 4.5]
     assert body["seconds"] == 10.5

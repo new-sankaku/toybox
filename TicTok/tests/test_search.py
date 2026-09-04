@@ -237,10 +237,10 @@ def test_blank_mention_blanks_a_body_that_is_only_a_mention():
 
 def test_blank_mention_cuts_at_the_known_name_not_at_the_first_space():
     """表示名そのものに空白があると、空白で切った残りが索引へ残って結局その名前で当たる。"""
-    names = MentionNames(["Maiza Santos"])
-    assert blank_mention("@Maiza Santos please gift", names) == " " * 14 + "please gift"
+    names = MentionNames(["Alice Torres"])
+    assert blank_mention("@Alice Torres please gift", names) == " " * 14 + "please gift"
     # 名前を知らなければ空白で切るしかなく、後半が索引へ残る。
-    assert "Santos" in blank_mention("@Maiza Santos please gift")
+    assert "Torres" in blank_mention("@Alice Torres please gift")
 
 
 def test_blank_mention_falls_back_to_the_first_space_for_an_unknown_name():
@@ -730,8 +730,8 @@ def test_search_scenes_cuts_the_target_at_a_known_name_with_a_space(
     tmp_db.flush()
     with tmp_db._lock:
         tmp_db._conn.execute(
-            "INSERT INTO users (identity_key, nickname) VALUES ('k1', 'Maiza Santos')")
+            "INSERT INTO users (identity_key, nickname) VALUES ('k1', 'Alice Torres')")
         tmp_db._conn.commit()
-    seeded(["@Maiza Santos please gift"], source=indexer.SOURCE_COMMENT)
-    assert tmp_db.search_scenes("Santos", [indexer.SOURCE_COMMENT])["total"] == 0
+    seeded(["@Alice Torres please gift"], source=indexer.SOURCE_COMMENT)
+    assert tmp_db.search_scenes("Torres", [indexer.SOURCE_COMMENT])["total"] == 0
     assert tmp_db.search_scenes("gift", [indexer.SOURCE_COMMENT])["total"] == 1

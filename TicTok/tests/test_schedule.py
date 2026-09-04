@@ -169,7 +169,7 @@ def test_peak_hours_report_the_tightest_cells():
 
 
 def test_bimodal_history_keeps_both_peaks():
-    # 実配信者は昼と夜の2山を持つ(pomiiiipが11時と22時)。片方へ寄せない。
+    # 実配信者は昼と夜の2山を持つ(streamer_aが11時と22時)。片方へ寄せない。
     starts = [_ts(d, 11) for d in range(10)] + [_ts(d, 22) for d in range(10)]
     profile = build_schedule_profile(
         starts, floor=0.35, min_factor=0.5, max_factor=2.0, min_sessions=8,

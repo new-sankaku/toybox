@@ -1284,8 +1284,15 @@ class HighlightsMixin:
         しまうと、両方が間違っているときに一致して見える。
 
         週の窓と対象gifterは :meth:`streamer_mention_week` と同じ経路を通る
-        (``_ranking_periods`` / ``_period_bounds`` / ``_gift_window_ranking``)。配信者画面と
-        数が食い違えば、人はまず「どちらが正しいのか」で止まる。
+        (``_ranking_periods`` / ``_period_bounds`` / ``_gift_window_ranking_merged``)。配信者
+        画面と数が食い違えば、人はまず「どちらが正しいのか」で止まる。
+
+        **同じ人の別アカウント(user_merges)は1人として扱う**(利用者の指定)。人が束ねた
+        時点で「その2つは同じ人だ」という判断は済んでいるので、週合計も対象かどうかも
+        畳んだ側で決める —— 畳まないと、束ねた人だけが下限をアカウントの数で割られ、
+        配信者画面では1人に見えているものがこの面では2人に割れる。行が名乗る身元は畳んだ
+        側(``person_key`` と名前)で、**投げたアカウントそのものは ``identity_key`` に残す**
+        (観測した事実は書き換えない)。畳んだ数は ``accounts`` が名乗る。
 
         ``min_diamonds`` は **gift 1個あたりの単価**の下限で、呼び出し側が解決した値を
         受け取る(既定は設定の演出gift下限98💎)。**合計では判定しない** —— 30💎のgiftを
@@ -1339,9 +1346,16 @@ class HighlightsMixin:
         selected = week if week in set(keys) else keys[-1]
         index = keys.index(selected)
         start, end = _period_bounds(selected, WEEK_SATURDAY)
-        everyone = self._gift_window_ranking(conn, handles, ph, start, end)
+        # **同じ人の別アカウント(user_merges)は1人へ畳む**(利用者の指定)。畳まないと、
+        # 束ねたはずの人が週合計をアカウントの数だけに割られ、下限に届かない側の行が
+        # この面から消える —— 配信者画面では1人として見えているのに、検証の面だけ
+        # 別人として扱われることになる。畳んでも数えるgift eventは同じなので、週の合計
+        # コインは畳む前と一致する(変わるのは人数と、誰が下限に届くかである)。
+        everyone = self._gift_window_ranking_merged(conn, handles, ph, start, end)
+        merge_map = self.user_merge_map()
         # 身元は一覧と同じ解決(users表を主、未記入だけevent記録値で補う)を使い回す。
         # gift 1件ずつのevent記録値から名前を作ると、同じ人が行ごとに別の名前で並ぶ。
+        # 鍵は**畳み先**なので、サブアカウントで投げたgiftも主の名乗りで並ぶ。
         people = {row["identity_key"]: row for row in everyone if row["identity_key"]}
         targets = {key for key, row in people.items()
                    if row["diamonds"] >= MENTION_POST_MIN}
@@ -1386,14 +1400,18 @@ class HighlightsMixin:
                     combo_below += 1
                 continue
             key = row["identity_key"] or ""
+            # そのgiftを投げたアカウントを、**人**へ畳む。行が名乗る身元も下限の判定も
+            # ここから先は畳んだ側で行う(投げたアカウントそのものは ``identity_key`` に
+            # 残すので、どのアカウントから来たgiftかは失われない)。
+            person_key = merge_map.get(key, key)
             # 週合計が下限に届かない人のgiftは並べない(利用者の指定)。この面で検証するのは
             # 「fileになる週」の中身で、fileが作られない人のgiftは確かめる相手ではない ——
             # 混ぜると、週の全gifterぶんの行を人が1件ずつ読み下すことになる。**黙って消さ
             # ない**ので、下限を越えていたのに外れた件数は ``totals.offtarget`` が名乗る。
-            if key not in targets:
+            if person_key not in targets:
                 offtarget += 1
                 continue
-            person = people.get(key) or {}
+            person = people.get(person_key) or {}
             items.append({
                 "event_id": row["event_id"],
                 "time": row["time"],
@@ -1408,14 +1426,22 @@ class HighlightsMixin:
                 # 生のCDN URLのまま返す。proxy URLへ解決するのはroute層で、そこが
                 # gift iconのpoolを持っている(``runtime.gift_icon_url``)。
                 "gift_image": row["gift_image"] or "",
+                # **投げたアカウント**(観測した事実)。連投の塊を見分ける鍵はこちらで、
+                # 束ねを外した日にも行の出所が変わらない。
                 "identity_key": key,
+                # **人**(束ねた先)。表が「1人」として数え、並べ、名乗るのはこの鍵である。
+                # 束ねが無ければ ``identity_key`` と同じ値になる。
+                "person_key": person_key,
+                # その人へ畳んだアカウントの数。1なら束ねていない ―― 週合計が何アカウント
+                # ぶんの合計なのかを出さないと、下限に届いた理由が画面から辿れない。
+                "accounts": person.get("accounts", 1),
                 "user_nickname": person.get("nickname", ""),
                 "user_unique_id": person.get("unique_id", ""),
                 "week_diamonds": person.get("diamonds", 0),
                 # 週合計が下限に届いた人か。届かない人の行も残して印だけ付ける ——
                 # 落とすと「この面に出ていないgift」が2種類(下限未満と対象外)出来て、
                 # 出てこない理由を人が切り分けられなくなる。
-                "target": key in targets,
+                "target": person_key in targets,
                 # そのgiftが演出を持つ階層か。**coinを代理指標にした推定であって実測では
                 # ない。** 出てこないgiftを「演出が無いので採られなくて当然」と「演出が
                 # あるのに採られていない = 要調査」に切り分けるための線で、後者が人の
@@ -1463,6 +1489,7 @@ class HighlightsMixin:
                 # **その週にgiftを投げた人の数**であって、表に並んだ人の数ではない ——
                 # 表は対象gifterだけなので、items から数えると target_gifters と必ず
                 # 同じ数になり、「何人のうち何人がfileになるのか」が読めなくなる。
+                # 数えるのは**束ねた後の人**なので、アカウントの数より少なくなり得る。
                 "gifters": len(people),
                 "target_gifters": len(targets),
                 "highlights": len(week_highlights),
@@ -1637,7 +1664,11 @@ class HighlightsMixin:
             # そのgift演出に何人が載っているか。**人数であって件数ではない** —— 連投は同じ人が
             # 何件も出すので、件数で見ると1人しか居ないgift演出が「相席」に見える。区間はgift
             # ごとに持てるので詰めても相手は動かないが、gift演出ごと外すと相手の見せ場も消える。
-            " (SELECT COUNT(DISTINCT g2.identity_key) FROM highlight_segment_gifts g2"
+            # 束ねた別アカウント(user_merges)は1人として数える —— 同じ人が2つの
+            # アカウントで同じgift演出へ載っただけの区間が「相席」に見えてしまう。
+            " (SELECT COUNT(DISTINCT COALESCE(m2.primary_key, g2.identity_key))"
+            "   FROM highlight_segment_gifts g2"
+            "   LEFT JOIN user_merges m2 ON m2.member_key = g2.identity_key"
             "   WHERE g2.segment_id = s.id AND g2.dropped = 0) AS segment_gifters"
             " FROM highlight_segments s"
             " JOIN highlight_videos h ON h.id = s.highlight_id"

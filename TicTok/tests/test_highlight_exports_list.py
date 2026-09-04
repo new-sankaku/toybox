@@ -20,7 +20,7 @@ from tests.test_server import (  # noqa: F401  (fixtureとして使う)
 )
 
 # 実物の名前をそのまま使う。先頭の2桁がその週の順位で、名前順がそのまま💎の高い順になる。
-FIRST = "01_260829-260905_coin19380_あきと_story.mp4"
+FIRST = "01_260829-260905_coin19380_視聴者A_story.mp4"
 SECOND = "02_260829-260905_coin5000_よい_story.mp4"
 # 順位のprefixを持たない古い名前。読めるが ``position`` は持たない。
 OLD = "260822-260829_coin2088_someone_story.mp4"
@@ -45,7 +45,7 @@ def export_dir(server, tmp_path):
     layout.set_record_roots([work, final])
     layout.set_pool_root(work)
 
-    directory = layout.merged_highlight_dir("pomi")
+    directory = layout.merged_highlight_dir("streamer_a")
 
     def _place(name: str, size: int = 32) -> Path:
         directory.mkdir(parents=True, exist_ok=True)
@@ -56,7 +56,7 @@ def export_dir(server, tmp_path):
     return directory, _place
 
 
-def _items(client, query: str = "streamer=pomi") -> list:
+def _items(client, query: str = "streamer=streamer_a") -> list:
     body = client.get(f"/api/highlights/exports?{query}")
     assert body.status_code == 200, body.text
     return body.json()["items"]
@@ -70,9 +70,9 @@ def test_missing_directory_is_empty_not_a_404(client, export_dir):
     directory, _place = export_dir
     assert not directory.is_dir()
 
-    body = client.get("/api/highlights/exports?streamer=pomi")
+    body = client.get("/api/highlights/exports?streamer=streamer_a")
     assert body.status_code == 200
-    assert body.json() == {"streamer": "pomi", "week": "", "items": [],
+    assert body.json() == {"streamer": "streamer_a", "week": "", "items": [],
                            "directory": str(directory), "exists": False}
 
 
@@ -99,7 +99,7 @@ def test_the_url_points_at_the_clip_file_endpoint_and_serves_the_file(client, ex
 
     item = _items(client)[0]
     assert item["url"] == ("/api/clips/file?root=work"
-                           f"&name={quote(f'pomi/LiveHightlite_マージ済み/{FIRST}')}")
+                           f"&name={quote(f'streamer_a/LiveHightlite_マージ済み/{FIRST}')}")
 
     played = client.get(item["url"])
     assert played.status_code == 200, played.text
@@ -141,7 +141,7 @@ def test_the_name_carries_the_position_and_the_coin(client, export_dir):
     assert items[FIRST]["position"] == 1
     assert items[FIRST]["coin"] == 19380
     assert items[FIRST]["week"] == WEEK
-    assert items[FIRST]["nickname"] == "あきと"
+    assert items[FIRST]["nickname"] == "視聴者A"
     assert items[FIRST]["verified"] is True
 
     # prefixを持たない古い名前。順位だけが無く、他は読める。
@@ -162,13 +162,13 @@ def test_week_narrows_the_listing_by_the_name(client, export_dir):
     place(SECOND)
     place(OLD)
 
-    assert [item["filename"] for item in _items(client, f"streamer=pomi&week={WEEK}")] \
+    assert [item["filename"] for item in _items(client, f"streamer=streamer_a&week={WEEK}")] \
         == [FIRST, SECOND]
-    body = client.get(f"/api/highlights/exports?streamer=pomi&week={WEEK}").json()
+    body = client.get(f"/api/highlights/exports?streamer=streamer_a&week={WEEK}").json()
     assert body["week"] == WEEK and body["exists"] is True
 
     # 1本も無い週でも失敗ではない(置き場は在る)。
-    empty = client.get("/api/highlights/exports?streamer=pomi&week=250101-250108").json()
+    empty = client.get("/api/highlights/exports?streamer=streamer_a&week=250101-250108").json()
     assert empty["items"] == [] and empty["exists"] is True
 
 
@@ -185,7 +185,7 @@ def test_other_files_in_the_directory_are_not_listed(client, export_dir):
     """mp4以外(字幕・logの残骸)は並べない。一覧は「観られる成果物」だけを名乗る。"""
     _directory, place = export_dir
     place(FIRST)
-    place("01_260829-260905_coin19380_あきと_story.srt", 4)
+    place("01_260829-260905_coin19380_視聴者A_story.srt", 4)
     place("notes.txt", 4)
 
     assert [item["filename"] for item in _items(client)] == [FIRST]

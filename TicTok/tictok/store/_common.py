@@ -513,8 +513,8 @@ CREATE INDEX IF NOT EXISTS idx_collab_session ON collab_windows(session_id);
 -- 定員も入らない)。
 --
 -- kindは 'envelope'(送信) と 'portal_closed'(Portal閉鎖時の実移動人数)の2種。
--- **この2つはidで結合できない**: 実測でPortal送信のenvelope_id(7661161260446092052)と
--- PortalEventのportal_info.id(7661135713622936341)は別値だった。結合するなら送信者と
+-- **この2つはidで結合できない**: 実測でPortal送信のenvelope_id(7300000000000000303)と
+-- PortalEventのportal_info.id(7300000000000000302)は別値だった。結合するなら送信者と
 -- 時刻で寄せるしかなく、それは解析側の判断なのでここでは行わない。
 --
 -- diamond_countはNULLになり得る。実測でbusiness_type=19(Super Fan Box)はdiamond_countを
@@ -1198,7 +1198,7 @@ CREATE TABLE IF NOT EXISTS highlight_segment_gifts (
     -- gift演出が動いたときに、人が一度も触っていないgiftの窓だけが古い場所へ取り残される。
     --
     -- gift演出の窓と**別に要る**。1つのgift演出は最長8.3秒あり、そこに別人のgiftが複数入る(実測で
-    -- 6.0秒のgift演出に あきと6000💎(1.17s) / おニャンコ999💎(4.55s) / るきしろ99💎(0.32s) の
+    -- 6.0秒のgift演出に 視聴者A6000💎(1.17s) / 視聴者B999💎(4.55s) / 視聴者D99💎(0.32s) の
     -- 3人)。出力はgifterごとに1本なので、窓がgift演出単位だと**同じ6秒が3人ぶんのfileへ同じ形で
     -- 入り**、しかも1人の行から窓を詰めると他の2人のfileまで一緒に動く。
     --

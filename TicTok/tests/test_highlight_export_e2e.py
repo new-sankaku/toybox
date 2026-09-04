@@ -63,10 +63,10 @@ def test_書き出すとmp4と素性が対で出来る(client, server, highlight
     started = storage.get_recording(recording_id)["started_at"]
     storage.add_event(session_id, gift_builder(
         "Goal Highlight", diamonds=6000, at=started + 100.0,
-        user=_user("あきと", user_id="7001", unique_id="akito")))
+        user=_user("視聴者A", user_id="7001", unique_id="viewer_a")))
     storage.add_event(session_id, gift_builder(
         "Fireworks", diamonds=1088, at=started + 200.0,
-        user=_user("あきと", user_id="7001", unique_id="akito")))
+        user=_user("視聴者A", user_id="7001", unique_id="viewer_a")))
     storage.flush()
     gifts = storage.highlight_gift_events(session_id, started, started + 1000.0)
 
@@ -108,7 +108,7 @@ def test_書き出すとmp4と素性が対で出来る(client, server, highlight
     assert side.is_file()
     record = json.loads(side.read_text(encoding="utf-8"))
     assert record["verified"] is True and record["schema"] == hx.PROVENANCE_SCHEMA
-    assert record["gifter"]["nickname"] == "あきと"
+    assert record["gifter"]["nickname"] == "視聴者A"
     assert record["output"]["bytes"] == out.stat().st_size
     assert [s["gift_name"] for s in record["segments"]] == ["Goal Highlight", "Fireworks"]
     assert [s["gift_event_id"] for s in record["segments"]] == [
@@ -130,7 +130,7 @@ def test_書き出すとmp4と素性が対で出来る(client, server, highlight
 
     checked = verify._check_file(storage._conn, out)
     assert checked["ok"], checked["problems"]
-    assert checked["owner"] == "あきと" and checked["segments"] == 2
+    assert checked["owner"] == "視聴者A" and checked["segments"] == 2
     # 素性が無いfileは「出所を辿れない」と言うこと —— 事故で残った7本がこの状態だった。
     side.unlink()
     assert not verify._check_file(storage._conn, out)["ok"]
@@ -147,7 +147,7 @@ def test_検証用の経路はそれと判る名前で出る(client, server, hig
     started = storage.get_recording(recording_id)["started_at"]
     storage.add_event(session_id, gift_builder(
         "Goal Highlight", diamonds=6000, at=started + 100.0,
-        user=_user("あきと", user_id="7001", unique_id="akito")))
+        user=_user("視聴者A", user_id="7001", unique_id="viewer_a")))
     storage.flush()
     gift = storage.highlight_gift_events(session_id, started, started + 1000.0)[0]
 
@@ -190,7 +190,7 @@ def test_連投は記録6件のまま1つの連続した映像になる(client, 
     for n in range(6):
         storage.add_event(session_id, gift_builder(
             "Hearts", diamonds=199, at=started + 100.0 + n * 0.4,
-            user=_user("るきしろ", user_id="7003", unique_id="rukishiro")))
+            user=_user("視聴者D", user_id="7003", unique_id="viewer_do")))
     storage.flush()
     gifts = storage.highlight_gift_events(session_id, started, started + 1000.0)
     assert len(gifts) == 6

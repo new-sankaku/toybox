@@ -2,7 +2,7 @@
 
 **1つのgift演出に別人のgiftが複数入る。** 本番DBの実測では gift 49件のうち27件が「gift 2件
 以上のgift演出」に載っており、うち **19件はgifterが2人以上**のgift演出だった。6.0秒のgift演出に
-あきと6000💎(1.17s) / おニャンコ999💎(4.55s) / るきしろ99💎(0.32s) の3人、という形が3本
+視聴者A6000💎(1.17s) / 視聴者B999💎(4.55s) / 視聴者D99💎(0.32s) の3人、という形が3本
 ある。
 
 出力は **gifterごとに1本**なので、切り出す範囲がgift演出単位だと:
@@ -244,7 +244,7 @@ def test_coverage_names_the_cut_and_how_many_people_share_the_segment(
     # だけなので、届かない額を置くと相席の相手が表から消えて、人数を数える相手が居なくなる。
     # この test の主眼は区間と相席の人数なので、額そのものは本質ではない。
     for offset, (nickname, user_id, coin) in enumerate((
-            ("あきと", "7001", 6000), ("るきしろ", "7002", 1000))):
+            ("視聴者A", "7001", 6000), ("視聴者D", "7002", 1000))):
         storage.add_event(session_id, gift_builder(
             "G", diamonds=coin, at=started + 100.0 + offset,
             user={"userId": user_id, "uniqueId": f"u{user_id}",
@@ -257,10 +257,10 @@ def test_coverage_names_the_cut_and_how_many_people_share_the_segment(
                  # **別人**である(identity_keyが違う)。同じ人の連投と区別するために、
                  # 人数はDISTINCTなidentity_keyで数える。
                  gifts=[_gift(event_id=events[0]["gift_event_id"], media_time=100.5,
-                              name=events[0]["gift_name"], key="k-akito",
+                              name=events[0]["gift_name"], key="k-viewer_a",
                               diamonds=events[0]["diamonds"]),
                         _gift(event_id=events[1]["gift_event_id"], media_time=101.5,
-                              name=events[1]["gift_name"], key="k-rukishiro",
+                              name=events[1]["gift_name"], key="k-viewer_do",
                               diamonds=events[1]["diamonds"], primary=False)]),
     ]))
     segment = _segment_of(client, highlight_id)

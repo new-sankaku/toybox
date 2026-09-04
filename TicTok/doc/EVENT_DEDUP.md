@@ -13,7 +13,7 @@
 | like | 815,042 | 231 | 0.03% |
 | join | 332,075 | 109 | 0.03% |
 
-極端な例（session 581, @wicha_3111）は **distinct 10件のCommentが124行**になっていた。
+極端な例（session 581, @streamer_c）は **distinct 10件のCommentが124行**になっていた。
 内訳は 20回x2種 / 19回x3種 / 17回x1種 / 4回x1種 / 2回x3種。この配信は数分おきに切断と
 再接続を繰り返していた。
 
@@ -37,7 +37,7 @@ session 581 の同一Comment（create_time 1787780587.671）の挿入時刻は�
 ```
 2222905  time=1787781150.693   ← 初回fetchの messages
 2222911  time=1787781150.807   ← 接続直後の最初のpush frame（同じcursorから送り直す分）
-         system 1787781150.812 "@wicha_3111 のLIVE (Room 7678...) に接続しました。"
+         system 1787781150.812 "@streamer_c のLIVE (Room 7678...) に接続しました。"
 ```
 
 `process_connect_events=False` を渡しても前者しか止まらない。これが「その1行では直らない」

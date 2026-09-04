@@ -394,14 +394,14 @@ describe("バックアップの警報", () => {
                  detail: {} },
     });
     data.primary.last_run.failures = [
-      { path: "pomiiiip/ts/00600/seg00012.ts", reason: "[WinError 112] 空き容量がありません" },
-      { path: "pomiiiip/ts/00600/seg00013.ts", reason: "[WinError 112] 空き容量がありません" },
+      { path: "streamer_a/ts/00600/seg00012.ts", reason: "[WinError 112] 空き容量がありません" },
+      { path: "streamer_a/ts/00600/seg00013.ts", reason: "[WinError 112] 空き容量がありません" },
     ];
     page = await open(data);
     const item = page.document.querySelector(".bk-alarm-item");
     expect(Array.from(item.querySelectorAll(".bk-tag-warn.bk-tag-path"))
       .map((el) => el.textContent))
-      .toEqual(["pomiiiip/ts/00600/seg00012.ts", "pomiiiip/ts/00600/seg00013.ts"]);
+      .toEqual(["streamer_a/ts/00600/seg00012.ts", "streamer_a/ts/00600/seg00013.ts"]);
     expect(page.document.querySelector(".bk-alarm-big").textContent).toBe("一部失敗");
   });
 

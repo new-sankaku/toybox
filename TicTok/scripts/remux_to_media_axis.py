@@ -35,7 +35,7 @@ Usage (run from the TicTok directory, in the venv, with the server stopped):
     python scripts/remux_to_media_axis.py                    # dry-run, report only
     python scripts/remux_to_media_axis.py --apply --limit 1  # do one, verify, then more
     python scripts/remux_to_media_axis.py --apply
-    python scripts/remux_to_media_axis.py --apply --base 00328_pomiiiip_20260720_112526
+    python scripts/remux_to_media_axis.py --apply --base 00328_streamer_a_20260720_112526
 """
 
 from __future__ import annotations

@@ -50,13 +50,13 @@ gift演出が10個ほど繋がっている。そのうちgift地点は一部で�
 5. 尺の長い方。演出の頭から尻までが入っている見込みが高い。
 6. ``(highlight_id, idx)`` の若い方 ―― 結果を毎回同じにするためだけの規則である。
 
-**3番目が無かったために、別人の演出がその人のfileへ入った。** 実測: おニャンコ🐢💤の
-Travel with You 999💎(media 7317.1s)は、あきと🐢💤の Strong Finish 6000💎(7313.7s)と
-るきしろ🐢💤の Singing Mushroom 99💎(7312.8s)の直後に飛んでいる。TikTokはこの4.2秒から
+**3番目が無かったために、別人の演出がその人のfileへ入った。** 実測: 視聴者B🐢💤の
+Travel with You 999💎(media 7317.1s)は、視聴者A🐢💤の Strong Finish 6000💎(7313.7s)と
+視聴者D🐢💤の Singing Mushroom 99💎(7312.8s)の直後に飛んでいる。TikTokはこの4.2秒から
 gift演出を2つ作った —— Strong Finish のgift演出(F1のマシンが走る演出)と、Travel with You のgift演出
 (黄色い車が椰子の木の道を走る演出)である。帰属はどちらのgift演出にも3件とも載る(窓が重なる)が、
 ``is_primary`` は正しく別々に立っていた。にもかかわらず尺で選んでいたため、7.46秒の
-Strong Finish のgift演出が6.17秒の Travel with You のgift演出に勝ち、**おニャンコのfileにF1の演出が
+Strong Finish のgift演出が6.17秒の Travel with You のgift演出に勝ち、**視聴者BのfileにF1の演出が
 入った**。PKの終盤のようにgiftが集中する場面では、これは例外ではなく普通に起きる。
 
 ## 出力はgifterごとに1本
@@ -69,8 +69,13 @@ Strong Finish のgift演出が6.17秒の Travel with You のgift演出に勝ち�
 実装済みで、**ここで書き直さない** —— 配信者画面のメンション一覧と「誰が対象か」が
 食い違うのが、この機能で最悪の結末である。閾値の数字も応答の ``post_min`` を使う。
 
-**束ねる鍵は ``identity_key``、file名に出すのは表示名。** 同じ人が期間の途中で表示名を
+**束ねる鍵は身元、file名に出すのは表示名。** 同じ人が期間の途中で表示名を
 変えれば表示名で束ねた1人は2本に割れ、別人が同じ表示名を名乗れば別人が1本に混ざる。
+
+その身元は **人が束ねたサブアカウント(user_merges)を畳んだ後**の鍵である(:func:`person_key`)。
+畳み先も畳んだ後の週合計も ``streamer_mention_week`` の応答(``merge_map`` / ``merged_gifters``)
+から採り、ここでは組み立てない。畳まずにアカウントのまま束ねると、人が「同じ人だ」と決めた
+相手の週合計がアカウントの数だけに割れ、配信者画面で1人に見えているものが出力では2本になる。
 
 ``order`` が決めるのは**1本の中の並び**だけである。
 
@@ -81,7 +86,7 @@ Strong Finish のgift演出が6.17秒の Travel with You のgift演出に勝ち�
 
 **並びは窓の畳み方まで決める**(:func:`build_cuts`)。同じhighlightの中で隣り合うgift演出を1つの
 窓へ畳むと、その中は必ず時系列で流れる ―― 高額順を指定していても、畳まれた塊の中だけは
-時系列に戻る。実測でそれが起きた: よい🐢💤 ｻｲｺｳｯ! の1本は 99💎 → 4999💎(Guardian's Pledge)
+時系列に戻る。実測でそれが起きた: 視聴者C🐢💤 ｻｲｺｳｯ! の1本は 99💎 → 4999💎(Guardian's Pledge)
 → 99💎 の3件のgift演出が接していたため0.0〜17.79秒の1つの窓へ畳まれ、**99💎から始まる1本**が
 出来上がった。よって高額順では**gift演出を跨いで畳まない**。畳むのは同じgift演出に乗った連投だけで、
 余白で重なった分は高額な側を丸ごと残して安い側を削る(同じ映像は二度入らない)。時系列順では
@@ -164,7 +169,7 @@ video/audio両方のpacket時刻を測り、どちらも期待尺に届いてい
 
 **実際に起きた事故がこの節の理由である。** ``highlight_videos`` が1行も無い状態で、手で
 組んだgift演出の定義から7本のmp4が書き出された。素材の範囲はあるhighlightから、gifterの名前は
-**別のhighlight**の真値から採られており、``あきと`` の名前を持つfileの中身は
+**別のhighlight**の真値から採られており、``視聴者A`` の名前を持つfileの中身は
 ``よい`` が投げた Guardian's Pledge だった。**別人のfileに別人のgiftが入っていた。**
 
 file名は「誰の・いつの・いくらぶんか」を名乗るが、**中身がそのとおりである保証は名前の側に
@@ -457,12 +462,30 @@ def has_show(row) -> bool:
         return False
 
 
-def segment_owners(rows: list) -> dict:
-    """``{segment_id: そのgift演出の主のidentity_key}``。主の居ないgift演出は入らない。
+def person_key(row, merge_map: Optional[dict] = None):
+    """その行のgifterを**人として**指す鍵。
+
+    観測した事実(``identity_key``)は「どのアカウントが投げたか」で、人が
+    「この2つは同じ人だ」と束ねた(user_merges)なら1人として扱う相手は主のkeyである。
+    ``merge_map`` は :meth:`tictok.store.users.UsersMixin.user_merge_map` の辞書で、
+    渡さなければ束ねを見ない(=アカウントがそのまま人)。
+
+    **fileを分ける軸も、見せ場の主が誰かも、この鍵で判ずる。** ``identity_key`` のまま
+    比べると、束ねた人が2本のfileへ割れ、同じ人の別アカウントが「別人の演出」として
+    出力から落ちる。
+    """
+    key = row.get("identity_key")
+    if not merge_map or key is None:
+        return key
+    return merge_map.get(key, key)
+
+
+def segment_owners(rows: list, merge_map: Optional[dict] = None) -> dict:
+    """``{segment_id: そのgift演出の主の person_key}``。主の居ないgift演出は入らない。
 
     **割れなかったgift演出は1つ = 見せ場1つ**である。montageのgift演出は平均6秒で、TikTokはそこに**1つのgiftの
     場面**を載せる。ところが窓が6秒もあると、その間に別の人のgiftが何件も飛ぶ ―― 実測で
-    rukishirのSinging Mushroom 99💎、murakabaneriのStrong Finish 6000💎、onyanko102の
+    viewer_dのSinging Mushroom 99💎、viewer_aのStrong Finish 6000💎、viewer_bの
     Travel with You 999💎の3件が同じ6.0秒のgift演出に載っていた。画面に映っているのは
     6000💎の演出**1つだけ**である。
 
@@ -483,16 +506,16 @@ def segment_owners(rows: list) -> dict:
         segment_id = row.get("segment_id")
         if segment_id is None:
             continue
-        owners[segment_id] = row.get("identity_key")
+        owners[segment_id] = person_key(row, merge_map)
     return owners
 
 
-def owns_segment(row, owners: dict) -> bool:
+def owns_segment(row, owners: dict, merge_map: Optional[dict] = None) -> bool:
     """その行のgifterが、そのgift演出の見せ場の主か。
 
     **偽の行を1本のfileへ入れてはいけない。** 出力は「この人が投げた分」として本人へ届く
     物なので、他人の演出が映っている6秒がそこに並ぶと、file全体が誰のものでもなくなる ――
-    実測でrukishirの1本は、正しいHearts 199💎×6の窓の後ろに、murakabaneriの
+    実測でviewer_dの1本は、正しいHearts 199💎×6の窓の後ろに、viewer_aの
     Strong Finish 6000💎の場面が2つ続いていた(本人のgiftはその6秒に同席していただけである)。
 
     **人が手で付け替えた行(``manual``)は主でなくても通す。** そこは人が「このgift演出はこの
@@ -509,7 +532,7 @@ def owns_segment(row, owners: dict) -> bool:
     owner = owners[segment_id]
     if owner is None:
         return True
-    return row.get("identity_key") == owner
+    return person_key(row, merge_map) == owner
 
 
 def _order_rows(rows: list, order: str) -> list:
@@ -519,7 +542,8 @@ def _order_rows(rows: list, order: str) -> list:
     return sorted(rows, key=_order_key_diamonds)
 
 
-def select_segments(rows: list, *, min_diamonds: Optional[int] = None) -> dict:
+def select_segments(rows: list, *, min_diamonds: Optional[int] = None,
+                    merge_map: Optional[dict] = None) -> dict:
     """**giftの行**から、出力に載せてよいものだけを残す。``(残り, 内訳)``をdictで返す。
 
     **数える単位はgiftである。** 1つのgift演出は複数のgiftを持ち(実測で最長8.3秒のgift演出に
@@ -564,8 +588,10 @@ def select_segments(rows: list, *, min_diamonds: Optional[int] = None) -> dict:
     # **そのgift演出の見せ場の主でない行を落とす**(:func:`owns_segment`)。主は照合側がgift演出ごとに
     # 1件だけ立てており、母集団は落とす前の ``rows`` 全部から採る —— 人が外した行(excluded)が
     # 主だったgift演出で、残った同席のgiftへ主の座が移らないようにするためである。
-    owners = segment_owners(rows)
-    mine = [row for row in rich if owns_segment(row, owners)]
+    # 束ね(user_merges)は主の判定にも効かせる ―― 同じ人の別アカウントで投げたgiftが
+    # 「他人の演出」として落ちると、束ねた人ほど出力が痩せる。
+    owners = segment_owners(rows, merge_map)
+    mine = [row for row in rich if owns_segment(row, owners, merge_map)]
     other_owner = len(rich) - len(mine)
     unique, duplicated = dedup_by_gift(mine)
     return {
@@ -619,7 +645,8 @@ def clamp_to_segment(at, start, end) -> tuple:
     return value, value != float(at)
 
 
-def _item(row, pad_lead: float, pad_tail: float) -> dict:
+def _item(row, pad_lead: float, pad_tail: float,
+          merge_map: Optional[dict] = None) -> dict:
     """**gift 1件**を表す行。素材pathの実在確認もここで済ませる。
 
     ``start``/``end`` は**そのgiftを切る窓**である。人がgiftごとに詰めていなければgift演出の窓と
@@ -661,6 +688,10 @@ def _item(row, pad_lead: float, pad_tail: float) -> dict:
         "user_nickname": row.get("user_nickname"),
         "user_unique_id": row.get("user_unique_id"),
         "identity_key": row.get("identity_key"),
+        # **人**(束ねた先)。``identity_key`` は投げたアカウントなので、束ねた人の
+        # サブアカウントぶんは束の持ち主と一致しない —— 画面が「別人のgiftが混ざって
+        # いる」印を出すのはこちらで比べたときだけである。
+        "person_key": person_key(row, merge_map),
         "recording_id": row.get("recording_id"),
         "media_start": row.get("media_start"),
         "recording": row.get("recording"),
@@ -882,11 +913,11 @@ def safe_display_name(nickname, *, budget: int = NICKNAME_MAX_CHARS) -> str:
     """表示名をfile名へ置ける形にする。**空になったら失敗させる。**
 
     表示名は利用者が自由に付けるもので、file名に置けない文字がそのまま入る。実データにも
-    ``ありしゃ🐈‍⬛🐾``(ZWJ結合)や ``🟡むらたろう🍑🏌️‍♂️🍔``(ZWJ+異体字選択子)が在る。
+    ``視聴者F🐈‍⬛🐾``(ZWJ結合)や ``🟡視聴者G🍑🏌️‍♂️🍔``(ZWJ+異体字選択子)が在る。
 
     決めたこと:
 
-    - **絵文字は残す。** NTFSはそのまま置けるし、落とすと ``ぽみ`` のように**別人に見える**。
+    - **絵文字は残す。** NTFSはそのまま置けるし、落とすと ``配信者A`` のように**別人に見える**。
       表示名を名乗る意味そのものが消える。
     - 置けない文字(``< > : " / \ | ? *``・制御文字)は ``_`` へ置き換える。落とさず置き換える
       のは、消すと ``a/b`` と ``ab`` が同じ名前になるためである(clipperのlabelと同じ規則)。
@@ -1150,9 +1181,10 @@ def verify_item(store, item: dict, identity_key) -> dict:
     4. ``gift_event_id`` が ``events`` の実在するgiftを指し、💎・gift名・``identity_key``
        がgift演出の列と一致すること。
     5. そのgiftのgifterが**このfileの持ち主と同じ人**であること。file名は持ち主を名乗るので、
-       ここが違うfileは名前が嘘をつく。
+       ここが違うfileは名前が嘘をつく。**「同じ人」は束ね(user_merges)を畳んだ後で比べる** ――
+       人が「この2つは同じ人だ」と決めたサブアカウントのgiftは、その人のfileの中身である。
 
-    ``identity_key`` はこのfileの持ち主(:func:`plan_exports` が束ねた鍵)。"""
+    ``identity_key`` はこのfileの持ち主(:func:`plan_exports` が束ねた人の鍵)。"""
     highlight_id, segment_id = item.get("highlight_id"), item.get("segment_id")
     if highlight_id is None or segment_id is None:
         raise NotVerified(
@@ -1245,10 +1277,15 @@ def verify_item(store, item: dict, identity_key) -> dict:
                 f"event {gift['gift_event_id']} / {column}: "
                 f"DB {event.get(column)!r} と gift演出 {gift.get(column)!r}）。"
                 "再照合してください。")
-    if not _same(event.get("identity_key"), identity_key):
+    # 投げたアカウントを**人**へ畳んでから比べる。束ね(user_merges)はDBから引き直す ――
+    # この関数の役目は「手元の値を1つも信用せずDBと突き合わせる」ことなので、計画の段で
+    # 作った畳み先の辞書は受け取らない。束ねが外れていれば、外れた後の答えで落ちるのが正しい。
+    owner = store.user_person_key(event.get("identity_key"))
+    if not _same(owner, identity_key):
         raise NotVerified(
             f"このfileの持ち主と、gift演出のgiftを投げた人が違います"
-            f"（file {identity_key!r} / gift {event.get('identity_key')!r} = "
+            f"（file {identity_key!r} / gift {event.get('identity_key')!r}"
+            f"（人 {owner!r}） = "
             f"{event.get('user_nickname')!r} / event {gift['gift_event_id']}）。")
 
     return {
@@ -1821,7 +1858,8 @@ MISSING_UNKNOWN = "出力に選ばれませんでした"
 
 
 def _missing_reason(row: Optional[dict], highlight_ids: list,
-                    selected: set, owners: Optional[dict] = None) -> str:
+                    selected: set, owners: Optional[dict] = None,
+                    merge_map: Optional[dict] = None) -> str:
     """1件のgiftが1本へ載らなかった理由。``row`` は照合結果の行(無ければ None)。
 
     **「無い」を1種類に潰さない。** 人が外したのか、再照合で消えたのか、別のハイライトに
@@ -1832,7 +1870,7 @@ def _missing_reason(row: Optional[dict], highlight_ids: list,
             return MISSING_EXCLUDED
         if row.get("dropped"):
             return MISSING_DROPPED
-        if owners is not None and not owns_segment(row, owners):
+        if owners is not None and not owns_segment(row, owners, merge_map):
             return MISSING_OTHER_OWNER
         return MISSING_UNKNOWN
     if highlight_ids and not (set(highlight_ids) & selected):
@@ -1843,8 +1881,13 @@ def _missing_reason(row: Optional[dict], highlight_ids: list,
 
 
 def _missing_gifts(week_gifts: list, rows: list, placed: set,
-                   selected: set, owners: Optional[dict] = None) -> dict:
-    """``{identity_key: [出力へ載らなかったgift, ...]}``。時刻順。
+                   selected: set, owners: Optional[dict] = None,
+                   merge_map: Optional[dict] = None) -> dict:
+    """``{person_key: [出力へ載らなかったgift, ...]}``。時刻順。
+
+    束ねる鍵は**人**(:func:`person_key`)である ―― サブアカウントで投げたgiftを
+    アカウントのまま束ねると、束ねた人の1本にその分が付かず「載らなかったgift」が
+    どこにも出ない。
 
     母集団は「その週に載るはずのgift全部」
     (:meth:`tictok.store.highlights.HighlightsMixin.highlight_week_gifts`)で、単価の下限も
@@ -1861,14 +1904,18 @@ def _missing_gifts(week_gifts: list, rows: list, placed: set,
         if event_id in placed:
             continue
         highlight_ids = list(gift.get("highlight_ids") or [])
-        out.setdefault(gift.get("identity_key") or "", []).append({
+        pkey = person_key(gift, merge_map) or ""
+        out.setdefault(pkey, []).append({
             **{k: gift.get(k) for k in
                ("gift_event_id", "time", "label", "gift_id", "gift_name", "gift_count",
                 "diamonds", "unit_diamonds", "gift_image", "identity_key",
                 "user_nickname", "user_unique_id")},
+            # 投げたアカウント(``identity_key``)はそのまま残し、人として畳んだ鍵を添える。
+            # 画面が「束の持ち主と同じ人か」を見るのはこちらである。
+            "person_key": pkey,
             "highlight_ids": highlight_ids,
             "reason": _missing_reason(by_event.get(event_id), highlight_ids, selected,
-                                      owners),
+                                      owners, merge_map),
         })
     for gifts in out.values():
         gifts.sort(key=lambda g: (-int(g.get("diamonds") or 0), g.get("time") or 0.0))
@@ -1891,9 +1938,15 @@ def plan_exports(rows: list, mention: dict, *, order: str = DEFAULT_ORDER,
     含んでいるので、絞り込みは必ず要る ―― 「入っていない」と思って素通しにすると、
     99💎を1回投げただけの人まで1本ずつfileになる。
 
-    **束ねる鍵は ``identity_key`` であって表示名ではない。** 同じ人が期間の途中で表示名を
-    変えれば1人が2本に割れ、別人が同じ表示名を名乗れば別人が1本に混ざる。file名に出すのは
-    表示名だが、束ねるのは不変の身元である。
+    **束ねる鍵は身元であって表示名ではない。** 同じ人が期間の途中で表示名を変えれば1人が
+    2本に割れ、別人が同じ表示名を名乗れば別人が1本に混ざる。file名に出すのは表示名だが、
+    束ねるのは不変の身元である。
+
+    その身元は **人が束ねたサブアカウント(user_merges)を畳んだ後**の鍵(:func:`person_key`)で
+    ある。畳み先は ``mention`` の ``merge_map`` が、畳んだ後の週合計は ``merged_gifters`` が
+    持っており、**どちらもここでは組み立てない**。畳まずにアカウントのまま束ねると、
+    人が「同じ人だ」と決めた相手の週合計がアカウントの数だけに割れ、配信者画面では1人に
+    見えているものが出力では2本になる(あるいは両方が下限に届かず1本も出ない)。
 
     file名に出す表示名は ``mention`` の行が持つもの ―― users表の最新を主に、未書き込みの列
     だけevent記録値で補うという解決規則が既にあり、gift演出が持つ ``user_nickname``
@@ -1928,19 +1981,26 @@ def plan_exports(rows: list, mention: dict, *, order: str = DEFAULT_ORDER,
             raise RuntimeError(
                 f"{name}は0〜{MAX_PAD_SECONDS:.1f}秒の範囲で指定してください（{value}）。")
 
-    chosen = select_segments(rows, min_diamonds=min_diamonds)
+    # 同じ人の別アカウント(user_merges)の畳み先。**自分で組み立てない** ―― 束ねの規則も
+    # 畳み先も ``streamer_mention_week`` が持っており、ここで解き直すと畳み方が2つになる。
+    merge_map = dict(mention.get("merge_map") or {})
+    chosen = select_segments(rows, min_diamonds=min_diamonds, merge_map=merge_map)
     post_min = int(mention.get("post_min") or 0)
     week_key = mention.get("week") or ""
     if not week_key:
         raise NoSegments("この配信者にはGiftのある週がありません。")
     week_start, week_end = _period_bounds(week_key, WEEK_SATURDAY)
-    targets = {g["identity_key"]: g for g in (mention.get("gifters") or [])
+    # 対象は**束ねた後の一覧**(``merged_gifters``)から採る。``gifters`` は@で呼ぶ相手の
+    # 一覧でアカウント1つにつき1行なので、あちらで判ずると束ねた人の週合計が
+    # アカウントの数だけに割れ、1人ぶんのfileが2本に割れるか、どちらも下限に届かず
+    # 1本も出ないかのどちらかになる。
+    targets = {g["identity_key"]: g for g in (mention.get("merged_gifters") or [])
                if g.get("identity_key") and int(g.get("diamonds") or 0) >= post_min}
 
     bundles: dict = {}
     off_target = 0
     for row in chosen["rows"]:
-        key = row.get("identity_key")
+        key = person_key(row, merge_map)
         if key not in targets:
             # 週合計が下限に届かない人(または名寄せの鍵を持たないgift演出)。file にしない。
             off_target += 1
@@ -1951,7 +2011,8 @@ def plan_exports(rows: list, mention: dict, *, order: str = DEFAULT_ORDER,
     skipped: list = []
     for key, group in bundles.items():
         gifter = targets[key]
-        items = [_item(row, pad_lead, pad_tail) for row in _order_rows(group, order)]
+        items = [_item(row, pad_lead, pad_tail, merge_map)
+                 for row in _order_rows(group, order)]
         # 実際に切る窓。**同じ人の重なる窓だけ**を1つへ畳む(:func:`build_cuts`)。畳まないと
         # 連投したgiftの数だけ同じ映像が並ぶ。畳んだ後で重なりが残っていないことも確かめる
         # —— 出来上がってから気付いても、mp4は既に出来ている。
@@ -1961,7 +2022,12 @@ def plan_exports(rows: list, mention: dict, *, order: str = DEFAULT_ORDER,
         # 録画が消えていてもここで書き出しを見送ることはしない。
         stamps = [t for t in (segment_date(item) for item in items) if t is not None]
         plans.append({
+            # このfileの持ち主。**人の鍵**(束ねが在れば主のkey)である ―― 投げた
+            # アカウントそのものは各 ``items`` の ``identity_key`` が持っている。
             "identity_key": key,
+            # 畳んだアカウントの数。1なら束ねていない。1本のfileが何アカウントぶんの
+            # giftから出来ているかを、画面と素性の両方から読めるようにする。
+            "accounts": int(gifter.get("accounts") or 1),
             "nickname": gifter.get("nickname") or "",
             "user_nickname": gifter.get("nickname") or "",
             "unique_id": gifter.get("unique_id") or "",
@@ -1997,7 +2063,7 @@ def plan_exports(rows: list, mention: dict, *, order: str = DEFAULT_ORDER,
     selected_highlights = {row.get("highlight_id") for row in rows
                            if row.get("highlight_id") is not None}
     missing = _missing_gifts(list(week_gifts or []), rows, placed, selected_highlights,
-                             segment_owners(rows))
+                             segment_owners(rows, merge_map), merge_map)
     for plan in plans:
         gifts = missing.get(plan["identity_key"], [])
         plan["missing"] = gifts
@@ -2012,6 +2078,7 @@ def plan_exports(rows: list, mention: dict, *, order: str = DEFAULT_ORDER,
         gifts = missing.get(key, [])
         uncovered.append({
             "identity_key": key,
+            "accounts": int(gifter.get("accounts") or 1),
             "nickname": gifter.get("nickname") or "",
             "unique_id": gifter.get("unique_id") or "",
             "coin": int(gifter.get("diamonds") or 0),

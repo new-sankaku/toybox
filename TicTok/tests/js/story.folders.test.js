@@ -25,7 +25,7 @@ describe("story.js ハイライト一覧をfolderで畳む", () => {
   let win;
   let doc;
 
-  const STREAMER = "pomiiiip";
+  const STREAMER = "streamer_a";
   const URL_LIST = "/api/highlights";
   const PLACE = `${STREAMER}/LiveHightlite`;
   const WEEK = `${PLACE}/20260829-20260905`;

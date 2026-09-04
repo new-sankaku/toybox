@@ -642,14 +642,14 @@ def test_alias_replaces_the_name_in_the_pasted_text(
         _gifter(tmp_db, session_id, gift_builder, f"fan{i:02d}",
                 _ts("2026-09-01 20:00"), coin)
     tmp_db.flush()
-    tmp_db.set_user_alias(_key("fan00"), "あきと")
+    tmp_db.set_user_alias(_key("fan00"), "視聴者A")
 
     day = _day_of(tmp_db)
-    assert day["post_text"].split("\n")[1] == "🥇 あきと 🥈 FAN01 🥉 FAN02"
-    assert day["roster_text"].split("\n")[0] == "1. あきと　5,000"
+    assert day["post_text"].split("\n")[1] == "🥇 視聴者A 🥈 FAN01 🥉 FAN02"
+    assert day["roster_text"].split("\n")[0] == "1. 視聴者A　5,000"
     # 表は表示名のまま。省略形は別のfieldで添えるだけである。
     assert day["roster"][0]["nickname"] == "FAN00"
-    assert day["roster"][0]["alias"] == "あきと"
+    assert day["roster"][0]["alias"] == "視聴者A"
     assert day["roster"][1]["alias"] == ""
 
 
@@ -661,10 +661,10 @@ def test_alias_is_the_same_person_across_days_and_weeks(
     _gifter(tmp_db, session_id, gift_builder, "fan00", _ts("2026-08-31 20:00"), 5000)
     _gifter(tmp_db, session_id, gift_builder, "fan00", _ts("2026-09-01 20:00"), 4000)
     tmp_db.flush()
-    tmp_db.set_user_alias(_key("fan00"), "あきと")
+    tmp_db.set_user_alias(_key("fan00"), "視聴者A")
 
     for key in ("2026-08-31", "2026-09-01"):
-        assert "🥇 あきと" in _day_of(tmp_db, key)["post_text"]
+        assert "🥇 視聴者A" in _day_of(tmp_db, key)["post_text"]
 
 
 def test_empty_alias_removes_the_row_and_the_name_comes_back(
@@ -674,8 +674,8 @@ def test_empty_alias_removes_the_row_and_the_name_comes_back(
     session_id = make_session("streamer")
     _gifter(tmp_db, session_id, gift_builder, "fan00", _ts("2026-09-01 20:00"), 5000)
     tmp_db.flush()
-    tmp_db.set_user_alias(_key("fan00"), "あきと")
-    assert tmp_db.list_user_aliases() == {_key("fan00"): "あきと"}
+    tmp_db.set_user_alias(_key("fan00"), "視聴者A")
+    assert tmp_db.list_user_aliases() == {_key("fan00"): "視聴者A"}
 
     tmp_db.set_user_alias(_key("fan00"), "   ")
     assert tmp_db.list_user_aliases() == {}
@@ -694,7 +694,7 @@ def test_alias_refuses_keys_that_do_not_name_one_person(tmp_db):
     付けると、別人の名前として貼られる。"""
     for key in NON_IDENTITY_KEYS:
         with pytest.raises(ValueError):
-            tmp_db.set_user_alias(key, "あきと")
+            tmp_db.set_user_alias(key, "視聴者A")
 
 
 def test_alias_max_is_named_by_the_payload(tmp_db, make_session, gift_builder):
@@ -764,13 +764,13 @@ def test_merged_account_takes_the_alias_of_the_primary(
     _gifter(tmp_db, session_id, gift_builder, "fan00", _ts("2026-09-01 20:00"), 3000)
     _gifter(tmp_db, session_id, gift_builder, "fan01", _ts("2026-09-01 21:00"), 2500)
     tmp_db.flush()
-    tmp_db.set_user_alias(_key("fan00"), "あきと")
+    tmp_db.set_user_alias(_key("fan00"), "視聴者A")
     tmp_db.set_user_alias(_key("fan01"), "サブ")
     tmp_db.merge_users(_key("fan01"), _key("fan00"))
 
     day = _day_of(tmp_db)
-    assert day["roster"][0]["alias"] == "あきと"
-    assert day["post_text"].split("\n")[1] == "🥇 あきと"
+    assert day["roster"][0]["alias"] == "視聴者A"
+    assert day["post_text"].split("\n")[1] == "🥇 視聴者A"
 
 
 def test_merge_flattens_instead_of_making_a_chain(tmp_db, make_session, gift_builder):

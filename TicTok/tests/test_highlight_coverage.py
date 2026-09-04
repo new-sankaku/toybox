@@ -101,7 +101,7 @@ def week(tmp_db, make_session, gift_builder):
 
     fanA は週合計6,000💎(対象)、fanB は99💎(対象外)。前の週のgiftも1件置いて、窓の外が
     混ざらないことを確かめられるようにする。"""
-    session_id = make_session("pomi")
+    session_id = make_session("streamer_a")
     _gift(tmp_db, session_id, gift_builder, handle="01", at=IN_WEEK,
           diamonds=6000, name="Goal Highlight")
     _gift(tmp_db, session_id, gift_builder, handle="01", at=IN_WEEK + 600,
@@ -119,10 +119,10 @@ def test_出てこないgiftも必ず並ぶ(tmp_db, week):
     """**0件を隠さない。** 高額なのに1本も無いgiftが並ぶことがこの面の価値である ——
     TikTokが選ばなかったのか照合が取りこぼしたのかを、人はそこから確かめる。"""
     goal, on_air, mushroom = _names(week)
-    highlight_id = _highlight(tmp_db, "pomi", "hl1.mp4")
+    highlight_id = _highlight(tmp_db, "streamer_a", "hl1.mp4")
     _segment(tmp_db, highlight_id, 0, gift_event_id=goal)
 
-    result = tmp_db.highlight_coverage("pomi", "", 0)
+    result = tmp_db.highlight_coverage("streamer_a", "", 0)
     by_event = {item["event_id"]: item for item in result["items"]}
     # 窓の中の**対象gifterの**2件が並ぶ。当たったのは1件だけで、残る1件は空listのまま
     # 残る(mushroom は週合計99💎の人のgiftなので、そもそもこの面に出ない)。
@@ -144,7 +144,7 @@ def test_まとめ投げは合計ではなく単価で切る(tmp_db, week, make_
     _gift(tmp_db, week["session_id"], gift_builder, handle="01", at=IN_WEEK + 1200,
           diamonds=270, name="Rose Combo", repeat_count=9)
     tmp_db.flush()
-    result = tmp_db.highlight_coverage("pomi", "", 98)
+    result = tmp_db.highlight_coverage("streamer_a", "", 98)
     assert "Rose Combo" not in {item["gift_name"] for item in result["items"]}
     # **黙って消さない。** 落ちた件数は名乗る(数が合わないと、人はまず数を疑う)。
     assert result["totals"]["combo_below_min"] == 1
@@ -152,7 +152,7 @@ def test_まとめ投げは合計ではなく単価で切る(tmp_db, week, make_
     _gift(tmp_db, week["session_id"], gift_builder, handle="01", at=IN_WEEK + 1500,
           diamonds=1194, name="Hearts", repeat_count=6)
     tmp_db.flush()
-    again = tmp_db.highlight_coverage("pomi", "", 98)
+    again = tmp_db.highlight_coverage("streamer_a", "", 98)
     hearts = next(i for i in again["items"] if i["gift_name"] == "Hearts")
     assert (hearts["diamonds"], hearts["unit_diamonds"], hearts["gift_count"])         == (1194, 199, 6)
 
@@ -160,7 +160,7 @@ def test_まとめ投げは合計ではなく単価で切る(tmp_db, week, make_
 def test_前の週のgiftは混ざらない(tmp_db, week):
     """窓はメンション一覧と同じ土曜7時〜土曜7時。ここがずれると配信者画面と数が合わず、
     どちらが正しいのかで人が止まる。"""
-    result = tmp_db.highlight_coverage("pomi", "2026-08-29", 0)
+    result = tmp_db.highlight_coverage("streamer_a", "2026-08-29", 0)
     assert result["week"] == "2026-08-29"
     assert week["ids"]["Flying Jets"] not in {item["event_id"] for item in result["items"]}
     assert result["start_label"].endswith("07:00")
@@ -170,9 +170,9 @@ def test_前の週のgiftは混ざらない(tmp_db, week):
 def test_下限はgift1件あたり_0は全件(tmp_db, week):
     """``min_diamonds`` はgift 1件あたりの下限。0は「下限なし」で、未指定とは別の意味。"""
     # 0でも対象gifterの2件だけ(対象外の1件は下限とは別の規則で外れている)。
-    assert len(tmp_db.highlight_coverage("pomi", "", 0)["items"]) == 2
-    assert len(tmp_db.highlight_coverage("pomi", "", 98)["items"]) == 2
-    high = tmp_db.highlight_coverage("pomi", "", 199)
+    assert len(tmp_db.highlight_coverage("streamer_a", "", 0)["items"]) == 2
+    assert len(tmp_db.highlight_coverage("streamer_a", "", 98)["items"]) == 2
+    high = tmp_db.highlight_coverage("streamer_a", "", 199)
     assert [item["diamonds"] for item in high["items"]] == [6000]
     assert high["min_diamonds"] == 199
 
@@ -184,7 +184,7 @@ def test_対象外のgifterのgiftは並ばない(tmp_db, week):
     人が1件ずつ読み下す行が週の全gifterぶんへ膨らむ。**黙って消さない** —— 単価の下限は
     越えていたのに外れた件数は ``totals.offtarget`` が名乗る。
     """
-    result = tmp_db.highlight_coverage("pomi", "", 0)
+    result = tmp_db.highlight_coverage("streamer_a", "", 0)
     by_event = {item["event_id"]: item for item in result["items"]}
     goal, _on_air, mushroom = _names(week)
     assert by_event[goal]["target"] is True and by_event[goal]["week_diamonds"] == 6099
@@ -205,7 +205,7 @@ def test_高額な順に並ぶ(tmp_db, week, gift_builder):
     _gift(tmp_db, week["session_id"], gift_builder, handle="01", at=IN_WEEK + 1800,
           diamonds=99, name="Hand Heart")
     tmp_db.flush()
-    items = tmp_db.highlight_coverage("pomi", "", 0)["items"]
+    items = tmp_db.highlight_coverage("streamer_a", "", 0)["items"]
     assert [item["diamonds"] for item in items] == [6000, 99, 99]
     assert items[1]["time"] < items[2]["time"]   # 同額は時刻順
 
@@ -215,12 +215,12 @@ def test_高額な順に並ぶ(tmp_db, week, gift_builder):
 def test_同じgiftが複数のhighlightに入れば当たりも複数(tmp_db, week):
     """TikTokは同じ瞬間を別のhighlightにも入れる。1へ丸めると重複排除を確かめられない。"""
     goal = week["ids"]["Goal Highlight"]
-    first = _highlight(tmp_db, "pomi", "hl1.mp4")
-    second = _highlight(tmp_db, "pomi", "hl2.mp4")
+    first = _highlight(tmp_db, "streamer_a", "hl1.mp4")
+    second = _highlight(tmp_db, "streamer_a", "hl2.mp4")
     _segment(tmp_db, first, 0, gift_event_id=goal)
     _segment(tmp_db, second, 0, gift_event_id=goal, start=12.0, end=18.0)
 
-    result = tmp_db.highlight_coverage("pomi", "", 0)
+    result = tmp_db.highlight_coverage("streamer_a", "", 0)
     hits = next(i for i in result["items"] if i["event_id"] == goal)["hits"]
     assert [(h["filename"], h["segment_start"]) for h in hits] == [
         ("hl1.mp4", 0.0), ("hl2.mp4", 12.0)]
@@ -239,20 +239,20 @@ def test_自分の見せ場の当たりが代表になる(tmp_db, week):
     goal = week["ids"]["Goal Highlight"]
     other = week["ids"]["LIVE On Air"]
     # id の小さい方(= SQLの並びで先頭)を同席の当たりにする。
-    passenger = _highlight(tmp_db, "pomi", "hl1.mp4")
-    own = _highlight(tmp_db, "pomi", "hl2.mp4")
+    passenger = _highlight(tmp_db, "streamer_a", "hl1.mp4")
+    own = _highlight(tmp_db, "streamer_a", "hl2.mp4")
     _segment(tmp_db, passenger, 0,
              gifts=[{"gift_event_id": other}, {"gift_event_id": goal}])
     _segment(tmp_db, own, 0, gift_event_id=goal, start=12.0, end=18.0)
 
-    hits = next(i for i in tmp_db.highlight_coverage("pomi", "", 0)["items"]
+    hits = next(i for i in tmp_db.highlight_coverage("streamer_a", "", 0)["items"]
                 if i["event_id"] == goal)["hits"]
     assert [(h["filename"], h["is_primary"]) for h in hits] == [
         ("hl2.mp4", True), ("hl1.mp4", False)]
 
 
 def _goal_hits(tmp_db, goal):
-    return next(i for i in tmp_db.highlight_coverage("pomi", "", 0)["items"]
+    return next(i for i in tmp_db.highlight_coverage("streamer_a", "", 0)["items"]
                 if i["event_id"] == goal)["hits"]
 
 
@@ -265,14 +265,14 @@ def test_人が選んだ当たりが代表になる(tmp_db, week):
     """**機械の順位より人の選択が先。**
 
     見せ場も主も「そのgiftのアニメが映っているのはどれか」を機械が当てる代用でしかない。
-    実測(Whale diving 2,150💎 / おニャンコ🐢💤)では3本すべてで同席と判定され、本人のアニメが
+    実測(Whale diving 2,150💎 / 視聴者B🐢💤)では3本すべてで同席と判定され、本人のアニメが
     映っている11.1秒の1本も後ろへ回っていた。画面は先頭の当たりを代表として使うので、人が
     選べない限りその行から本人のアニメへは辿り着けない。
     """
     goal = week["ids"]["Goal Highlight"]
     other = week["ids"]["LIVE On Air"]
-    own = _highlight(tmp_db, "pomi", "hl1.mp4")
-    passenger = _highlight(tmp_db, "pomi", "hl2.mp4")
+    own = _highlight(tmp_db, "streamer_a", "hl1.mp4")
+    passenger = _highlight(tmp_db, "streamer_a", "hl2.mp4")
     _segment(tmp_db, own, 0, gift_event_id=goal)
     # 同席(主は別人)だが、後続のアニメまで入っている長い方。
     _segment(tmp_db, passenger, 0, start=12.0, end=23.1,
@@ -291,8 +291,8 @@ def test_選べる当たりは1本だけ_highlightを跨いで落とす(tmp_db, 
     落とす相手をgift演出の中に限ると、2本が「この1本を使う」と名乗ったまま残り、書き出しが
     どちらを採るかは行の並び順で決まる。"""
     goal = week["ids"]["Goal Highlight"]
-    first = _highlight(tmp_db, "pomi", "hl1.mp4")
-    second = _highlight(tmp_db, "pomi", "hl2.mp4")
+    first = _highlight(tmp_db, "streamer_a", "hl1.mp4")
+    second = _highlight(tmp_db, "streamer_a", "hl2.mp4")
     _segment(tmp_db, first, 0, gift_event_id=goal)
     _segment(tmp_db, second, 0, gift_event_id=goal, start=12.0, end=18.0)
 
@@ -308,12 +308,12 @@ def test_時刻の近さでは結ばない(tmp_db, week):
     """突き合わせは ``gift_event_id`` の一致だけ。照合を検証する面が別の(緩い)規則で
     答えを作ると、両方が間違っているときに一致して見える。"""
     goal, on_air, _mushroom = _names(week)
-    highlight_id = _highlight(tmp_db, "pomi", "hl1.mp4")
+    highlight_id = _highlight(tmp_db, "streamer_a", "hl1.mp4")
     # media軸ではこのgift演出の窓が両方のgiftを覆っていても、指すのは1件だけである。
     _segment(tmp_db, highlight_id, 0, gift_event_id=on_air, media_start=0.0,
              gift_media_time=1.0, start=0.0, end=3600.0)
 
-    result = tmp_db.highlight_coverage("pomi", "", 0)
+    result = tmp_db.highlight_coverage("streamer_a", "", 0)
     by_event = {item["event_id"]: item for item in result["items"]}
     assert by_event[on_air]["hits"] and by_event[goal]["hits"] == []
 
@@ -322,13 +322,13 @@ def test_再照合で消えたgift演出は当たりにしない(tmp_db, week):
     """``dropped`` は「前回は在ったが今回の照合では出なくなった」印である。並べると、
     既に否定された対応が検証の面で生き続ける。"""
     goal = week["ids"]["Goal Highlight"]
-    highlight_id = _highlight(tmp_db, "pomi", "hl1.mp4")
+    highlight_id = _highlight(tmp_db, "streamer_a", "hl1.mp4")
     _segment(tmp_db, highlight_id, 0, gift_event_id=goal, dropped=1, excluded=1)
-    result = tmp_db.highlight_coverage("pomi", "", 0)
+    result = tmp_db.highlight_coverage("streamer_a", "", 0)
     assert result["totals"]["matched"] == 0
     # 人が外しただけ(excluded)のgift演出は残す —— 外した判断そのものを人が見直せるように。
     _segment(tmp_db, highlight_id, 1, gift_event_id=goal, excluded=1)
-    again = tmp_db.highlight_coverage("pomi", "", 0)
+    again = tmp_db.highlight_coverage("streamer_a", "", 0)
     hits = next(i for i in again["items"] if i["event_id"] == goal)["hits"]
     assert len(hits) == 1 and hits[0]["excluded"] is True
 
@@ -340,14 +340,14 @@ def test_giftの位置と生の演出区間を添える(tmp_db, week):
     録画が当たっていないgift演出では ``at`` は None —— gift演出の頭で代用すると、位置が判って
     いるように見える数字が出る。"""
     goal, on_air, _mushroom = _names(week)
-    highlight_id = _highlight(tmp_db, "pomi", "hl1.mp4")
+    highlight_id = _highlight(tmp_db, "streamer_a", "hl1.mp4")
     _segment(tmp_db, highlight_id, 0, gift_event_id=goal, start=21.0, end=27.0,
              media_start=378.1, gift_media_time=380.6, effect="[[24.0, 26.0]]")
     _segment(tmp_db, highlight_id, 1, gift_event_id=on_air, start=27.0, end=30.0,
              media_start=None, gift_media_time=None)
 
     by_event = {item["event_id"]: item
-                for item in tmp_db.highlight_coverage("pomi", "", 0)["items"]}
+                for item in tmp_db.highlight_coverage("streamer_a", "", 0)["items"]}
     hit = by_event[goal]["hits"][0]
     # gift演出の頭は21.0、giftは録画のmedia軸で2.5秒後ろなので 23.5。
     assert hit["at"] == 23.5
@@ -369,14 +369,14 @@ def test_週のhighlightはgiftで割り当てる(tmp_db, week):
     giftの付いていないgift演出も、そのhighlightの内訳としては数える(演出の音が配信の音を
     覆う区間は票が立たないので、0にはならないのが普通である)。"""
     goal = week["ids"]["Goal Highlight"]
-    mine = _highlight(tmp_db, "pomi", "hl1.mp4")
+    mine = _highlight(tmp_db, "streamer_a", "hl1.mp4")
     _segment(tmp_db, mine, 0, gift_event_id=goal)
     _segment(tmp_db, mine, 1, gift_event_id=None, start=6.0, end=12.0)
     # まだ照合していないhighlight。どの週へも割り当てない(名乗る根拠が無い)。
-    other = _highlight(tmp_db, "pomi", "hl2.mp4")
+    other = _highlight(tmp_db, "streamer_a", "hl2.mp4")
     _segment(tmp_db, other, 0, gift_event_id=None)
 
-    totals = tmp_db.highlight_coverage("pomi", "", 0)["totals"]
+    totals = tmp_db.highlight_coverage("streamer_a", "", 0)["totals"]
     assert totals["highlights"] == 1
     assert totals["segments"] == 2
     assert totals["unidentified"] == 1
@@ -386,7 +386,7 @@ def test_別の配信者のhighlightは入らない(tmp_db, week):
     goal = week["ids"]["Goal Highlight"]
     theirs = _highlight(tmp_db, "wicha", "hl9.mp4")
     _segment(tmp_db, theirs, 0, gift_event_id=goal)
-    result = tmp_db.highlight_coverage("pomi", "", 0)
+    result = tmp_db.highlight_coverage("streamer_a", "", 0)
     assert result["totals"]["matched"] == 0 and result["totals"]["highlights"] == 0
 
 
@@ -405,7 +405,7 @@ def test_演出を持つ階層かを行ごとに名乗る(tmp_db, week):
     切り分ける線。**coinを代理指標にした推定で実測ではない**(doc/HIGHLIGHT_MATCH.md)。
 
     ``min_diamonds`` を0にして全giftを並べても、行ごとの判断がこの線を失わないこと。"""
-    result = tmp_db.highlight_coverage("pomi", "", 0)
+    result = tmp_db.highlight_coverage("streamer_a", "", 0)
     assert result["effect_floor"] == 98
     by_event = {item["event_id"]: item for item in result["items"]}
     goal, on_air, _mushroom = _names(week)
@@ -432,12 +432,12 @@ def test_gift演出の一覧もgiftの位置を名乗る(tmp_db, week):
     """``highlight_segments`` と coverage の ``hits`` が同じ秒を返すこと。片方だけが
     gift演出の頭を返すと、同じgiftが画面によって別の場所を指す。"""
     goal = week["ids"]["Goal Highlight"]
-    highlight_id = _highlight(tmp_db, "pomi", "hl1.mp4")
+    highlight_id = _highlight(tmp_db, "streamer_a", "hl1.mp4")
     _segment(tmp_db, highlight_id, 0, gift_event_id=goal, start=21.0, end=27.0,
              media_start=378.1, gift_media_time=380.6)
 
     listed = tmp_db.highlight_segments(highlight_id)[0]
-    hit = next(i for i in tmp_db.highlight_coverage("pomi", "", 0)["items"]
+    hit = next(i for i in tmp_db.highlight_coverage("streamer_a", "", 0)["items"]
                if i["event_id"] == goal)["hits"][0]
     # ``at`` はgift 1件ずつが名乗る(gift演出は複数のgiftを持つので、gift演出には1つに決まらない)。
     assert listed["gifts"][0]["at"] == hit["at"] == 23.5
@@ -455,10 +455,10 @@ def test_週のgiftを母集団として引ける(tmp_db, week, gift_builder):
     人はまずどちらが正しいのかで止まる。**対象gifter(週合計)では絞らない**のはここだけの
     約束である —— 誰のfileを作るかを決めるのは ``plan_exports`` 側で、ここは母集団を渡す。"""
     goal, on_air, mushroom = _names(week)
-    highlight_id = _highlight(tmp_db, "pomi", "hl1.mp4")
+    highlight_id = _highlight(tmp_db, "streamer_a", "hl1.mp4")
     _segment(tmp_db, highlight_id, 0, gift_event_id=goal)
 
-    ledger = tmp_db.highlight_week_gifts("pomi", "", 0)
+    ledger = tmp_db.highlight_week_gifts("streamer_a", "", 0)
     by_event = {g["gift_event_id"]: g for g in ledger["gifts"]}
     assert sorted(by_event) == sorted([goal, on_air, mushroom])
     assert by_event[goal]["highlight_ids"] == [highlight_id]
@@ -467,8 +467,49 @@ def test_週のgiftを母集団として引ける(tmp_db, week, gift_builder):
     _gift(tmp_db, week["session_id"], gift_builder, handle="01", at=IN_WEEK + 1200,
           diamonds=270, name="Rose Combo", repeat_count=9)
     tmp_db.flush()
-    high = tmp_db.highlight_week_gifts("pomi", "", 98)
+    high = tmp_db.highlight_week_gifts("streamer_a", "", 98)
     assert "Rose Combo" not in {g["gift_name"] for g in high["gifts"]}
     assert [g["gift_name"] for g in high["gifts"]] == ["Goal Highlight",
                                                        "LIVE On Air",
                                                        "Singing Mushroom"]
+
+
+# ===== 同じ人の別アカウント(user_merges) =====
+
+
+def _key(handle: str) -> str:
+    """``_gift`` が作るuserのidentity_key。名寄せは数値user_id優先なので同じ物を返す。"""
+    return f"7300000000000{handle}"
+
+
+def test_束ねたアカウントは1人として扱う(tmp_db, week):
+    """配信者画面で束ねた2つのアカウントは、この面でも1人である(利用者の指定)。
+
+    束ねる前の fanB は週合計99💎で対象外(``offtarget``)。fanA へ束ねると、その99💎は
+    **同じ人が投げたgift**になるので表に並ぶ。畳んだ数と週合計を行が名乗り、投げた
+    アカウントそのものは ``identity_key`` に残る。"""
+    goal, on_air, mushroom = _names(week)
+    tmp_db.merge_users(_key("02"), _key("01"))
+
+    result = tmp_db.highlight_coverage("streamer_a", "", 0)
+    by_event = {item["event_id"]: item for item in result["items"]}
+    assert sorted(by_event) == sorted([goal, on_air, mushroom])
+    row = by_event[mushroom]
+    # 投げたアカウントは書き換えない。人として数える鍵だけが主のkeyへ畳まれる。
+    assert row["identity_key"] == _key("02")
+    assert row["person_key"] == _key("01")
+    # 週合計も名乗りも畳んだ後の物。6,000 + 99 + 99 = 6,198。
+    assert row["week_diamonds"] == 6198
+    assert row["user_nickname"] == by_event[goal]["user_nickname"]
+    assert row["accounts"] == 2 and row["target"] is True
+    # 外した件数も人数も畳んだ後で数える。
+    assert result["totals"]["offtarget"] == 0
+    assert result["totals"]["gifters"] == 1
+    assert result["totals"]["target_gifters"] == 1
+
+
+def test_束ねていない人はaccountsが1のまま(tmp_db, week):
+    """束ねの無い行に印が付かないこと。画面はこの数で「統合」を出す。"""
+    result = tmp_db.highlight_coverage("streamer_a", "", 0)
+    assert {item["accounts"] for item in result["items"]} == {1}
+    assert all(item["person_key"] == item["identity_key"] for item in result["items"])

@@ -1399,7 +1399,7 @@ async def _run_highlight_export_job(job: dict, report) -> dict:
     (``doc/HIGHLIGHT_MATCH.md``)。
 
     **成果物は複数file**である。対象はその週に1,000💎以上投げたgifterで、人数ぶんのmp4が
-    出来る(実測でpomiiiipの1週間に8人)。突き合わせと違って**即時laneへは入れない**ので、
+    出来る(実測でstreamer_aの1週間に8人)。突き合わせと違って**即時laneへは入れない**ので、
     gift演出ごとのframe精度の再encodeを人数ぶん重ねても他の操作を塞がない
     (``HIGHLIGHT_EXPORT_JOB_PRIORITY``)。
     """

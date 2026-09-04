@@ -8,7 +8,7 @@ log だけで絞れるようにする仕組み。
 捕捉ffmpegは `-loglevel warning` で走る。HTTP error なら `Will reconnect ...` が出るし、
 入力に映像が無ければ `Stream map ... matches no streams` が出る。ところが**接続は張れて
 いるのにpacketが来ない**型の失敗では、ffmpegは14秒間生きたまま何も書かず、stderrは
-0 byteのまま終わる。実測 2026-08-25 08:08〜08:13(`wicha_3111`)は5巡すべてこれで、
+0 byteのまま終わる。実測 2026-08-25 08:08〜08:13(`streamer_c`)は5巡すべてこれで、
 `recording.launch_failed` に残るのは `segments: 0` と空のstderrだけだった。
 
 源が止まっていたのか、こちら側が取りこぼしたのかは、この記録からは区別できない。
